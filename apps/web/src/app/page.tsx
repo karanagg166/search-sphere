@@ -109,13 +109,13 @@ export default function Home() {
         <div className="p-5 rounded-lg border border-border bg-card flex flex-col gap-2">
           <div className="flex items-center gap-2 text-primary font-semibold">
             <Layers className="w-5 h-5" />
-            Local LLM & Embeddings
+            Cloud LLMs & Embeddings
           </div>
           <p className="text-xs text-muted-foreground">
-            Ollama running on port 11434 with persistent model volume for local inference (Qwen, etc.).
+            Connects to cloud model providers (OpenAI, Gemini, Anthropic, Cohere) via API keys.
           </p>
           <div className="mt-auto pt-2 text-xs font-mono text-muted-foreground">
-            Ollama host: 11434
+            Online API Provider
           </div>
         </div>
       </section>

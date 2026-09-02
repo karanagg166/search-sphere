@@ -84,23 +84,7 @@ services:
       - semantic_network
 
   # ============================================================================
-  # 5. Ollama Local LLM Server
-  # ============================================================================
-  ollama:
-    image: ollama/ollama:latest
-    container_name: semantic_ollama
-    restart: unless-stopped
-    ports:
-      - "${OLLAMA_PORT:-11434}:11434"
-    environment:
-      OLLAMA_HOST: "0.0.0.0"
-    volumes:
-      - ollama_data:/root/.ollama
-    networks:
-      - semantic_network
-
-  # ============================================================================
-  # 6. FastAPI Backend Service
+  # 5. FastAPI Backend Service
   # ============================================================================
   api:
     build:
@@ -117,7 +101,6 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       ENVIRONMENT: ${ENVIRONMENT:-development}
     volumes:
       - ./apps/api:/app
@@ -130,14 +113,12 @@ services:
         condition: service_started
       minio:
         condition: service_started
-      ollama:
-        condition: service_started
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - semantic_network
 
   # ============================================================================
-  # 7. Background Worker Service
+  # 6. Background Worker Service
   # ============================================================================
   worker:
     build:
@@ -152,7 +133,6 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       ENVIRONMENT: ${ENVIRONMENT:-development}
     volumes:
       - ./apps/worker:/app
@@ -168,7 +148,7 @@ services:
       - semantic_network
 
   # ============================================================================
-  # 8. Next.js Frontend Service
+  # 7. Next.js Frontend Service
   # ============================================================================
   web:
     build:
@@ -203,8 +183,6 @@ volumes:
   qdrant_data:
     driver: local
   minio_data:
-    driver: local
-  ollama_data:
     driver: local
 
 # ==============================================================================

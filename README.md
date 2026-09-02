@@ -32,7 +32,6 @@ semantic-search/
 | **redis** | Redis 7 | `6379` | In-memory cache & Dramatiq task broker |
 | **qdrant** | Qdrant Vector DB | `6333` (REST)<br/>`6334` (gRPC) | Vector search engine dashboard: [http://localhost:6333/dashboard](http://localhost:6333/dashboard) |
 | **minio** | MinIO Object Storage | `9000` (S3 API)<br/>`9001` (Console) | S3-compatible storage UI: [http://localhost:9001](http://localhost:9001)<br/>User/Pass: `minioadmin` / `minioadmin` |
-| **ollama** | Ollama Local LLM | `11434` | Local model inference API: [http://localhost:11434](http://localhost:11434) |
 
 ---
 
@@ -43,7 +42,6 @@ Persistent Docker volumes ensure data is retained across restarts and rebuilds:
 - `redis_data` -> `/data`
 - `qdrant_data` -> `/qdrant/storage`
 - `minio_data` -> `/data`
-- `ollama_data` -> `/root/.ollama`
 
 ---
 
@@ -126,7 +124,6 @@ docker compose logs -f
 make logs-api       # docker compose logs -f api
 make logs-worker    # docker compose logs -f worker
 make logs-web       # docker compose logs -f web
-make logs-ollama    # docker compose logs -f ollama
 make logs-qdrant    # docker compose logs -f qdrant
 make logs-postgres  # docker compose logs -f postgres
 ```
@@ -157,34 +154,6 @@ docker compose exec postgres psql -U postgres -d semantic_search
 make shell-redis
 # or
 docker compose exec redis redis-cli
-```
-
----
-
-## 🦙 Ollama Model Management (Qwen)
-
-To download and run a local Qwen model in the Ollama service:
-
-```bash
-# Pull the default Qwen model (qwen2.5:7b)
-make pull-model
-
-# Or pull a specific model size (e.g. 1.5b, 7b, 14b, 32b, or coder variants)
-make pull-model MODEL=qwen2.5:7b
-make pull-model MODEL=qwen2.5:1.5b
-make pull-model MODEL=qwen2.5-coder:7b
-
-# Direct Docker Compose command
-docker compose exec ollama ollama pull qwen2.5:7b
-
-# Verify downloaded models
-docker compose exec ollama ollama list
-
-# Test inference directly via curl
-curl http://localhost:11434/api/generate -d '{
-  "model": "qwen2.5:7b",
-  "prompt": "Explain semantic search in one sentence."
-}'
 ```
 
 ---

@@ -1,6 +1,4 @@
-.PHONY: help build up down down-v restart status logs logs-api logs-worker logs-web logs-ollama shell-api shell-worker shell-web shell-db pull-model test lint format clean
-
-MODEL ?= qwen2.5:7b
+.PHONY: help build up down down-v restart status logs logs-api logs-worker logs-web logs-qdrant logs-postgres shell-api shell-worker shell-web shell-db shell-redis test lint format clean
 
 help: ## Show available commands
 	@echo "Semantic Search & RAG Monorepo Commands:"
@@ -40,9 +38,6 @@ logs-worker: ## View and stream logs from the background worker service
 logs-web: ## View and stream logs from the Next.js frontend service
 	docker compose logs -f web
 
-logs-ollama: ## View and stream logs from the Ollama local LLM service
-	docker compose logs -f ollama
-
 logs-qdrant: ## View and stream logs from the Qdrant vector database
 	docker compose logs -f qdrant
 
@@ -63,10 +58,6 @@ shell-db: ## Open an interactive PostgreSQL (psql) shell
 
 shell-redis: ## Open an interactive Redis CLI shell
 	docker compose exec redis redis-cli
-
-pull-model: ## Pull an Ollama model (default: qwen2.5:7b, override with MODEL=<name>)
-	@echo "Pulling Ollama model: $(MODEL)..."
-	docker compose exec ollama ollama pull $(MODEL)
 
 test: ## Run test suite in the API container
 	docker compose exec api pytest
