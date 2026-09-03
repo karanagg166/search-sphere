@@ -25,7 +25,7 @@ semantic-search/
 
 | Service | Technology | Port(s) | Description / URL |
 | :--- | :--- | :--- | :--- |
-| **web** | Next.js 14 + React 18 | `3000` | UI Dashboard: [http://localhost:3000](http://localhost:3000) |
+| **web** | Next.js 16 + React 19 | `3000` | UI Dashboard: [http://localhost:3000](http://localhost:3000) |
 | **api** | FastAPI + Python 3.12 | `8000` | API & Health: [http://localhost:8000/health](http://localhost:8000/health)<br/>Swagger Docs: [http://localhost:8000/docs](http://localhost:8000/docs) |
 | **worker** | Dramatiq + Python 3.12 | Background | Async document processing & ingestion worker |
 | **postgres** | PostgreSQL 16 | `5432` | Relational database (`semantic_search`) |
@@ -191,7 +191,7 @@ docker compose exec api ruff format .
 ## 📦 Installed Libraries & SDKs
 
 ### Frontend (`apps/web`)
-- **Framework**: Next.js 14 (App Router), React 18, TypeScript
+- **Framework**: Next.js 16 (App Router), React 19, TypeScript
 - **Styling & UI**: Tailwind CSS, shadcn/ui component structure, Lucide Icons, class-variance-authority, tailwind-merge
 - **Data & State**: TanStack Query (React Query) v5, Axios
 - **Forms & Validation**: React Hook Form, Zod, `@hookform/resolvers`
