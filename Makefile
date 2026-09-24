@@ -32,32 +32,14 @@ logs: ## View and stream logs from all services
 logs-api: ## View and stream logs from the FastAPI backend service
 	docker compose logs -f api
 
-logs-worker: ## View and stream logs from the background worker service
-	docker compose logs -f worker
-
 logs-web: ## View and stream logs from the Next.js frontend service
 	docker compose logs -f web
-
-logs-qdrant: ## View and stream logs from the Qdrant vector database
-	docker compose logs -f qdrant
-
-logs-postgres: ## View and stream logs from PostgreSQL
-	docker compose logs -f postgres
 
 shell-api: ## Open an interactive bash shell in the API container
 	docker compose exec api bash
 
-shell-worker: ## Open an interactive bash shell in the Worker container
-	docker compose exec worker bash
-
 shell-web: ## Open an interactive shell in the Next.js web container
 	docker compose exec web sh
-
-shell-db: ## Open an interactive PostgreSQL (psql) shell
-	docker compose exec postgres psql -U postgres -d search_sphere
-
-shell-redis: ## Open an interactive Redis CLI shell
-	docker compose exec redis redis-cli
 
 test: ## Run test suite in the API container
 	docker compose exec api pytest

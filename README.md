@@ -21,27 +21,15 @@ search-sphere/
 
 ---
 
-## 🚀 Services & Ports
+## 🚀 Architecture & Services
 
-| Service | Technology | Port(s) | Description / URL |
-| :--- | :--- | :--- | :--- |
-| **web** | Next.js 16 + React 19 | `3000` | UI Dashboard: [http://localhost:3000](http://localhost:3000) |
-| **api** | FastAPI + Python 3.12 | `8000` | API & Health: [http://localhost:8000/health](http://localhost:8000/health)<br/>Swagger Docs: [http://localhost:8000/docs](http://localhost:8000/docs) |
-| **worker** | Dramatiq + Python 3.12 | Background | Async document processing & ingestion worker |
-| **postgres** | PostgreSQL 16 | `5432` | Relational database (`search_sphere`) |
-| **redis** | Redis 7 | `6379` | In-memory cache & Dramatiq task broker |
-| **qdrant** | Qdrant Vector DB | `6333` (REST)<br/>`6334` (gRPC) | Vector search engine dashboard: [http://localhost:6333/dashboard](http://localhost:6333/dashboard) |
-| **minio** | MinIO Object Storage | `9000` (S3 API)<br/>`9001` (Console) | S3-compatible storage UI: [http://localhost:9001](http://localhost:9001)<br/>User/Pass: `minioadmin` / `minioadmin` |
-
----
-
-## 💾 Persistent Volumes
-
-Persistent Docker volumes ensure data is retained across restarts and rebuilds:
-- `postgres_data` -> `/var/lib/postgresql/data`
-- `redis_data` -> `/data`
-- `qdrant_data` -> `/qdrant/storage`
-- `minio_data` -> `/data`
+| Service | Hosting | Technology | Port / URL | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **web** | Local Docker | Next.js 16 + React 19 | [http://localhost:3000](http://localhost:3000) | Web UI Dashboard |
+| **api** | Local Docker | FastAPI + Python 3.12 | [http://localhost:8000/docs](http://localhost:8000/docs) | Backend REST API & Async Tasks |
+| **database** | Cloud (Supabase) | PostgreSQL 17 | `aws-0-ap-northeast-2.pooler.supabase.com:5432` | Relational Metadata DB |
+| **storage** | Cloud (Supabase) | Supabase Storage | `documents` bucket | Cloud Object Storage |
+| **vector db** | Cloud (Qdrant) | Qdrant Cloud | `https://05eee4ff-130e...aws.cloud.qdrant.io` | Distributed Vector Search |
 
 ---
 

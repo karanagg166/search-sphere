@@ -1,90 +1,6 @@
 services:
   # ============================================================================
-  # 1. PostgreSQL Database
-  # ============================================================================
-  postgres:
-    image: postgres:16-alpine
-    container_name: search_sphere_postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-search_sphere}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-search_sphere}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - search_sphere_network
-
-  # ============================================================================
-  # 2. Redis Cache & Broker
-  # ============================================================================
-  redis:
-    image: redis:7-alpine
-    container_name: search_sphere_redis
-    restart: unless-stopped
-    command: redis-server --appendonly yes
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - search_sphere_network
-
-  # ============================================================================
-  # 3. Qdrant Vector Database
-  # ============================================================================
-  qdrant:
-    image: qdrant/qdrant:v1.12.1
-    container_name: search_sphere_qdrant
-    restart: unless-stopped
-    ports:
-      - "${QDRANT_PORT:-6333}:6333"
-      - "${QDRANT_GRPC_PORT:-6334}:6334"
-    environment:
-      QDRANT__SERVICE__GRPC_PORT: 6334
-    volumes:
-      - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333' || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - search_sphere_network
-
-  # ============================================================================
-  # 4. MinIO Object Storage
-  # ============================================================================
-  minio:
-    image: minio/minio:latest
-    container_name: search_sphere_minio
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    ports:
-      - "${MINIO_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
-    volumes:
-      - minio_data:/data
-    networks:
-      - search_sphere_network
-
-  # ============================================================================
-  # 5. FastAPI Backend Service
+  # 1. FastAPI Backend Service (Cloud-connected: Supabase, Qdrant Cloud)
   # ============================================================================
   api:
     build:
@@ -97,58 +13,30 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/search_sphere}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
-      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC}
+      QDRANT_URL: ${QDRANT_URL}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-}
+      SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-documents}
       ENVIRONMENT: ${ENVIRONMENT:-development}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3000/api/auth/callback/google}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://localhost:8000/auth/github/callback}
     volumes:
       - ./apps/api:/app
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      qdrant:
-        condition: service_started
-      minio:
-        condition: service_started
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - search_sphere_network
 
   # ============================================================================
-  # 6. Background Worker Service
-  # ============================================================================
-  worker:
-    build:
-      context: ./apps/worker
-      dockerfile: Dockerfile
-    container_name: search_sphere_worker
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/search_sphere}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
-      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
-      ENVIRONMENT: ${ENVIRONMENT:-development}
-    volumes:
-      - ./apps/worker:/app
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_started
-    command: dramatiq --processes 2 --threads 2 --watch src src.main
-    networks:
-      - search_sphere_network
-
-  # ============================================================================
-  # 7. Next.js Frontend Service
+  # 2. Next.js Frontend Service
   # ============================================================================
   web:
     build:
@@ -158,8 +46,13 @@ services:
     restart: unless-stopped
     ports:
       - "${WEB_PORT:-3000}:3000"
+    env_file:
+      - .env
     environment:
+      INTERNAL_API_URL: http://api:8000
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-}
       PORT: 3000
       HOSTNAME: "0.0.0.0"
     volumes:
@@ -171,19 +64,6 @@ services:
     command: pnpm dev
     networks:
       - search_sphere_network
-
-# ==============================================================================
-# Persistent Named Volumes
-# ==============================================================================
-volumes:
-  postgres_data:
-    driver: local
-  redis_data:
-    driver: local
-  qdrant_data:
-    driver: local
-  minio_data:
-    driver: local
 
 # ==============================================================================
 # Monorepo Bridge Network
