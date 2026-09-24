@@ -1,6 +1,30 @@
 services:
   # ============================================================================
-  # 1. FastAPI Backend Service (Cloud-connected: Supabase, Qdrant Cloud)
+  # 1. RabbitMQ Message Broker (Dramatiq Queue)
+  # ============================================================================
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: search_sphere_rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - search_sphere_network
+
+  # ============================================================================
+  # 2. FastAPI Backend Service (Cloud-connected: Supabase, Qdrant Cloud)
   # ============================================================================
   api:
     build:
@@ -29,14 +53,43 @@ services:
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://localhost:8000/auth/github/callback}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
     volumes:
       - ./apps/api:/app
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - search_sphere_network
 
   # ============================================================================
-  # 2. Next.js Frontend Service
+  # 3. Asynchronous Background Worker Service (Dramatiq + RabbitMQ)
+  # ============================================================================
+  worker:
+    build:
+      context: ./apps/worker
+      dockerfile: Dockerfile
+    container_name: search_sphere_worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+    volumes:
+      - ./apps/worker:/app
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    command: dramatiq --processes 2 --threads 2 --watch src src.main
+    networks:
+      - search_sphere_network
+
+  # ============================================================================
+  # 4. Next.js Frontend Service
   # ============================================================================
   web:
     build:
@@ -64,6 +117,13 @@ services:
     command: pnpm dev
     networks:
       - search_sphere_network
+
+# ==============================================================================
+# Persistent Named Volumes
+# ==============================================================================
+volumes:
+  rabbitmq_data:
+    driver: local
 
 # ==============================================================================
 # Monorepo Bridge Network

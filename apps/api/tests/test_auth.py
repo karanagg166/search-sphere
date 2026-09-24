@@ -105,7 +105,6 @@ async def test_auth_workflow_and_endpoints():
         assert no_email_resp.status_code == 401
         assert "No account found" in no_email_resp.json()["detail"]
 
-
         # 6. Access /auth/me with valid Bearer token
         me_resp = await client.get(
             "/auth/me",

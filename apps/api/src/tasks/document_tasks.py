@@ -1,17 +1,17 @@
 import dramatiq
 import structlog
-from dramatiq.brokers.redis import RedisBroker
+from dramatiq.brokers.rabbitmq import RabbitmqBroker
 
 from src.config import settings
 
 logger = structlog.get_logger()
 
-# Setup broker for the API producer
+# Setup RabbitMQ broker for the API producer
 try:
-    broker = RedisBroker(url=settings.REDIS_URL)
+    broker = RabbitmqBroker(url=settings.RABBITMQ_URL)
     dramatiq.set_broker(broker)
 except Exception as e:
-    logger.warning("Could not initialize Redis broker for Dramatiq", error=str(e))
+    logger.warning("Could not initialize RabbitMQ broker for Dramatiq", error=str(e))
 
 
 @dramatiq.actor(queue_name="default", actor_name="process_document_task")

@@ -34,8 +34,11 @@ class Settings(BaseSettings):
     LOCAL_STORAGE_DIR: str = "./data/storage"
     MAX_UPLOAD_SIZE_BYTES: int = 20 * 1024 * 1024  # 20 MB max upload
 
-    # Redis Queue & Worker
+    # Caching
     REDIS_URL: str = "redis://redis:6379/0"
+
+    # RabbitMQ Queue & Worker
+    RABBITMQ_URL: str = "amqp://guest:guest@rabbitmq:5672/"
 
     # Frontend URL (for OAuth callbacks & CORS)
     FRONTEND_URL: str = "http://localhost:3000"
