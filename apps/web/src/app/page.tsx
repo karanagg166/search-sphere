@@ -53,7 +53,7 @@ export default function Home() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
             <Search className="w-8 h-8 text-primary" />
-            Semantic Search & RAG Monorepo
+            Search Sphere
           </h1>
           <p className="text-muted-foreground mt-1 text-sm">
             Scalable document ingestion, vector retrieval, and background pipeline environment.

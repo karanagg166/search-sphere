@@ -6,8 +6,8 @@ import structlog
 logger = structlog.get_logger()
 
 app = FastAPI(
-    title="Semantic Search & RAG API",
-    description="FastAPI Backend for Semantic Search and RAG Monorepo",
+    title="Search Sphere API",
+    description="FastAPI Backend for Search Sphere Monorepo",
     version="0.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -38,7 +38,7 @@ async def health_check():
 async def root():
     """Root endpoint with basic navigation links."""
     return {
-        "message": "Semantic Search / RAG API is running.",
+        "message": "Search Sphere API is running.",
         "health": "/health",
         "docs": "/docs",
     }

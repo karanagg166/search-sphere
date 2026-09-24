@@ -1,7 +1,7 @@
 [project]
-name = "api"
+name = "search-sphere-api"
 version = "0.1.0"
-description = "FastAPI Backend for Semantic Search and RAG Monorepo"
+description = "FastAPI Backend for Search Sphere Monorepo"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []

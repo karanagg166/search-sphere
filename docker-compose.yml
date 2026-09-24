@@ -4,30 +4,30 @@ services:
   # ============================================================================
   postgres:
     image: postgres:16-alpine
-    container_name: semantic_postgres
+    container_name: search_sphere_postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-semantic_search}
+      POSTGRES_DB: ${POSTGRES_DB:-search_sphere}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-semantic_search}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-search_sphere}"]
       interval: 5s
       timeout: 5s
       retries: 5
     networks:
-      - semantic_network
+      - search_sphere_network
 
   # ============================================================================
   # 2. Redis Cache & Broker
   # ============================================================================
   redis:
     image: redis:7-alpine
-    container_name: semantic_redis
+    container_name: search_sphere_redis
     restart: unless-stopped
     command: redis-server --appendonly yes
     ports:
@@ -40,14 +40,14 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - semantic_network
+      - search_sphere_network
 
   # ============================================================================
   # 3. Qdrant Vector Database
   # ============================================================================
   qdrant:
     image: qdrant/qdrant:v1.12.1
-    container_name: semantic_qdrant
+    container_name: search_sphere_qdrant
     restart: unless-stopped
     ports:
       - "${QDRANT_PORT:-6333}:6333"
@@ -62,14 +62,14 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - semantic_network
+      - search_sphere_network
 
   # ============================================================================
   # 4. MinIO Object Storage
   # ============================================================================
   minio:
     image: minio/minio:latest
-    container_name: semantic_minio
+    container_name: search_sphere_minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
@@ -81,7 +81,7 @@ services:
     volumes:
       - minio_data:/data
     networks:
-      - semantic_network
+      - search_sphere_network
 
   # ============================================================================
   # 5. FastAPI Backend Service
@@ -90,14 +90,14 @@ services:
     build:
       context: ./apps/api
       dockerfile: Dockerfile
-    container_name: semantic_api
+    container_name: search_sphere_api
     restart: unless-stopped
     ports:
       - "${API_PORT:-8000}:8000"
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/semantic_search}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/search_sphere}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
@@ -115,7 +115,7 @@ services:
         condition: service_started
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
-      - semantic_network
+      - search_sphere_network
 
   # ============================================================================
   # 6. Background Worker Service
@@ -124,12 +124,12 @@ services:
     build:
       context: ./apps/worker
       dockerfile: Dockerfile
-    container_name: semantic_worker
+    container_name: search_sphere_worker
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/semantic_search}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/search_sphere}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
@@ -145,7 +145,7 @@ services:
         condition: service_started
     command: dramatiq --processes 2 --threads 2 --watch src src.main
     networks:
-      - semantic_network
+      - search_sphere_network
 
   # ============================================================================
   # 7. Next.js Frontend Service
@@ -154,7 +154,7 @@ services:
     build:
       context: ./apps/web
       dockerfile: Dockerfile
-    container_name: semantic_web
+    container_name: search_sphere_web
     restart: unless-stopped
     ports:
       - "${WEB_PORT:-3000}:3000"
@@ -168,9 +168,9 @@ services:
       - /app/.next
     depends_on:
       - api
-    command: npm run dev
+    command: pnpm dev
     networks:
-      - semantic_network
+      - search_sphere_network
 
 # ==============================================================================
 # Persistent Named Volumes
@@ -189,5 +189,5 @@ volumes:
 # Monorepo Bridge Network
 # ==============================================================================
 networks:
-  semantic_network:
+  search_sphere_network:
     driver: bridge

@@ -6,8 +6,8 @@ import { Providers } from "@/components/providers";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Semantic Search & RAG Platform",
-  description: "Monorepo for Semantic Search and RAG system",
+  title: "Search Sphere | Semantic Search & RAG Platform",
+  description: "Search Sphere - Scalable semantic search and RAG platform",
 };
 
 export default function RootLayout({

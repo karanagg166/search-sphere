@@ -1,7 +1,7 @@
 [project]
-name = "worker"
+name = "search-sphere-worker"
 version = "0.1.0"
-description = "Background Task Worker for Semantic Search and RAG Monorepo"
+description = "Background Task Worker for Search Sphere Monorepo"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []

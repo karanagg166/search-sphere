@@ -1,7 +1,7 @@
 .PHONY: help build up down down-v restart status logs logs-api logs-worker logs-web logs-qdrant logs-postgres shell-api shell-worker shell-web shell-db shell-redis test lint format clean
 
 help: ## Show available commands
-	@echo "Semantic Search & RAG Monorepo Commands:"
+	@echo "Search Sphere Monorepo Commands:"
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
@@ -54,7 +54,7 @@ shell-web: ## Open an interactive shell in the Next.js web container
 	docker compose exec web sh
 
 shell-db: ## Open an interactive PostgreSQL (psql) shell
-	docker compose exec postgres psql -U postgres -d semantic_search
+	docker compose exec postgres psql -U postgres -d search_sphere
 
 shell-redis: ## Open an interactive Redis CLI shell
 	docker compose exec redis redis-cli
