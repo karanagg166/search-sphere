@@ -2,17 +2,17 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.processing.document_extractor import (
+from src.processing.cleaning import TextCleaner
+from src.processing.extraction import (
     DocumentExtractionError,
     DocumentExtractor,
+)
+from src.processing.models.document import (
+    CleanedBlock,
+    CleanedDocument,
     ExtractedBlock,
     ExtractedDocument,
     ExtractedPage,
-)
-from src.processing.text_cleaner import (
-    CleanedBlock,
-    CleanedDocument,
-    TextCleaner,
 )
 from src.services.document_fetcher import DocumentFetcher, FetchedDocument
 from src.tasks.document_tasks import _process_document

@@ -3,11 +3,12 @@ import asyncio
 import dramatiq
 import structlog
 
-from src.processing.document_extractor import (
+from src.processing.cleaning import TextCleaner
+from src.processing.extraction import (
     DocumentExtractionError,
     DocumentExtractor,
 )
-from src.processing.text_cleaner import CleanedDocument, TextCleaner
+from src.processing.models.document import CleanedDocument
 from src.services.document_fetcher import DocumentFetcher
 
 logger = structlog.get_logger()

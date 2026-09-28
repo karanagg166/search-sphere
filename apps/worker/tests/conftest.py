@@ -5,8 +5,7 @@ import fitz
 import pytest
 from PIL import Image
 
-from src.processing.image_captioner import ImageCaptioner
-from src.processing.ocr_processor import OcrProcessor
+from src.processing.extraction import ImageCaptioner, OcrProcessor
 
 
 @pytest.fixture

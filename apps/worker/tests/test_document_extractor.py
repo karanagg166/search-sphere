@@ -3,15 +3,17 @@ from unittest.mock import MagicMock
 import fitz
 import pytest
 
-from src.processing.document_extractor import (
+from src.processing.extraction import (
     DocumentExtractionError,
     DocumentExtractor,
+    ImageCaptioningError,
+    OcrProcessingError,
+)
+from src.processing.models.document import (
     ExtractedBlock,
     ExtractedDocument,
     ExtractedPage,
 )
-from src.processing.image_captioner import ImageCaptioningError
-from src.processing.ocr_processor import OcrProcessingError
 
 
 def test_extracted_block_and_page_combined_text() -> None:

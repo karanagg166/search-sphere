@@ -1,63 +1,24 @@
-from dataclasses import dataclass
 from io import BytesIO
 
 import fitz
 import structlog
 from PIL import Image
 
-from src.processing.image_captioner import (
+from src.processing.extraction.image_captioner import (
     ImageCaptioner,
     ImageCaptioningError,
 )
-from src.processing.ocr_processor import (
+from src.processing.extraction.ocr_processor import (
     OcrProcessingError,
     OcrProcessor,
 )
+from src.processing.models.document import (
+    ExtractedBlock,
+    ExtractedDocument,
+    ExtractedPage,
+)
 
 logger = structlog.get_logger()
-
-
-@dataclass(frozen=True)
-class ExtractedBlock:
-    """
-    One extracted block from the PDF page.
-
-    block_type:
-    - "text"
-    - "image"
-    """
-
-    block_type: str
-    content: str
-
-
-@dataclass(frozen=True)
-class ExtractedPage:
-    """Ordered extracted content for a single PDF page."""
-
-    page_number: int
-    blocks: list[ExtractedBlock]
-
-    def combined_text(self) -> str:
-        return "\n\n".join(
-            block.content.strip()
-            for block in self.blocks
-            if block.content.strip()
-        )
-
-
-@dataclass(frozen=True)
-class ExtractedDocument:
-    """Complete ordered extracted document."""
-
-    pages: list[ExtractedPage]
-
-    def combined_text(self) -> str:
-        return "\n\n".join(
-            page.combined_text()
-            for page in self.pages
-            if page.combined_text().strip()
-        )
 
 
 class DocumentExtractionError(Exception):
@@ -118,9 +79,7 @@ class DocumentExtractor:
         """
 
         if not pdf_bytes:
-            raise DocumentExtractionError(
-                "Cannot extract content from an empty PDF."
-            )
+            raise DocumentExtractionError("Cannot extract content from an empty PDF.")
 
         try:
             document = fitz.open(
@@ -133,9 +92,7 @@ class DocumentExtractor:
                 error=str(exc),
             )
 
-            raise DocumentExtractionError(
-                "Failed to open PDF document."
-            ) from exc
+            raise DocumentExtractionError("Failed to open PDF document.") from exc
 
         pages: list[ExtractedPage] = []
 
@@ -151,16 +108,12 @@ class DocumentExtractor:
 
                 pages.append(extracted_page)
 
-            extracted_document = ExtractedDocument(
-                pages=pages
-            )
+            extracted_document = ExtractedDocument(pages=pages)
 
             logger.info(
                 "Document extraction completed",
                 page_count=len(pages),
-                extracted_characters=len(
-                    extracted_document.combined_text()
-                ),
+                extracted_characters=len(extracted_document.combined_text()),
             )
 
             return extracted_document
@@ -276,10 +229,7 @@ class DocumentExtractor:
         for line in block.get("lines", []):
             spans = line.get("spans", [])
 
-            line_text = "".join(
-                span.get("text", "")
-                for span in spans
-            ).strip()
+            line_text = "".join(span.get("text", "") for span in spans).strip()
 
             if line_text:
                 lines.append(line_text)
@@ -319,9 +269,7 @@ class DocumentExtractor:
         )
 
         if ocr_text:
-            extracted_parts.append(
-                f"[Image text: {ocr_text}]"
-            )
+            extracted_parts.append(f"[Image text: {ocr_text}]")
 
         description = self._generate_description(
             image_bytes=image_bytes,
@@ -329,9 +277,7 @@ class DocumentExtractor:
         )
 
         if description:
-            extracted_parts.append(
-                f"[Image description: {description}]"
-            )
+            extracted_parts.append(f"[Image description: {description}]")
 
         return "\n\n".join(extracted_parts)
 
@@ -341,13 +287,20 @@ class DocumentExtractor:
         page_number: int,
     ) -> str:
         try:
-            return self.ocr_processor.extract_text(
-                image_bytes
-            ).strip()
+            return self.ocr_processor.extract_text(image_bytes).strip()
 
         except OcrProcessingError as exc:
             logger.warning(
                 "OCR failed for PDF image",
+                page_number=page_number,
+                error=str(exc),
+            )
+
+            return ""
+
+        except Exception as exc:
+            logger.warning(
+                "Unexpected failure during image OCR",
                 page_number=page_number,
                 error=str(exc),
             )
@@ -360,13 +313,20 @@ class DocumentExtractor:
         page_number: int,
     ) -> str:
         try:
-            return self.image_captioner.describe(
-                image_bytes
-            ).strip()
+            return self.image_captioner.describe(image_bytes).strip()
 
         except ImageCaptioningError as exc:
             logger.warning(
                 "Image captioning failed",
+                page_number=page_number,
+                error=str(exc),
+            )
+
+            return ""
+
+        except Exception as exc:
+            logger.warning(
+                "Unexpected failure during image captioning",
                 page_number=page_number,
                 error=str(exc),
             )
@@ -388,9 +348,7 @@ class DocumentExtractor:
         """
 
         try:
-            with Image.open(
-                BytesIO(image_bytes)
-            ) as image:
+            with Image.open(BytesIO(image_bytes)) as image:
                 width, height = image.size
 
                 if width < 100 or height < 100:
