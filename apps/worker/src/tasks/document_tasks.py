@@ -7,6 +7,7 @@ from src.processing.document_extractor import (
     DocumentExtractionError,
     DocumentExtractor,
 )
+from src.processing.text_cleaner import CleanedDocument, TextCleaner
 from src.services.document_fetcher import DocumentFetcher
 
 logger = structlog.get_logger()
@@ -21,29 +22,34 @@ def process_document_task(document_id: str) -> None:
     """
     Background job responsible for processing a single document.
 
-    Current pipeline stage:
+    Current pipeline stages:
     1. Load document metadata from PostgreSQL.
-    2. Download the original PDF from object storage.
-    3. Extract native text from the PDF.
+    2. Download original PDF from object storage.
+    3. Extract document content (native text, OCR text, and BLIP image captions).
+    4. Deterministically clean and normalize document text while preserving structure.
 
-    Cleaning, OCR, chunking, embeddings, and vector storage
-    are intentionally handled in later pipeline stages.
+    Chunking, embeddings, and vector storage are handled in later pipeline stages.
     """
-
     asyncio.run(_process_document(document_id))
 
 
-async def _process_document(document_id: str) -> None:
+async def _process_document(
+    document_id: str,
+    fetcher: DocumentFetcher | None = None,
+    extractor: DocumentExtractor | None = None,
+    cleaner: TextCleaner | None = None,
+) -> CleanedDocument:
     logger.info(
         "Document processing started",
         document_id=document_id,
     )
 
-    fetcher = DocumentFetcher()
-    extractor = DocumentExtractor()
+    doc_fetcher = fetcher or DocumentFetcher()
+    doc_extractor = extractor or DocumentExtractor()
+    doc_cleaner = cleaner or TextCleaner()
 
     try:
-        fetched_document = await fetcher.fetch(document_id)
+        fetched_document = await doc_fetcher.fetch(document_id)
 
         logger.info(
             "Document fetched successfully",
@@ -52,9 +58,7 @@ async def _process_document(document_id: str) -> None:
             size=len(fetched_document.content),
         )
 
-        extracted_document = extractor.extract(
-            fetched_document.content
-        )
+        extracted_document = doc_extractor.extract(fetched_document.content)
 
         raw_text = extracted_document.combined_text()
 
@@ -65,6 +69,21 @@ async def _process_document(document_id: str) -> None:
             extracted_characters=len(raw_text),
             preview=raw_text[:500],
         )
+
+        cleaned_document = doc_cleaner.clean_document(extracted_document)
+
+        cleaned_text = cleaned_document.combined_text()
+
+        logger.info(
+            "Document text cleaning completed",
+            document_id=document_id,
+            pages=len(cleaned_document.pages),
+            raw_characters=len(raw_text),
+            cleaned_characters=len(cleaned_text),
+            cleaned_preview=cleaned_text[:500],
+        )
+
+        return cleaned_document
 
     except DocumentExtractionError as exc:
         logger.error(
