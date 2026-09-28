@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     # OCR
     TESSERACT_CMD: str | None = None
 
+    # Vision / Image Captioning
+    IMAGE_CAPTION_MODEL: str = "Salesforce/blip-image-captioning-base"
+
     # ------------------------------------------------------------------
     # Chunking
     # These will be used later when we reach the chunking phase.
