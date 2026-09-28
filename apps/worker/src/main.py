@@ -13,13 +13,14 @@ dramatiq.set_broker(rabbitmq_broker)
 
 logger.info("Worker initialized with RabbitMQ broker", rabbitmq_url=rabbitmq_url)
 
+# Import actors to register with Dramatiq broker
+from src.tasks.document_tasks import (  # noqa: E402
+    process_document_task,
+)
 
-@dramatiq.actor(queue_name="default", actor_name="process_document_task")
-def process_document_task(document_id: str) -> None:
-    """Sample background document processing actor."""
-    logger.info("Received document task", document_id=document_id)
-
+__all__ = ["process_document_task"]
 
 
 if __name__ == "__main__":
     logger.info("Worker process starting up...")
+

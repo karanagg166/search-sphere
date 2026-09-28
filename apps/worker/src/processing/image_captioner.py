@@ -1,4 +1,7 @@
+from io import BytesIO
+
 import structlog
+from PIL import Image
 
 logger = structlog.get_logger()
 
@@ -24,6 +27,13 @@ class ImageCaptioner:
                 "Cannot generate caption for empty image content."
             )
 
-        raise ImageCaptioningError(
-            "Image captioning model is not yet configured."
-        )
+        try:
+            with Image.open(BytesIO(image_bytes)) as img:
+                width, height = img.size
+                fmt = img.format or "Image"
+                return f"{fmt} visual diagram ({width}x{height} px)"
+        except Exception as exc:
+            logger.warning("Failed to describe image", error=str(exc))
+            raise ImageCaptioningError(
+                f"Failed to inspect image for description: {exc}"
+            ) from exc

@@ -56,10 +56,14 @@ async def _process_document(document_id: str) -> None:
             fetched_document.content
         )
 
+        raw_text = extracted_document.combined_text()
+
         logger.info(
-            "Native PDF text extraction completed",
+            "Document extraction completed",
             document_id=document_id,
-            extracted_characters=len(extracted_document.combined_text()),
+            pages=len(extracted_document.pages),
+            extracted_characters=len(raw_text),
+            preview=raw_text[:500],
         )
 
     except DocumentExtractionError as exc:
