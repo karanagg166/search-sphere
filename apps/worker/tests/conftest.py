@@ -69,3 +69,16 @@ def mock_image_captioner() -> MagicMock:
     mock = MagicMock(spec=ImageCaptioner)
     mock.describe.return_value = "A technical architectural diagram"
     return mock
+
+
+@pytest.fixture
+def mock_semantic_embedder() -> MagicMock:
+    """
+    Provides a mocked SemanticEmbedder instance returning deterministic embeddings.
+    """
+    from src.processing.chunking.semantic_splitter import SemanticEmbedder
+
+    mock = MagicMock(spec=SemanticEmbedder)
+    # Default: returns identical unit vectors so cosine distance is 0.0
+    mock.embed.side_effect = lambda texts: [[1.0, 0.0, 0.0] for _ in texts]
+    return mock

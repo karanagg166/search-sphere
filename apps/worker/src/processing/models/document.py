@@ -77,3 +77,40 @@ class CleanedDocument:
         return "\n\n".join(
             page.combined_text() for page in self.pages if page.combined_text().strip()
         )
+
+
+@dataclass(frozen=True)
+class DocumentChunk:
+    """
+    A single structure-aware semantic chunk of a document.
+
+    Fields:
+    - chunk_index: 0-indexed sequential position within the document
+    - content: clean text content of the chunk
+    - token_count: number of tokens in this chunk
+    - start_page: 1-indexed first page number spanned by this chunk
+    - end_page: 1-indexed last page number spanned by this chunk
+    - page_numbers: sorted unique list of all pages spanned
+    - block_types: list of source block types contained ("text", "image")
+    """
+
+    chunk_index: int
+    content: str
+    token_count: int
+    start_page: int
+    end_page: int
+    page_numbers: list[int]
+    block_types: list[str]
+
+
+@dataclass(frozen=True)
+class ChunkedDocument:
+    """Complete ordered collection of chunks for a document."""
+
+    chunks: list[DocumentChunk]
+
+    def total_chunks(self) -> int:
+        return len(self.chunks)
+
+    def total_tokens(self) -> int:
+        return sum(chunk.token_count for chunk in self.chunks)

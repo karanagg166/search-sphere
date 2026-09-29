@@ -3,12 +3,13 @@ import asyncio
 import dramatiq
 import structlog
 
+from src.processing.chunking import DocumentChunker
 from src.processing.cleaning import TextCleaner
 from src.processing.extraction import (
     DocumentExtractionError,
     DocumentExtractor,
 )
-from src.processing.models.document import CleanedDocument
+from src.processing.models.document import ChunkedDocument
 from src.services.document_fetcher import DocumentFetcher
 
 logger = structlog.get_logger()
@@ -28,8 +29,9 @@ def process_document_task(document_id: str) -> None:
     2. Download original PDF from object storage.
     3. Extract document content (native text, OCR text, and BLIP image captions).
     4. Deterministically clean and normalize document text while preserving structure.
+    5. Structure-aware semantic chunking into ChunkedDocument.
 
-    Chunking, embeddings, and vector storage are handled in later pipeline stages.
+    Embeddings and vector storage are handled in later pipeline stages.
     """
     asyncio.run(_process_document(document_id))
 
@@ -39,7 +41,8 @@ async def _process_document(
     fetcher: DocumentFetcher | None = None,
     extractor: DocumentExtractor | None = None,
     cleaner: TextCleaner | None = None,
-) -> CleanedDocument:
+    chunker: DocumentChunker | None = None,
+) -> ChunkedDocument:
     logger.info(
         "Document processing started",
         document_id=document_id,
@@ -48,6 +51,7 @@ async def _process_document(
     doc_fetcher = fetcher or DocumentFetcher()
     doc_extractor = extractor or DocumentExtractor()
     doc_cleaner = cleaner or TextCleaner()
+    doc_chunker = chunker or DocumentChunker()
 
     try:
         fetched_document = await doc_fetcher.fetch(document_id)
@@ -84,7 +88,40 @@ async def _process_document(
             cleaned_preview=cleaned_text[:500],
         )
 
-        return cleaned_document
+        chunked_document = doc_chunker.chunk_document(cleaned_document)
+
+        total_chunks = len(chunked_document.chunks)
+        total_tokens = chunked_document.total_tokens()
+        avg_tokens = (total_tokens / total_chunks) if total_chunks > 0 else 0
+        min_tokens = (
+            min(c.token_count for c in chunked_document.chunks)
+            if total_chunks > 0
+            else 0
+        )
+        max_tokens = (
+            max(c.token_count for c in chunked_document.chunks)
+            if total_chunks > 0
+            else 0
+        )
+        first_chunk_preview = (
+            chunked_document.chunks[0].content[:200] if total_chunks > 0 else ""
+        )
+        cleaned_blocks_count = sum(len(p.blocks) for p in cleaned_document.pages)
+
+        logger.info(
+            "Document chunking completed",
+            document_id=document_id,
+            pages=len(cleaned_document.pages),
+            cleaned_blocks=cleaned_blocks_count,
+            chunks=total_chunks,
+            total_tokens=total_tokens,
+            avg_chunk_tokens=round(avg_tokens, 1),
+            min_chunk_tokens=min_tokens,
+            max_chunk_tokens=max_tokens,
+            first_chunk_preview=first_chunk_preview,
+        )
+
+        return chunked_document
 
     except DocumentExtractionError as exc:
         logger.error(

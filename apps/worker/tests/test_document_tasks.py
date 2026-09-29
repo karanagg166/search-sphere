@@ -2,14 +2,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.processing.chunking import DocumentChunker, SemanticSplitter
 from src.processing.cleaning import TextCleaner
 from src.processing.extraction import (
     DocumentExtractionError,
     DocumentExtractor,
 )
 from src.processing.models.document import (
-    CleanedBlock,
-    CleanedDocument,
+    ChunkedDocument,
+    DocumentChunk,
     ExtractedBlock,
     ExtractedDocument,
     ExtractedPage,
@@ -19,7 +20,9 @@ from src.tasks.document_tasks import _process_document
 
 
 @pytest.mark.asyncio
-async def test_process_document_success_sequence() -> None:
+async def test_process_document_success_sequence(
+    mock_semantic_embedder: MagicMock,
+) -> None:
     doc_id = "doc-test-123"
     fake_pdf = b"%PDF-1.4 test document"
 
@@ -62,12 +65,16 @@ async def test_process_document_success_sequence() -> None:
     mock_extractor.extract.return_value = extracted_doc
 
     cleaner = TextCleaner()
+    chunker = DocumentChunker(
+        semantic_splitter=SemanticSplitter(embedder=mock_semantic_embedder)
+    )
 
-    cleaned_doc = await _process_document(
+    chunked_doc = await _process_document(
         document_id=doc_id,
         fetcher=mock_fetcher,
         extractor=mock_extractor,
         cleaner=cleaner,
+        chunker=chunker,
     )
 
     # 1. Fetcher called with document_id
@@ -76,29 +83,27 @@ async def test_process_document_success_sequence() -> None:
     # 2. Extractor called with downloaded bytes
     mock_extractor.extract.assert_called_once_with(fake_pdf)
 
-    # 3. Cleaned document produced
-    assert isinstance(cleaned_doc, CleanedDocument)
-    assert len(cleaned_doc.pages) == 1
-    p1 = cleaned_doc.pages[0]
-    assert p1.page_number == 1
-    assert len(p1.blocks) == 2
+    # 3. Chunked document produced
+    assert isinstance(chunked_doc, ChunkedDocument)
+    assert chunked_doc.total_chunks() >= 1
 
-    # 4. Text block cleaned (Unicode normalized, hyphen repaired, divider stripped)
-    text_block = p1.blocks[0]
-    assert text_block.block_type == "text"
-    assert "Architecture Overview" in text_block.content
-    assert "This document explains" in text_block.content
-    assert "-----------------------" not in text_block.content
+    first_chunk = chunked_doc.chunks[0]
+    assert first_chunk.chunk_index == 0
+    assert first_chunk.start_page == 1
+    assert first_chunk.end_page == 1
 
-    # 5. Image markers survived cleaning and order preserved
-    image_block = p1.blocks[1]
-    assert image_block.block_type == "image"
-    assert "[Image text: Diagram V1]" in image_block.content
-    assert "[Image description: Architecture workflow chart]" in image_block.content
+    # 4. Content cleaned and preserved in chunk
+    assert "Architecture Overview" in first_chunk.content
+    assert "This document explains" in first_chunk.content
+    assert "-----------------------" not in first_chunk.content
+    assert "[Image text: Diagram V1]" in first_chunk.content
+    assert "[Image description: Architecture workflow chart]" in first_chunk.content
 
 
 @pytest.mark.asyncio
-async def test_process_document_handles_empty_and_noisy_blocks() -> None:
+async def test_process_document_handles_empty_and_noisy_blocks(
+    mock_semantic_embedder: MagicMock,
+) -> None:
     doc_id = "doc-noisy-456"
     mock_fetcher = MagicMock(spec=DocumentFetcher)
     mock_fetcher.fetch = AsyncMock(
@@ -131,16 +136,21 @@ async def test_process_document_handles_empty_and_noisy_blocks() -> None:
     mock_extractor.extract.return_value = ExtractedDocument(pages=[page])
 
     cleaner = TextCleaner()
-    cleaned_doc = await _process_document(
+    chunker = DocumentChunker(
+        semantic_splitter=SemanticSplitter(embedder=mock_semantic_embedder)
+    )
+
+    chunked_doc = await _process_document(
         document_id=doc_id,
         fetcher=mock_fetcher,
         extractor=mock_extractor,
         cleaner=cleaner,
+        chunker=chunker,
     )
 
-    # Only meaningful block remains; noise and empty blocks pruned
-    assert len(cleaned_doc.pages[0].blocks) == 1
-    assert cleaned_doc.pages[0].blocks[0].content == "Meaningful content line."
+    # Only meaningful block remains and is chunked
+    assert chunked_doc.total_chunks() == 1
+    assert chunked_doc.chunks[0].content == "Meaningful content line."
 
 
 @pytest.mark.asyncio
@@ -200,9 +210,11 @@ async def test_process_document_end_to_end_pipeline(
     sample_pdf_bytes: bytes,
     mock_ocr_processor: MagicMock,
     mock_image_captioner: MagicMock,
+    mock_semantic_embedder: MagicMock,
 ) -> None:
     """
-    Verifies the real DocumentExtractor -> TextCleaner sequence with mocked storage/db.
+    Verifies the real DocumentExtractor -> TextCleaner -> DocumentChunker
+    sequence with mocked storage/db.
     """
     doc_id = "doc-e2e-real"
     mock_fetcher = MagicMock(spec=DocumentFetcher)
@@ -220,21 +232,26 @@ async def test_process_document_end_to_end_pipeline(
         image_captioner=mock_image_captioner,
     )
     cleaner = TextCleaner()
+    chunker = DocumentChunker(
+        semantic_splitter=SemanticSplitter(embedder=mock_semantic_embedder)
+    )
 
-    cleaned_document = await _process_document(
+    chunked_document = await _process_document(
         document_id=doc_id,
         fetcher=mock_fetcher,
         extractor=extractor,
         cleaner=cleaner,
+        chunker=chunker,
     )
 
-    assert isinstance(cleaned_document, CleanedDocument)
-    assert len(cleaned_document.pages) == 1
+    assert isinstance(chunked_document, ChunkedDocument)
+    assert chunked_document.total_chunks() >= 1
 
-    combined = cleaned_document.combined_text()
+    combined = " ".join(c.content for c in chunked_document.chunks)
     assert "Search Sphere Document Extraction" in combined
     assert "This is native text extracted from PDF." in combined
 
-    # Pipeline output remains structured CleanedDocument, no chunking/embedding yet
-    assert hasattr(cleaned_document, "pages")
-    assert all(isinstance(b, CleanedBlock) for b in cleaned_document.pages[0].blocks)
+    # Pipeline output is structured ChunkedDocument
+    assert all(isinstance(c, DocumentChunk) for c in chunked_document.chunks)
+    assert chunked_document.chunks[0].chunk_index == 0
+    assert chunked_document.chunks[0].start_page == 1
