@@ -15,6 +15,7 @@ from src.processing.extraction import (
 )
 from src.processing.models.document import EmbeddedDocument
 from src.services.document_fetcher import DocumentFetcher
+from src.vector_store import QdrantVectorStore, QdrantVectorStoreError
 
 logger = structlog.get_logger()
 
@@ -35,9 +36,10 @@ def process_document_task(document_id: str) -> None:
     4. Deterministically clean and normalize document text while preserving structure.
     5. Structure-aware semantic chunking into ChunkedDocument.
     6. Batch dense embedding generation into EmbeddedDocument.
+    7. Qdrant vector indexing and stale chunk synchronization.
 
     Future pipeline stages:
-    - Qdrant storage and vector indexing
+    - Query embedding
     - Dense ANN retrieval / search
     - Sparse / BM25 hybrid search fusion (RRF)
     - Cross-encoder reranking
@@ -53,6 +55,7 @@ async def _process_document(
     cleaner: TextCleaner | None = None,
     chunker: DocumentChunker | None = None,
     embedder: DenseEmbedder | None = None,
+    vector_store: QdrantVectorStore | None = None,
 ) -> EmbeddedDocument:
     logger.info(
         "Document processing started",
@@ -64,6 +67,7 @@ async def _process_document(
     doc_cleaner = cleaner or TextCleaner()
     doc_chunker = chunker or DocumentChunker()
     doc_embedder = embedder or DenseEmbedder()
+    doc_vector_store = vector_store or QdrantVectorStore()
 
     try:
         fetched_document = await doc_fetcher.fetch(document_id)
@@ -150,6 +154,18 @@ async def _process_document(
             ),
         )
 
+        points_written = await doc_vector_store.index_document(
+            document_id,
+            embedded_document,
+        )
+
+        logger.info(
+            "Document vector indexing completed",
+            document_id=document_id,
+            collection=doc_vector_store.collection_name,
+            points_written=points_written,
+        )
+
         return embedded_document
 
     except DocumentExtractionError as exc:
@@ -168,6 +184,14 @@ async def _process_document(
         )
         raise
 
+    except QdrantVectorStoreError as exc:
+        logger.error(
+            "Document vector indexing failed",
+            document_id=document_id,
+            error=str(exc),
+        )
+        raise
+
     except Exception as exc:
         logger.exception(
             "Document processing failed",
@@ -176,3 +200,6 @@ async def _process_document(
         )
         raise
 
+    finally:
+        if vector_store is None:
+            await doc_vector_store.close()

@@ -64,13 +64,13 @@ class Settings(BaseSettings):
     EMBEDDING_BATCH_SIZE: int = 32
     EMBEDDING_DEVICE: str = "cpu"
 
-
     # ------------------------------------------------------------------
     # Qdrant Vector Database
     # ------------------------------------------------------------------
     QDRANT_URL: str = "http://qdrant:6333"
     QDRANT_API_KEY: str | None = None
     QDRANT_COLLECTION_NAME: str = "documents"
+    QDRANT_UPSERT_BATCH_SIZE: int = 100
 
     # ------------------------------------------------------------------
     # Redis

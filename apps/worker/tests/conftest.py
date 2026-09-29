@@ -120,3 +120,19 @@ def mock_dense_embedder() -> MagicMock:
     mock.embed_document.side_effect = _embed_document
     return mock
 
+
+@pytest.fixture
+def mock_vector_store() -> MagicMock:
+    """
+    Provides a mocked QdrantVectorStore instance returning success.
+    """
+    from unittest.mock import AsyncMock
+
+    from src.vector_store import QdrantVectorStore
+
+    mock = MagicMock(spec=QdrantVectorStore)
+    mock.collection_name = "test_documents"
+    mock.vector_dimension = 384
+    mock.index_document = AsyncMock(return_value=1)
+    mock.close = AsyncMock()
+    return mock
