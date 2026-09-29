@@ -3,10 +3,13 @@ import asyncio
 import dramatiq
 import structlog
 
-from src.processing.document_extractor import (
+from src.processing.chunking import DocumentChunker
+from src.processing.cleaning import TextCleaner
+from src.processing.extraction import (
     DocumentExtractionError,
     DocumentExtractor,
 )
+from src.processing.models.document import ChunkedDocument
 from src.services.document_fetcher import DocumentFetcher
 
 logger = structlog.get_logger()
@@ -21,29 +24,37 @@ def process_document_task(document_id: str) -> None:
     """
     Background job responsible for processing a single document.
 
-    Current pipeline stage:
+    Current pipeline stages:
     1. Load document metadata from PostgreSQL.
-    2. Download the original PDF from object storage.
-    3. Extract native text from the PDF.
+    2. Download original PDF from object storage.
+    3. Extract document content (native text, OCR text, and BLIP image captions).
+    4. Deterministically clean and normalize document text while preserving structure.
+    5. Structure-aware semantic chunking into ChunkedDocument.
 
-    Cleaning, OCR, chunking, embeddings, and vector storage
-    are intentionally handled in later pipeline stages.
+    Embeddings and vector storage are handled in later pipeline stages.
     """
-
     asyncio.run(_process_document(document_id))
 
 
-async def _process_document(document_id: str) -> None:
+async def _process_document(
+    document_id: str,
+    fetcher: DocumentFetcher | None = None,
+    extractor: DocumentExtractor | None = None,
+    cleaner: TextCleaner | None = None,
+    chunker: DocumentChunker | None = None,
+) -> ChunkedDocument:
     logger.info(
         "Document processing started",
         document_id=document_id,
     )
 
-    fetcher = DocumentFetcher()
-    extractor = DocumentExtractor()
+    doc_fetcher = fetcher or DocumentFetcher()
+    doc_extractor = extractor or DocumentExtractor()
+    doc_cleaner = cleaner or TextCleaner()
+    doc_chunker = chunker or DocumentChunker()
 
     try:
-        fetched_document = await fetcher.fetch(document_id)
+        fetched_document = await doc_fetcher.fetch(document_id)
 
         logger.info(
             "Document fetched successfully",
@@ -52,9 +63,7 @@ async def _process_document(document_id: str) -> None:
             size=len(fetched_document.content),
         )
 
-        extracted_document = extractor.extract(
-            fetched_document.content
-        )
+        extracted_document = doc_extractor.extract(fetched_document.content)
 
         raw_text = extracted_document.combined_text()
 
@@ -65,6 +74,54 @@ async def _process_document(document_id: str) -> None:
             extracted_characters=len(raw_text),
             preview=raw_text[:500],
         )
+
+        cleaned_document = doc_cleaner.clean_document(extracted_document)
+
+        cleaned_text = cleaned_document.combined_text()
+
+        logger.info(
+            "Document text cleaning completed",
+            document_id=document_id,
+            pages=len(cleaned_document.pages),
+            raw_characters=len(raw_text),
+            cleaned_characters=len(cleaned_text),
+            cleaned_preview=cleaned_text[:500],
+        )
+
+        chunked_document = doc_chunker.chunk_document(cleaned_document)
+
+        total_chunks = len(chunked_document.chunks)
+        total_tokens = chunked_document.total_tokens()
+        avg_tokens = (total_tokens / total_chunks) if total_chunks > 0 else 0
+        min_tokens = (
+            min(c.token_count for c in chunked_document.chunks)
+            if total_chunks > 0
+            else 0
+        )
+        max_tokens = (
+            max(c.token_count for c in chunked_document.chunks)
+            if total_chunks > 0
+            else 0
+        )
+        first_chunk_preview = (
+            chunked_document.chunks[0].content[:200] if total_chunks > 0 else ""
+        )
+        cleaned_blocks_count = sum(len(p.blocks) for p in cleaned_document.pages)
+
+        logger.info(
+            "Document chunking completed",
+            document_id=document_id,
+            pages=len(cleaned_document.pages),
+            cleaned_blocks=cleaned_blocks_count,
+            chunks=total_chunks,
+            total_tokens=total_tokens,
+            avg_chunk_tokens=round(avg_tokens, 1),
+            min_chunk_tokens=min_tokens,
+            max_chunk_tokens=max_tokens,
+            first_chunk_preview=first_chunk_preview,
+        )
+
+        return chunked_document
 
     except DocumentExtractionError as exc:
         logger.error(

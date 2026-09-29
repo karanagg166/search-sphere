@@ -43,10 +43,19 @@ class Settings(BaseSettings):
 
     # ------------------------------------------------------------------
     # Chunking
-    # These will be used later when we reach the chunking phase.
+    # Hybrid structure-aware & semantic chunking configuration.
+    # Defaults are initial experimental baselines to be tuned via retrieval eval.
     # ------------------------------------------------------------------
-    CHUNK_SIZE: int = 800
-    CHUNK_OVERLAP: int = 100
+    CHUNK_TARGET_TOKENS: int = 500
+    CHUNK_MAX_TOKENS: int = 700
+    CHUNK_OVERLAP_TOKENS: int = 60
+    SEMANTIC_CHUNKING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+    SEMANTIC_DISTANCE_THRESHOLD: float = 0.5
+    SEMANTIC_SIMILARITY_PERCENTILE: float = 80.0
+
+    # Backwards-compatible aliases
+    CHUNK_SIZE: int = 500
+    CHUNK_OVERLAP: int = 60
 
     # ------------------------------------------------------------------
     # Embeddings

@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.processing.image_captioner import (
+from src.processing.extraction.image_captioner import (
     ImageCaptioner,
     ImageCaptioningError,
 )
@@ -39,7 +39,9 @@ def test_describe_invalid_image() -> None:
         captioner.describe(b"not an image file")
 
 
-def test_describe_success_with_injected_pipeline(sample_image_bytes: bytes) -> None:
+def test_describe_success_with_injected_pipeline(
+    sample_image_bytes: bytes,
+) -> None:
     mock_pipeline = MagicMock()
     mock_pipeline.return_value = [
         {"generated_text": "A dog running through a grassy field."}
@@ -54,14 +56,16 @@ def test_describe_success_with_injected_pipeline(sample_image_bytes: bytes) -> N
     assert kwargs.get("max_new_tokens") == 50
 
 
-def test_describe_lazy_loading_and_pipeline_reuse(sample_image_bytes: bytes) -> None:
+def test_describe_lazy_loading_and_pipeline_reuse(
+    sample_image_bytes: bytes,
+) -> None:
     mock_pipeline = MagicMock()
     mock_pipeline.return_value = [
         {"generated_text": "A medicine bottle with tablets beside it."}
     ]
 
     with patch(
-        "src.processing.image_captioner.pipeline",
+        "src.processing.extraction.image_captioner.pipeline",
         return_value=mock_pipeline,
     ) as mock_factory:
         captioner1 = ImageCaptioner(model_name="mock/blip-captioner")
@@ -82,7 +86,7 @@ def test_describe_lazy_loading_and_pipeline_reuse(sample_image_bytes: bytes) -> 
 
 def test_describe_pipeline_load_failure(sample_image_bytes: bytes) -> None:
     with patch(
-        "src.processing.image_captioner.pipeline",
+        "src.processing.extraction.image_captioner.pipeline",
         side_effect=RuntimeError("Weights failed to download"),
     ):
         captioner = ImageCaptioner(model_name="failing/model")
@@ -121,11 +125,11 @@ def test_describe_device_cuda_fallback(sample_image_bytes: bytes) -> None:
 
     with (
         patch(
-            "src.processing.image_captioner.torch.cuda.is_available",
+            "src.processing.extraction.image_captioner.torch.cuda.is_available",
             return_value=True,
         ),
         patch(
-            "src.processing.image_captioner.pipeline",
+            "src.processing.extraction.image_captioner.pipeline",
             return_value=mock_pipeline,
         ) as mock_factory,
     ):

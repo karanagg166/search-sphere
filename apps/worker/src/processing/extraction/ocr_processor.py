@@ -51,9 +51,7 @@ class OcrProcessor:
         """
 
         if not image_bytes:
-            raise OcrProcessingError(
-                "Cannot perform OCR on empty image content."
-            )
+            raise OcrProcessingError("Cannot perform OCR on empty image content.")
 
         self._validate_image(image_bytes)
 
@@ -65,9 +63,7 @@ class OcrProcessor:
                 config="--oem 3 --psm 6",
             )
         except pytesseract.TesseractNotFoundError as exc:
-            logger.exception(
-                "Tesseract executable was not found."
-            )
+            logger.exception("Tesseract executable was not found.")
 
             raise OcrProcessingError(
                 "Tesseract OCR is not installed or is not configured correctly."
@@ -79,9 +75,7 @@ class OcrProcessor:
                 error=str(exc),
             )
 
-            raise OcrProcessingError(
-                "Failed to extract text from image."
-            ) from exc
+            raise OcrProcessingError("Failed to extract text from image.") from exc
 
         cleaned_text = text.strip()
 
@@ -105,9 +99,7 @@ class OcrProcessor:
                 error=str(exc),
             )
 
-            raise OcrProcessingError(
-                "OCR input is not a valid image."
-            ) from exc
+            raise OcrProcessingError("OCR input is not a valid image.") from exc
 
     def _preprocess(self, image_bytes: bytes) -> np.ndarray:
         """
@@ -134,9 +126,7 @@ class OcrProcessor:
         )
 
         if image is None:
-            raise OcrProcessingError(
-                "Failed to decode image for OCR."
-            )
+            raise OcrProcessingError("Failed to decode image for OCR.")
 
         grayscale = cv2.cvtColor(
             image,

@@ -1,5 +1,4 @@
 import re
-from dataclasses import dataclass
 
 import structlog
 
@@ -7,52 +6,16 @@ from src.processing.cleaning.hyphenation_cleaner import HyphenationCleaner
 from src.processing.cleaning.line_cleaner import LineCleaner
 from src.processing.cleaning.noise_cleaner import NoiseCleaner
 from src.processing.cleaning.whitespace_cleaner import WhitespaceCleaner
-from src.processing.document_extractor import (
+from src.processing.models.document import (
+    CleanedBlock,
+    CleanedDocument,
+    CleanedPage,
     ExtractedBlock,
     ExtractedDocument,
     ExtractedPage,
 )
 
 logger = structlog.get_logger()
-
-
-@dataclass(frozen=True)
-class CleanedBlock:
-    """
-    A single cleaned block from a document page, preserving block type and order.
-
-    block_type:
-    - "text"
-    - "image"
-    """
-
-    block_type: str
-    content: str
-
-
-@dataclass(frozen=True)
-class CleanedPage:
-    """Ordered cleaned blocks for a single page."""
-
-    page_number: int
-    blocks: list[CleanedBlock]
-
-    def combined_text(self) -> str:
-        return "\n\n".join(
-            block.content.strip() for block in self.blocks if block.content.strip()
-        )
-
-
-@dataclass(frozen=True)
-class CleanedDocument:
-    """Complete ordered cleaned document."""
-
-    pages: list[CleanedPage]
-
-    def combined_text(self) -> str:
-        return "\n\n".join(
-            page.combined_text() for page in self.pages if page.combined_text().strip()
-        )
 
 
 class TextCleaner:

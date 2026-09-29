@@ -1,11 +1,9 @@
-from src.processing.document_extractor import (
+from src.processing.cleaning import TextCleaner
+from src.processing.models.document import (
+    CleanedDocument,
     ExtractedBlock,
     ExtractedDocument,
     ExtractedPage,
-)
-from src.processing.text_cleaner import (
-    CleanedDocument,
-    TextCleaner,
 )
 
 

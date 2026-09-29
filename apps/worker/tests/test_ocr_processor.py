@@ -4,7 +4,7 @@ import numpy as np
 import pytesseract
 import pytest
 
-from src.processing.ocr_processor import (
+from src.processing.extraction.ocr_processor import (
     OcrProcessingError,
     OcrProcessor,
 )
@@ -84,10 +84,9 @@ def test_extract_text_generic_failure(sample_image_bytes: bytes) -> None:
 
 def test_custom_tesseract_cmd() -> None:
     with patch(
-        "src.processing.ocr_processor.settings.TESSERACT_CMD",
+        "src.processing.extraction.ocr_processor.settings.TESSERACT_CMD",
         "/custom/bin/tesseract",
     ):
         processor = OcrProcessor()
         assert processor is not None
         assert pytesseract.pytesseract.tesseract_cmd == "/custom/bin/tesseract"
-
