@@ -4,13 +4,14 @@ import pytest
 
 from src.processing.chunking import DocumentChunker, SemanticSplitter
 from src.processing.cleaning import TextCleaner
+from src.processing.embedding import DenseEmbedder, DenseEmbeddingError
 from src.processing.extraction import (
     DocumentExtractionError,
     DocumentExtractor,
 )
 from src.processing.models.document import (
-    ChunkedDocument,
-    DocumentChunk,
+    EmbeddedChunk,
+    EmbeddedDocument,
     ExtractedBlock,
     ExtractedDocument,
     ExtractedPage,
@@ -22,6 +23,7 @@ from src.tasks.document_tasks import _process_document
 @pytest.mark.asyncio
 async def test_process_document_success_sequence(
     mock_semantic_embedder: MagicMock,
+    mock_dense_embedder: MagicMock,
 ) -> None:
     doc_id = "doc-test-123"
     fake_pdf = b"%PDF-1.4 test document"
@@ -69,12 +71,13 @@ async def test_process_document_success_sequence(
         semantic_splitter=SemanticSplitter(embedder=mock_semantic_embedder)
     )
 
-    chunked_doc = await _process_document(
+    embedded_doc = await _process_document(
         document_id=doc_id,
         fetcher=mock_fetcher,
         extractor=mock_extractor,
         cleaner=cleaner,
         chunker=chunker,
+        embedder=mock_dense_embedder,
     )
 
     # 1. Fetcher called with document_id
@@ -83,16 +86,21 @@ async def test_process_document_success_sequence(
     # 2. Extractor called with downloaded bytes
     mock_extractor.extract.assert_called_once_with(fake_pdf)
 
-    # 3. Chunked document produced
-    assert isinstance(chunked_doc, ChunkedDocument)
-    assert chunked_doc.total_chunks() >= 1
+    # 3. DenseEmbedder called once
+    mock_dense_embedder.embed_document.assert_called_once()
 
-    first_chunk = chunked_doc.chunks[0]
+    # 4. EmbeddedDocument produced
+    assert isinstance(embedded_doc, EmbeddedDocument)
+    assert embedded_doc.total_chunks() >= 1
+
+    first_chunk = embedded_doc.chunks[0]
+    assert isinstance(first_chunk, EmbeddedChunk)
     assert first_chunk.chunk_index == 0
     assert first_chunk.start_page == 1
     assert first_chunk.end_page == 1
+    assert len(first_chunk.embedding) == 384
 
-    # 4. Content cleaned and preserved in chunk
+    # 5. Content cleaned and preserved in chunk
     assert "Architecture Overview" in first_chunk.content
     assert "This document explains" in first_chunk.content
     assert "-----------------------" not in first_chunk.content
@@ -103,6 +111,7 @@ async def test_process_document_success_sequence(
 @pytest.mark.asyncio
 async def test_process_document_handles_empty_and_noisy_blocks(
     mock_semantic_embedder: MagicMock,
+    mock_dense_embedder: MagicMock,
 ) -> None:
     doc_id = "doc-noisy-456"
     mock_fetcher = MagicMock(spec=DocumentFetcher)
@@ -140,17 +149,19 @@ async def test_process_document_handles_empty_and_noisy_blocks(
         semantic_splitter=SemanticSplitter(embedder=mock_semantic_embedder)
     )
 
-    chunked_doc = await _process_document(
+    embedded_doc = await _process_document(
         document_id=doc_id,
         fetcher=mock_fetcher,
         extractor=mock_extractor,
         cleaner=cleaner,
         chunker=chunker,
+        embedder=mock_dense_embedder,
     )
 
-    # Only meaningful block remains and is chunked
-    assert chunked_doc.total_chunks() == 1
-    assert chunked_doc.chunks[0].content == "Meaningful content line."
+    # Only meaningful block remains and is embedded
+    assert embedded_doc.total_chunks() == 1
+    assert embedded_doc.chunks[0].content == "Meaningful content line."
+    assert len(embedded_doc.chunks[0].embedding) == 384
 
 
 @pytest.mark.asyncio
@@ -170,6 +181,7 @@ async def test_process_document_extraction_error_propagates() -> None:
     mock_extractor.extract.side_effect = DocumentExtractionError("Corrupted PDF stream")
 
     mock_cleaner = MagicMock(spec=TextCleaner)
+    mock_embedder = MagicMock(spec=DenseEmbedder)
 
     with pytest.raises(DocumentExtractionError, match="Corrupted PDF stream"):
         await _process_document(
@@ -177,10 +189,86 @@ async def test_process_document_extraction_error_propagates() -> None:
             fetcher=mock_fetcher,
             extractor=mock_extractor,
             cleaner=mock_cleaner,
+            embedder=mock_embedder,
         )
 
-    # Cleaner should not have been called if extraction failed
+    # Downstream components should not have been called
     mock_cleaner.clean_document.assert_not_called()
+    mock_embedder.embed_document.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_process_document_chunking_error_skips_embedder() -> None:
+    doc_id = "doc-chunk-fail"
+    mock_fetcher = MagicMock(spec=DocumentFetcher)
+    mock_fetcher.fetch = AsyncMock(
+        return_value=FetchedDocument(
+            id=doc_id,
+            storage_key=f"documents/{doc_id}.pdf",
+            status="uploaded",
+            content=b"%PDF",
+        )
+    )
+
+    mock_extractor = MagicMock(spec=DocumentExtractor)
+    mock_extractor.extract.return_value = ExtractedDocument(pages=[])
+
+    mock_cleaner = MagicMock(spec=TextCleaner)
+    mock_cleaner.clean_document.return_value = ExtractedDocument(pages=[])
+
+    mock_chunker = MagicMock(spec=DocumentChunker)
+    mock_chunker.chunk_document.side_effect = RuntimeError("Chunking boundary failed")
+
+    mock_embedder = MagicMock(spec=DenseEmbedder)
+
+    with pytest.raises(RuntimeError, match="Chunking boundary failed"):
+        await _process_document(
+            document_id=doc_id,
+            fetcher=mock_fetcher,
+            extractor=mock_extractor,
+            cleaner=mock_cleaner,
+            chunker=mock_chunker,
+            embedder=mock_embedder,
+        )
+
+    # Embedder must NOT be called if chunking fails
+    mock_embedder.embed_document.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_process_document_embedding_error_propagates() -> None:
+    doc_id = "doc-embed-fail"
+    mock_fetcher = MagicMock(spec=DocumentFetcher)
+    mock_fetcher.fetch = AsyncMock(
+        return_value=FetchedDocument(
+            id=doc_id,
+            storage_key=f"documents/{doc_id}.pdf",
+            status="uploaded",
+            content=b"%PDF",
+        )
+    )
+
+    mock_extractor = MagicMock(spec=DocumentExtractor)
+    mock_extractor.extract.return_value = ExtractedDocument(pages=[])
+
+    mock_cleaner = MagicMock(spec=TextCleaner)
+    mock_chunker = MagicMock(spec=DocumentChunker)
+    mock_chunker.chunk_document.return_value = MagicMock()
+
+    mock_embedder = MagicMock(spec=DenseEmbedder)
+    mock_embedder.embed_document.side_effect = DenseEmbeddingError(
+        "Model out of memory during encode"
+    )
+
+    with pytest.raises(DenseEmbeddingError, match="Model out of memory"):
+        await _process_document(
+            document_id=doc_id,
+            fetcher=mock_fetcher,
+            extractor=mock_extractor,
+            cleaner=mock_cleaner,
+            chunker=mock_chunker,
+            embedder=mock_embedder,
+        )
 
 
 @pytest.mark.asyncio
@@ -192,6 +280,7 @@ async def test_process_document_fetch_error_propagates() -> None:
 
     mock_extractor = MagicMock(spec=DocumentExtractor)
     mock_cleaner = MagicMock(spec=TextCleaner)
+    mock_embedder = MagicMock(spec=DenseEmbedder)
 
     with pytest.raises(ValueError, match="Document not found"):
         await _process_document(
@@ -199,10 +288,12 @@ async def test_process_document_fetch_error_propagates() -> None:
             fetcher=mock_fetcher,
             extractor=mock_extractor,
             cleaner=mock_cleaner,
+            embedder=mock_embedder,
         )
 
     mock_extractor.extract.assert_not_called()
     mock_cleaner.clean_document.assert_not_called()
+    mock_embedder.embed_document.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -211,11 +302,14 @@ async def test_process_document_end_to_end_pipeline(
     mock_ocr_processor: MagicMock,
     mock_image_captioner: MagicMock,
     mock_semantic_embedder: MagicMock,
+    mock_dense_embedder: MagicMock,
 ) -> None:
     """
-    Verifies the real DocumentExtractor -> TextCleaner -> DocumentChunker
-    sequence with mocked storage/db.
+    Verifies the real pipeline sequence:
+    DocumentExtractor -> TextCleaner -> DocumentChunker -> DenseEmbedder
+    with mocked storage/db.
     """
+
     doc_id = "doc-e2e-real"
     mock_fetcher = MagicMock(spec=DocumentFetcher)
     mock_fetcher.fetch = AsyncMock(
@@ -236,22 +330,24 @@ async def test_process_document_end_to_end_pipeline(
         semantic_splitter=SemanticSplitter(embedder=mock_semantic_embedder)
     )
 
-    chunked_document = await _process_document(
+    embedded_document = await _process_document(
         document_id=doc_id,
         fetcher=mock_fetcher,
         extractor=extractor,
         cleaner=cleaner,
         chunker=chunker,
+        embedder=mock_dense_embedder,
     )
 
-    assert isinstance(chunked_document, ChunkedDocument)
-    assert chunked_document.total_chunks() >= 1
+    assert isinstance(embedded_document, EmbeddedDocument)
+    assert embedded_document.total_chunks() >= 1
 
-    combined = " ".join(c.content for c in chunked_document.chunks)
+    combined = " ".join(c.content for c in embedded_document.chunks)
     assert "Search Sphere Document Extraction" in combined
     assert "This is native text extracted from PDF." in combined
 
-    # Pipeline output is structured ChunkedDocument
-    assert all(isinstance(c, DocumentChunk) for c in chunked_document.chunks)
-    assert chunked_document.chunks[0].chunk_index == 0
-    assert chunked_document.chunks[0].start_page == 1
+    # Pipeline output is structured EmbeddedDocument containing EmbeddedChunks
+    assert all(isinstance(c, EmbeddedChunk) for c in embedded_document.chunks)
+    assert embedded_document.chunks[0].chunk_index == 0
+    assert embedded_document.chunks[0].start_page == 1
+    assert len(embedded_document.chunks[0].embedding) == 384

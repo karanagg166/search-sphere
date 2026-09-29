@@ -4,6 +4,8 @@ from src.processing.models.document import (
     CleanedDocument,
     CleanedPage,
     DocumentChunk,
+    EmbeddedChunk,
+    EmbeddedDocument,
     ExtractedBlock,
     ExtractedDocument,
     ExtractedPage,
@@ -18,4 +20,7 @@ __all__ = [
     "CleanedDocument",
     "DocumentChunk",
     "ChunkedDocument",
+    "EmbeddedChunk",
+    "EmbeddedDocument",
 ]
+

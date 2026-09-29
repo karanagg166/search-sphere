@@ -5,11 +5,15 @@ import structlog
 
 from src.processing.chunking import DocumentChunker
 from src.processing.cleaning import TextCleaner
+from src.processing.embedding import (
+    DenseEmbedder,
+    DenseEmbeddingError,
+)
 from src.processing.extraction import (
     DocumentExtractionError,
     DocumentExtractor,
 )
-from src.processing.models.document import ChunkedDocument
+from src.processing.models.document import EmbeddedDocument
 from src.services.document_fetcher import DocumentFetcher
 
 logger = structlog.get_logger()
@@ -30,8 +34,14 @@ def process_document_task(document_id: str) -> None:
     3. Extract document content (native text, OCR text, and BLIP image captions).
     4. Deterministically clean and normalize document text while preserving structure.
     5. Structure-aware semantic chunking into ChunkedDocument.
+    6. Batch dense embedding generation into EmbeddedDocument.
 
-    Embeddings and vector storage are handled in later pipeline stages.
+    Future pipeline stages:
+    - Qdrant storage and vector indexing
+    - Dense ANN retrieval / search
+    - Sparse / BM25 hybrid search fusion (RRF)
+    - Cross-encoder reranking
+    - RAG answer generation
     """
     asyncio.run(_process_document(document_id))
 
@@ -42,7 +52,8 @@ async def _process_document(
     extractor: DocumentExtractor | None = None,
     cleaner: TextCleaner | None = None,
     chunker: DocumentChunker | None = None,
-) -> ChunkedDocument:
+    embedder: DenseEmbedder | None = None,
+) -> EmbeddedDocument:
     logger.info(
         "Document processing started",
         document_id=document_id,
@@ -52,6 +63,7 @@ async def _process_document(
     doc_extractor = extractor or DocumentExtractor()
     doc_cleaner = cleaner or TextCleaner()
     doc_chunker = chunker or DocumentChunker()
+    doc_embedder = embedder or DenseEmbedder()
 
     try:
         fetched_document = await doc_fetcher.fetch(document_id)
@@ -121,11 +133,36 @@ async def _process_document(
             first_chunk_preview=first_chunk_preview,
         )
 
-        return chunked_document
+        embedded_document = doc_embedder.embed_document(chunked_document)
+
+        logger.info(
+            "Document embedding completed",
+            document_id=document_id,
+            chunks=embedded_document.total_chunks(),
+            total_embedded_chunks=embedded_document.total_chunks(),
+            embedding_model=doc_embedder.model_name,
+            embedding_dimension=doc_embedder.dimension,
+            batch_size=doc_embedder.batch_size,
+            first_chunk_preview=(
+                embedded_document.chunks[0].content[:200]
+                if embedded_document.total_chunks() > 0
+                else ""
+            ),
+        )
+
+        return embedded_document
 
     except DocumentExtractionError as exc:
         logger.error(
             "PDF extraction failed",
+            document_id=document_id,
+            error=str(exc),
+        )
+        raise
+
+    except DenseEmbeddingError as exc:
+        logger.error(
+            "Document embedding generation failed",
             document_id=document_id,
             error=str(exc),
         )
@@ -138,3 +175,4 @@ async def _process_document(
             error=str(exc),
         )
         raise
+
