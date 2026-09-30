@@ -73,6 +73,12 @@ class Settings(BaseSettings):
     QDRANT_UPSERT_BATCH_SIZE: int = 100
 
     # ------------------------------------------------------------------
+    # Dense Retrieval
+    # ------------------------------------------------------------------
+    DENSE_SEARCH_TOP_K: int = 10
+    DENSE_SEARCH_MAX_TOP_K: int = 100
+
+    # ------------------------------------------------------------------
     # Redis
     # Redis is NOT the worker queue anymore.
     # Keep configuration available for future caching/temporary state.

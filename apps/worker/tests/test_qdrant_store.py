@@ -5,6 +5,7 @@ import pytest
 from qdrant_client import AsyncQdrantClient, models
 
 from src.processing.models.document import EmbeddedChunk, EmbeddedDocument
+from src.processing.models.search import DenseSearchResult
 from src.vector_store import (
     QdrantVectorStore,
     QdrantVectorStoreError,
@@ -503,5 +504,342 @@ async def test_qdrant_store_end_to_end_in_memory() -> None:
 
     count_res3 = await client.count("real_mem_test")
     assert count_res3.count == 0
+
+    await store.close()
+
+
+# ==============================================================================
+# 8. Dense ANN Search & Result Conversion Tests
+# ==============================================================================
+
+
+@pytest.mark.asyncio
+async def test_search_dense_query_call_parameters() -> None:
+    """Verify Qdrant query_points is invoked with correct parameters."""
+    mock_client = AsyncMock()
+    mock_response = MagicMock()
+    mock_response.points = []
+    mock_client.query_points.return_value = mock_response
+
+    store = QdrantVectorStore(
+        client=mock_client,
+        collection_name="docs_col",
+        vector_dimension=384,
+    )
+
+    query_vec = [0.05] * 384
+    results = await store.search_dense(query_vector=query_vec, limit=7)
+
+    assert results == []
+    mock_client.query_points.assert_awaited_once_with(
+        collection_name="docs_col",
+        query=query_vec,
+        limit=7,
+        query_filter=None,
+        score_threshold=None,
+        with_payload=True,
+        with_vectors=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_search_dense_without_filter() -> None:
+    """When document_id is omitted, query_filter is None."""
+    mock_client = AsyncMock()
+    mock_response = MagicMock()
+    mock_response.points = []
+    mock_client.query_points.return_value = mock_response
+
+    store = QdrantVectorStore(client=mock_client)
+    await store.search_dense(query_vector=[0.1] * 384, limit=5, document_id=None)
+
+    _, kwargs = mock_client.query_points.call_args
+    assert kwargs["query_filter"] is None
+
+
+@pytest.mark.asyncio
+async def test_search_dense_with_document_filter() -> None:
+    """When document_id is provided, server-side FieldCondition filter is built."""
+    mock_client = AsyncMock()
+    mock_response = MagicMock()
+    mock_response.points = []
+    mock_client.query_points.return_value = mock_response
+
+    store = QdrantVectorStore(client=mock_client)
+    await store.search_dense(
+        query_vector=[0.1] * 384,
+        limit=5,
+        document_id="doc-target-99",
+    )
+
+    _, kwargs = mock_client.query_points.call_args
+    query_filter = kwargs["query_filter"]
+    assert isinstance(query_filter, models.Filter)
+    assert isinstance(query_filter.must, list)
+    assert len(query_filter.must) == 1
+    condition = query_filter.must[0]
+    assert isinstance(condition, models.FieldCondition)
+    assert condition.key == "document_id"
+    assert condition.match == models.MatchValue(value="doc-target-99")
+
+
+@pytest.mark.asyncio
+async def test_search_dense_score_threshold() -> None:
+    """Optional score_threshold is forwarded to query_points."""
+    mock_client = AsyncMock()
+    mock_response = MagicMock()
+    mock_response.points = []
+    mock_client.query_points.return_value = mock_response
+
+    store = QdrantVectorStore(client=mock_client)
+    await store.search_dense(
+        query_vector=[0.1] * 384,
+        limit=5,
+        score_threshold=0.82,
+    )
+
+    _, kwargs = mock_client.query_points.call_args
+    assert kwargs["score_threshold"] == 0.82
+
+
+@pytest.mark.asyncio
+async def test_search_dense_payload_conversion() -> None:
+    """Raw Qdrant ScoredPoint is converted into domain DenseSearchResult."""
+    mock_client = AsyncMock()
+    mock_point = MagicMock()
+    mock_point.id = "c3f81e3a-7a5e-49b8-b80c-03d6d0a7a3b1"
+    mock_point.score = 0.945
+    mock_point.payload = {
+        "document_id": "doc-abc",
+        "chunk_index": 2,
+        "content": "Retrieved chunk content from Qdrant",
+        "token_count": 6,
+        "start_page": 3,
+        "end_page": 4,
+        "page_numbers": [3, 4],
+        "block_types": ["text", "image"],
+    }
+    mock_response = MagicMock()
+    mock_response.points = [mock_point]
+    mock_client.query_points.return_value = mock_response
+
+    store = QdrantVectorStore(client=mock_client)
+    results = await store.search_dense(query_vector=[0.1] * 384, limit=1)
+
+    assert len(results) == 1
+    res = results[0]
+    assert isinstance(res, DenseSearchResult)
+    assert res.point_id == "c3f81e3a-7a5e-49b8-b80c-03d6d0a7a3b1"
+    assert res.score == 0.945
+    assert res.document_id == "doc-abc"
+    assert res.chunk_index == 2
+    assert res.content == "Retrieved chunk content from Qdrant"
+    assert res.token_count == 6
+    assert res.start_page == 3
+    assert res.end_page == 4
+    assert res.page_numbers == [3, 4]
+    assert res.block_types == ["text", "image"]
+    assert res.rank == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "missing_field",
+    [
+        "document_id",
+        "chunk_index",
+        "content",
+        "token_count",
+        "start_page",
+        "end_page",
+        "page_numbers",
+        "block_types",
+    ],
+)
+async def test_search_dense_malformed_missing_payload_field_raises(
+    missing_field: str,
+) -> None:
+    """Missing any required payload field raises QdrantVectorStoreError."""
+    mock_client = AsyncMock()
+    payload = {
+        "document_id": "doc-1",
+        "chunk_index": 0,
+        "content": "Valid content",
+        "token_count": 2,
+        "start_page": 1,
+        "end_page": 1,
+        "page_numbers": [1],
+        "block_types": ["text"],
+    }
+    del payload[missing_field]
+
+    mock_point = MagicMock()
+    mock_point.id = "pt-invalid"
+    mock_point.score = 0.8
+    mock_point.payload = payload
+
+    mock_response = MagicMock()
+    mock_response.points = [mock_point]
+    mock_client.query_points.return_value = mock_response
+
+    store = QdrantVectorStore(client=mock_client)
+    expected_err = f"Missing required payload field '{missing_field}'"
+    with pytest.raises(QdrantVectorStoreError, match=expected_err):
+        await store.search_dense(query_vector=[0.1] * 384, limit=5)
+
+
+@pytest.mark.asyncio
+async def test_search_dense_missing_payload_dict_raises() -> None:
+    """Point with None payload raises QdrantVectorStoreError."""
+    mock_client = AsyncMock()
+    mock_point = MagicMock()
+    mock_point.id = "pt-no-payload"
+    mock_point.score = 0.75
+    mock_point.payload = None
+
+    mock_response = MagicMock()
+    mock_response.points = [mock_point]
+    mock_client.query_points.return_value = mock_response
+
+    store = QdrantVectorStore(client=mock_client)
+    with pytest.raises(QdrantVectorStoreError, match="Missing or invalid payload"):
+        await store.search_dense(query_vector=[0.1] * 384, limit=5)
+
+
+@pytest.mark.asyncio
+async def test_search_dense_client_failure_raises() -> None:
+    """Underlying query failure wraps into QdrantVectorStoreError with context."""
+    mock_client = AsyncMock()
+    mock_client.query_points.side_effect = RuntimeError("Connection reset by peer")
+
+    store = QdrantVectorStore(client=mock_client, collection_name="fail_col")
+
+    with pytest.raises(QdrantVectorStoreError, match="Failed to query dense vectors"):
+        await store.search_dense(query_vector=[0.1] * 384, limit=5)
+
+
+@pytest.mark.asyncio
+async def test_search_dense_empty_vector_raises() -> None:
+    """Empty query vector raises QdrantVectorStoreError."""
+    store = QdrantVectorStore(client=AsyncMock())
+    with pytest.raises(QdrantVectorStoreError, match="query_vector must not be empty"):
+        await store.search_dense(query_vector=[], limit=5)
+
+
+@pytest.mark.asyncio
+async def test_search_dense_dimension_mismatch_raises() -> None:
+    """Query vector with wrong dimension raises QdrantVectorStoreError."""
+    store = QdrantVectorStore(client=AsyncMock(), vector_dimension=384)
+    with pytest.raises(QdrantVectorStoreError, match="Query vector dimension mismatch"):
+        await store.search_dense(query_vector=[0.1] * 128, limit=5)
+
+
+@pytest.mark.asyncio
+async def test_search_dense_invalid_limit_raises() -> None:
+    """Non-positive limit raises QdrantVectorStoreError."""
+    store = QdrantVectorStore(client=AsyncMock())
+    with pytest.raises(QdrantVectorStoreError, match="limit must be positive"):
+        await store.search_dense(query_vector=[0.1] * 384, limit=0)
+
+
+# ==============================================================================
+# 9. Real In-Memory Qdrant Dense Search Integration Test
+# ==============================================================================
+
+
+@pytest.mark.asyncio
+async def test_qdrant_search_dense_in_memory() -> None:
+    """
+    Verifies end-to-end ANN dense search using an in-memory AsyncQdrantClient:
+    - indexes distinct documents with deterministic fake vectors
+    - verifies closest vector is ranked first by Cosine similarity
+    - verifies server-side document_id filter isolates target document
+    """
+    client = AsyncQdrantClient(":memory:")
+    store = QdrantVectorStore(
+        client=client,
+        collection_name="dense_search_mem_test",
+        vector_dimension=384,
+    )
+
+    # Document A: chunk 0 is [1, 0, 0...], chunk 1 is [0, 1, 0...]
+    vec_a0 = [0.0] * 384
+    vec_a0[0] = 1.0
+
+    vec_a1 = [0.0] * 384
+    vec_a1[1] = 1.0
+
+    doc_a = EmbeddedDocument(
+        chunks=[
+            _create_sample_embedded_chunk(
+                chunk_index=0,
+                content="Doc A chunk 0: downloads original PDF from object storage",
+                embedding=vec_a0,
+            ),
+            _create_sample_embedded_chunk(
+                chunk_index=1,
+                content="Doc A chunk 1: BLIP generates semantic image descriptions",
+                embedding=vec_a1,
+            ),
+        ]
+    )
+
+    # Document B: chunk 0 is [0, 0, 1...]
+    vec_b0 = [0.0] * 384
+    vec_b0[2] = 1.0
+
+    doc_b = EmbeddedDocument(
+        chunks=[
+            _create_sample_embedded_chunk(
+                chunk_index=0,
+                content="Doc B chunk 0: RabbitMQ transports the document identifier",
+                embedding=vec_b0,
+            )
+        ]
+    )
+
+    await store.index_document("doc-A", doc_a)
+    await store.index_document("doc-B", doc_b)
+
+    # 1. Query vector aligned with vec_a0: [0.99, 0.01, 0...]
+    query_vec = [0.0] * 384
+    query_vec[0] = 0.99
+    query_vec[1] = 0.01
+
+    results = await store.search_dense(query_vector=query_vec, limit=5)
+
+    assert len(results) == 3
+    # First ranked match must be Doc A chunk 0
+    assert results[0].document_id == "doc-A"
+    assert results[0].chunk_index == 0
+    assert "downloads original PDF" in results[0].content
+    assert results[0].rank == 1
+    assert results[0].score > results[1].score
+
+    # 2. Filter by document_id="doc-B": excludes Doc A entirely
+    doc_b_results = await store.search_dense(
+        query_vector=query_vec,
+        limit=5,
+        document_id="doc-B",
+    )
+    assert len(doc_b_results) == 1
+    assert doc_b_results[0].document_id == "doc-B"
+    assert doc_b_results[0].chunk_index == 0
+    assert "RabbitMQ transports" in doc_b_results[0].content
+
+    # 3. Filter by document_id="doc-A": excludes Doc B entirely
+    doc_a_results = await store.search_dense(
+        query_vector=query_vec,
+        limit=5,
+        document_id="doc-A",
+    )
+    assert len(doc_a_results) == 2
+    assert all(r.document_id == "doc-A" for r in doc_a_results)
+
+    # 4. Limit=1 returns strictly Top-1 result
+    top_1_results = await store.search_dense(query_vector=query_vec, limit=1)
+    assert len(top_1_results) == 1
+    assert top_1_results[0].document_id == "doc-A"
+    assert top_1_results[0].chunk_index == 0
 
     await store.close()

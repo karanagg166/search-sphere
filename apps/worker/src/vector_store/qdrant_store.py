@@ -7,6 +7,7 @@ from qdrant_client import AsyncQdrantClient, models
 from src.config import settings
 from src.processing.embedding import DEFAULT_EMBEDDING_DIMENSION
 from src.processing.models.document import EmbeddedDocument
+from src.processing.models.search import DenseSearchResult
 
 logger = structlog.get_logger()
 
@@ -361,6 +362,152 @@ class QdrantVectorStore:
             embedding_dimension=self.vector_dimension,
         )
         return total_points
+
+    def convert_scored_point(
+        self,
+        point: Any,
+        rank: int | None = None,
+    ) -> DenseSearchResult:
+        """
+        Convert a raw Qdrant ScoredPoint into an application-level DenseSearchResult.
+
+        Validates all required payload fields and preserves the exact Qdrant
+        similarity score.
+
+        Raises:
+            QdrantVectorStoreError: If point payload is missing, incomplete,
+                or malformed.
+        """
+        point_id = getattr(point, "id", None)
+        payload = getattr(point, "payload", None)
+        score = getattr(point, "score", None)
+
+        if not isinstance(payload, dict):
+            raise QdrantVectorStoreError(
+                f"Missing or invalid payload dictionary in Qdrant point '{point_id}'."
+            )
+
+        if score is None:
+            raise QdrantVectorStoreError(
+                f"Missing similarity score in Qdrant point '{point_id}'."
+            )
+
+        required_fields = (
+            "document_id",
+            "chunk_index",
+            "content",
+            "token_count",
+            "start_page",
+            "end_page",
+            "page_numbers",
+            "block_types",
+        )
+        for field in required_fields:
+            if field not in payload or payload[field] is None:
+                raise QdrantVectorStoreError(
+                    f"Missing required payload field '{field}' in Qdrant "
+                    f"point '{point_id}'."
+                )
+
+        try:
+            return DenseSearchResult(
+                point_id=str(point_id),
+                score=float(score),
+                document_id=str(payload["document_id"]),
+                chunk_index=int(payload["chunk_index"]),
+                content=str(payload["content"]),
+                token_count=int(payload["token_count"]),
+                start_page=int(payload["start_page"]),
+                end_page=int(payload["end_page"]),
+                page_numbers=list(payload["page_numbers"]),
+                block_types=list(payload["block_types"]),
+                rank=rank,
+            )
+        except (ValueError, TypeError) as exc:
+            raise QdrantVectorStoreError(
+                f"Invalid payload field types in Qdrant point '{point_id}': {exc}"
+            ) from exc
+
+    async def search_dense(
+        self,
+        query_vector: list[float],
+        limit: int,
+        document_id: str | None = None,
+        score_threshold: float | None = None,
+    ) -> list[DenseSearchResult]:
+        """
+        Execute approximate nearest neighbor (ANN) search on dense vectors in Qdrant.
+
+        Args:
+            query_vector: Dense vector representing the search query.
+            limit: Maximum number of Top-K results to return (must be > 0).
+            document_id: Optional document ID to filter points server-side.
+            score_threshold: Optional similarity score threshold.
+
+        Returns:
+            Ordered list of DenseSearchResult items preserving Qdrant ranking.
+
+        Raises:
+            QdrantVectorStoreError: If parameters are invalid, the search request fails,
+                                    or result payloads are missing/malformed.
+        """
+        if not query_vector:
+            raise QdrantVectorStoreError("query_vector must not be empty.")
+
+        if (
+            self.vector_dimension is not None
+            and len(query_vector) != self.vector_dimension
+        ):
+            raise QdrantVectorStoreError(
+                f"Query vector dimension mismatch: expected {self.vector_dimension}, "
+                f"got {len(query_vector)}."
+            )
+
+        if limit <= 0:
+            raise QdrantVectorStoreError(f"limit must be positive, got {limit}.")
+
+        query_filter: models.Filter | None = None
+        if document_id is not None:
+            query_filter = models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="document_id",
+                        match=models.MatchValue(value=document_id),
+                    )
+                ]
+            )
+
+        try:
+            response = await self.client.query_points(
+                collection_name=self.collection_name,
+                query=query_vector,
+                limit=limit,
+                query_filter=query_filter,
+                score_threshold=score_threshold,
+                with_payload=True,
+                with_vectors=False,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Failed to execute dense search query in Qdrant",
+                collection=self.collection_name,
+                limit=limit,
+                document_id=document_id,
+                error=str(exc),
+            )
+            raise QdrantVectorStoreError(
+                f"Failed to query dense vectors from collection "
+                f"'{self.collection_name}': {exc}"
+            ) from exc
+
+        points = getattr(response, "points", None)
+        if points is None:
+            return []
+
+        return [
+            self.convert_scored_point(point, rank=idx + 1)
+            for idx, point in enumerate(points)
+        ]
 
     async def close(self) -> None:
         """Close client connection if initialized and owned by this instance."""
