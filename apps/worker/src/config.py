@@ -79,6 +79,14 @@ class Settings(BaseSettings):
     DENSE_SEARCH_MAX_TOP_K: int = 100
 
     # ------------------------------------------------------------------
+    # Sparse Retrieval (BM25)
+    # ------------------------------------------------------------------
+    SPARSE_MODEL: str = "Qdrant/bm25"
+    QDRANT_SPARSE_VECTOR_NAME: str = "bm25"
+    SPARSE_SEARCH_TOP_K: int = 10
+    SPARSE_SEARCH_MAX_TOP_K: int = 100
+
+    # ------------------------------------------------------------------
     # Redis
     # Redis is NOT the worker queue anymore.
     # Keep configuration available for future caching/temporary state.

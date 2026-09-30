@@ -10,7 +10,8 @@ from src.processing.models.document import (
     ExtractedDocument,
     ExtractedPage,
 )
-from src.processing.models.search import DenseSearchResult
+from src.processing.models.search import DenseSearchResult, SparseSearchResult
+from src.processing.models.sparse_vector import SparseVector
 
 __all__ = [
     "ExtractedBlock",
@@ -24,5 +25,6 @@ __all__ = [
     "EmbeddedChunk",
     "EmbeddedDocument",
     "DenseSearchResult",
+    "SparseSearchResult",
+    "SparseVector",
 ]
-

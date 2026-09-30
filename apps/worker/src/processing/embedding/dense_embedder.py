@@ -85,15 +85,13 @@ def validate_vectors(
                 )
             if math.isnan(val):
                 raise DenseEmbeddingError(
-                    f"NaN detected in embedding vector at chunk {idx}, "
-                    f"element {v_idx}."
+                    f"NaN detected in embedding vector at chunk {idx}, element {v_idx}."
                 )
             if math.isinf(val):
                 raise DenseEmbeddingError(
                     f"Infinity detected in embedding vector at chunk {idx}, "
                     f"element {v_idx}."
                 )
-
 
 
 class DenseEmbedder:
@@ -234,7 +232,6 @@ class DenseEmbedder:
                 f"Failed to generate dense embeddings with model "
                 f"'{self.model_name}': {exc}"
             ) from exc
-
 
         if hasattr(embeddings, "tolist"):
             raw_vectors = embeddings.tolist()

@@ -1,5 +1,5 @@
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from qdrant_client import AsyncQdrantClient, models
@@ -7,7 +7,11 @@ from qdrant_client import AsyncQdrantClient, models
 from src.config import settings
 from src.processing.embedding import DEFAULT_EMBEDDING_DIMENSION
 from src.processing.models.document import EmbeddedDocument
-from src.processing.models.search import DenseSearchResult
+from src.processing.models.search import DenseSearchResult, SparseSearchResult
+from src.processing.models.sparse_vector import SparseVector
+
+if TYPE_CHECKING:
+    pass
 
 logger = structlog.get_logger()
 
@@ -40,7 +44,7 @@ class QdrantVectorStore:
 
     Responsibilities:
     - Manage AsyncQdrantClient connection;
-    - Ensure target collection exists with expected dense vector parameters;
+    - Ensure target collection exists with dense and named sparse vector params;
     - Validate existing collection configuration to prevent silent corruption;
     - Ensure keyword payload index on document_id;
     - Convert EmbeddedChunk items to Qdrant PointStructs with deterministic UUID5 IDs;
@@ -57,6 +61,8 @@ class QdrantVectorStore:
         batch_size: int | None = None,
         url: str | None = None,
         api_key: str | None = None,
+        sparse_vector_name: str | None = None,
+        sparse_embedder: Any = None,
     ) -> None:
         self.collection_name = collection_name or settings.QDRANT_COLLECTION_NAME
         self.vector_dimension = (
@@ -67,6 +73,10 @@ class QdrantVectorStore:
         self.batch_size = (
             batch_size if batch_size is not None else settings.QDRANT_UPSERT_BATCH_SIZE
         )
+        self.sparse_vector_name: str = str(
+            sparse_vector_name or getattr(settings, "QDRANT_SPARSE_VECTOR_NAME", "bm25")
+        )
+        self.sparse_embedder = sparse_embedder
 
         self._owns_client = client is None
         if client is not None:
@@ -110,12 +120,19 @@ class QdrantVectorStore:
                         size=self.vector_dimension,
                         distance=models.Distance.COSINE,
                     ),
+                    sparse_vectors_config={
+                        self.sparse_vector_name: models.SparseVectorParams(
+                            modifier=models.Modifier.IDF,
+                        )
+                    },
                 )
                 logger.info(
-                    "Created Qdrant collection",
+                    "Created Qdrant collection with dense and sparse vectors",
                     collection=self.collection_name,
                     vector_size=self.vector_dimension,
                     distance="Cosine",
+                    sparse_vector=self.sparse_vector_name,
+                    modifier="IDF",
                 )
             except Exception as exc:
                 logger.exception(
@@ -142,9 +159,73 @@ class QdrantVectorStore:
                 ) from exc
 
             self._validate_collection_vectors(info)
+            await self._ensure_sparse_vectors_config(info)
             await self._ensure_payload_indexes(info)
 
         self._collection_ensured = True
+
+    async def _ensure_sparse_vectors_config(self, info: Any) -> None:
+        """
+        Validate sparse vector configuration in an existing collection.
+
+        If the configured sparse vector is missing:
+        - Attempt safe schema addition using Qdrant's update_collection API.
+        - Never delete or destroy existing collection data.
+        - If the Qdrant server/client does not support dynamic sparse vector addition,
+          fail clearly with a descriptive QdrantVectorStoreError.
+        """
+        params = (
+            getattr(info.config, "params", None) if hasattr(info, "config") else None
+        )
+        sparse_vectors = getattr(params, "sparse_vectors", None) if params else None
+
+        if (
+            isinstance(sparse_vectors, dict)
+            and self.sparse_vector_name in sparse_vectors
+        ):
+            target_sparse = sparse_vectors[self.sparse_vector_name]
+            modifier = getattr(target_sparse, "modifier", None)
+            logger.info(
+                "Validated existing sparse vector schema",
+                collection=self.collection_name,
+                sparse_vector=self.sparse_vector_name,
+                modifier=str(modifier),
+            )
+            return
+
+        logger.info(
+            "Sparse vector missing from collection; attempting safe addition",
+            collection=self.collection_name,
+            sparse_vector=self.sparse_vector_name,
+        )
+        try:
+            await self.client.update_collection(
+                collection_name=self.collection_name,
+                sparse_vectors_config={
+                    self.sparse_vector_name: models.SparseVectorParams(
+                        modifier=models.Modifier.IDF,
+                    )
+                },
+            )
+            logger.info(
+                "Successfully added sparse vector schema to existing collection",
+                collection=self.collection_name,
+                sparse_vector=self.sparse_vector_name,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Failed to dynamically add sparse vector schema to existing collection",
+                collection=self.collection_name,
+                sparse_vector=self.sparse_vector_name,
+                error=str(exc),
+            )
+            raise QdrantVectorStoreError(
+                f"Collection '{self.collection_name}' is missing sparse vector "
+                f"'{self.sparse_vector_name}', and updating collection schema "
+                f"failed: {exc}. Existing collection data has been preserved; "
+                f"please ensure Qdrant server version supports dynamic sparse "
+                f"vector addition or run manual migration."
+            ) from exc
 
     def _validate_collection_vectors(self, info: Any) -> None:
         """Validate that an existing collection's vector configuration is compatible."""
@@ -275,10 +356,21 @@ class QdrantVectorStore:
         self,
         document_id: str,
         document: EmbeddedDocument,
+        sparse_vectors: list[SparseVector] | None = None,
     ) -> list[models.PointStruct]:
-        """Convert all EmbeddedChunk objects to Qdrant PointStruct instances."""
+        """
+        Convert all EmbeddedChunk objects to Qdrant PointStruct instances.
+        Supports both dense-only points (for backward compatibility) and hybrid
+        points containing both unnamed dense and named sparse BM25 vectors.
+        """
+        if sparse_vectors is not None and len(sparse_vectors) != len(document.chunks):
+            raise QdrantVectorStoreError(
+                f"Mismatch between chunks ({len(document.chunks)}) and sparse vectors "
+                f"({len(sparse_vectors)}) for document '{document_id}'."
+            )
+
         points: list[models.PointStruct] = []
-        for chunk in document.chunks:
+        for idx, chunk in enumerate(document.chunks):
             point_id = generate_point_id(document_id, chunk.chunk_index)
             payload = {
                 "document_id": document_id,
@@ -290,13 +382,29 @@ class QdrantVectorStore:
                 "page_numbers": list(chunk.page_numbers),
                 "block_types": list(chunk.block_types),
             }
-            points.append(
-                models.PointStruct(
-                    id=point_id,
-                    vector=chunk.embedding,
-                    payload=payload,
+
+            if sparse_vectors is not None:
+                sv = sparse_vectors[idx]
+                qdrant_sparse = sv.to_qdrant() if isinstance(sv, SparseVector) else sv
+                vector_dict: dict[str, Any] = {
+                    "": chunk.embedding,
+                    self.sparse_vector_name: qdrant_sparse,
+                }
+                points.append(
+                    models.PointStruct(
+                        id=point_id,
+                        vector=vector_dict,
+                        payload=payload,
+                    )
                 )
-            )
+            else:
+                points.append(
+                    models.PointStruct(
+                        id=point_id,
+                        vector=chunk.embedding,
+                        payload=payload,
+                    )
+                )
         return points
 
     async def _upsert_batch(self, batch: list[models.PointStruct]) -> None:
@@ -323,6 +431,7 @@ class QdrantVectorStore:
         self,
         document_id: str,
         document: EmbeddedDocument,
+        sparse_vectors: list[SparseVector] | None = None,
     ) -> int:
         """
         Synchronize Qdrant vector index with an EmbeddedDocument.
@@ -331,9 +440,10 @@ class QdrantVectorStore:
         1. Ensure collection exists and validate vector configuration.
         2. Delete any existing points for document_id (stale chunks cleanup).
         3. If document.chunks is empty, return 0.
-        4. Convert chunks to deterministic PointStructs.
-        5. Batch upsert points according to batch_size.
-        6. Return total points written.
+        4. Resolve sparse vectors (parameter or self.sparse_embedder if set).
+        5. Convert chunks to deterministic PointStructs.
+        6. Batch upsert points according to batch_size.
+        7. Return total points written.
         """
         await self.ensure_collection()
         await self.delete_document_points(document_id)
@@ -347,7 +457,27 @@ class QdrantVectorStore:
             )
             return 0
 
-        points = self.convert_to_points(document_id, document)
+        resolved_sparse = sparse_vectors
+        if resolved_sparse is None and self.sparse_embedder is not None:
+            try:
+                resolved_sparse = self.sparse_embedder.embed_texts(
+                    [chunk.content for chunk in document.chunks]
+                )
+            except Exception as exc:
+                logger.exception(
+                    "Failed to generate sparse vectors during indexing",
+                    document_id=document_id,
+                    error=str(exc),
+                )
+                raise QdrantVectorStoreError(
+                    f"Failed to generate sparse vectors for doc '{document_id}': {exc}"
+                ) from exc
+
+        points = self.convert_to_points(
+            document_id,
+            document,
+            sparse_vectors=resolved_sparse,
+        )
         total_points = len(points)
 
         for i in range(0, total_points, self.batch_size):
@@ -506,6 +636,159 @@ class QdrantVectorStore:
 
         return [
             self.convert_scored_point(point, rank=idx + 1)
+            for idx, point in enumerate(points)
+        ]
+
+    def convert_scored_sparse_point(
+        self,
+        point: Any,
+        rank: int | None = None,
+    ) -> SparseSearchResult:
+        """
+        Convert a raw Qdrant ScoredPoint into an application-level SparseSearchResult.
+
+        Validates all required payload fields and preserves the exact Qdrant
+        similarity score (BM25 IDF score).
+
+        Raises:
+            QdrantVectorStoreError: If point payload is missing, incomplete,
+                or malformed.
+        """
+        point_id = getattr(point, "id", None)
+        payload = getattr(point, "payload", None)
+        score = getattr(point, "score", None)
+
+        if not isinstance(payload, dict):
+            raise QdrantVectorStoreError(
+                f"Missing or invalid payload dictionary in Qdrant point '{point_id}'."
+            )
+
+        if score is None:
+            raise QdrantVectorStoreError(
+                f"Missing similarity score in Qdrant point '{point_id}'."
+            )
+
+        required_fields = (
+            "document_id",
+            "chunk_index",
+            "content",
+            "token_count",
+            "start_page",
+            "end_page",
+            "page_numbers",
+            "block_types",
+        )
+        for field in required_fields:
+            if field not in payload or payload[field] is None:
+                raise QdrantVectorStoreError(
+                    f"Missing required payload field '{field}' in Qdrant "
+                    f"point '{point_id}'."
+                )
+
+        try:
+            return SparseSearchResult(
+                point_id=str(point_id),
+                score=float(score),
+                document_id=str(payload["document_id"]),
+                chunk_index=int(payload["chunk_index"]),
+                content=str(payload["content"]),
+                token_count=int(payload["token_count"]),
+                start_page=int(payload["start_page"]),
+                end_page=int(payload["end_page"]),
+                page_numbers=list(payload["page_numbers"]),
+                block_types=list(payload["block_types"]),
+                rank=rank,
+            )
+        except (ValueError, TypeError) as exc:
+            raise QdrantVectorStoreError(
+                f"Invalid payload field types in Qdrant point '{point_id}': {exc}"
+            ) from exc
+
+    async def search_sparse(
+        self,
+        query_vector: SparseVector | models.SparseVector,
+        limit: int,
+        document_id: str | None = None,
+        score_threshold: float | None = None,
+    ) -> list[SparseSearchResult]:
+        """
+        Execute sparse lexical search on named BM25 vectors in Qdrant.
+
+        Args:
+            query_vector: SparseVector or Qdrant models.SparseVector for query.
+            limit: Maximum number of Top-K results to return (must be > 0).
+            document_id: Optional document ID to filter points server-side.
+            score_threshold: Optional similarity score threshold.
+
+        Returns:
+            Ordered list of SparseSearchResult items preserving Qdrant ranking.
+
+        Raises:
+            QdrantVectorStoreError: If parameters are invalid, the search request fails,
+                                    or result payloads are missing/malformed.
+        """
+        if query_vector is None:
+            raise QdrantVectorStoreError("query_vector must not be None.")
+
+        if isinstance(query_vector, SparseVector):
+            qdrant_query = query_vector.to_qdrant()
+        elif isinstance(query_vector, models.SparseVector):
+            qdrant_query = query_vector
+        else:
+            raise QdrantVectorStoreError(
+                f"query_vector must be a SparseVector or models.SparseVector, "
+                f"got {type(query_vector)}."
+            )
+
+        # If query vector has no active indices (e.g. stopwords only), return empty
+        if not qdrant_query.indices:
+            return []
+
+        if limit <= 0:
+            raise QdrantVectorStoreError(f"limit must be positive, got {limit}.")
+
+        query_filter: models.Filter | None = None
+        if document_id is not None:
+            query_filter = models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="document_id",
+                        match=models.MatchValue(value=document_id),
+                    )
+                ]
+            )
+
+        try:
+            response = await self.client.query_points(
+                collection_name=self.collection_name,
+                query=qdrant_query,
+                using=self.sparse_vector_name,
+                limit=limit,
+                query_filter=query_filter,
+                score_threshold=score_threshold,
+                with_payload=True,
+                with_vectors=False,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Failed to execute sparse search query in Qdrant",
+                collection=self.collection_name,
+                sparse_vector_name=self.sparse_vector_name,
+                limit=limit,
+                document_id=document_id,
+                error=str(exc),
+            )
+            raise QdrantVectorStoreError(
+                f"Failed to query sparse vectors from collection "
+                f"'{self.collection_name}': {exc}"
+            ) from exc
+
+        points = getattr(response, "points", None)
+        if points is None:
+            return []
+
+        return [
+            self.convert_scored_sparse_point(point, rank=idx + 1)
             for idx, point in enumerate(points)
         ]
 

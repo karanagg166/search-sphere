@@ -5,7 +5,8 @@ import pytest
 from qdrant_client import AsyncQdrantClient, models
 
 from src.processing.models.document import EmbeddedChunk, EmbeddedDocument
-from src.processing.models.search import DenseSearchResult
+from src.processing.models.search import DenseSearchResult, SparseSearchResult
+from src.processing.models.sparse_vector import SparseVector
 from src.vector_store import (
     QdrantVectorStore,
     QdrantVectorStoreError,
@@ -135,6 +136,10 @@ async def test_ensure_collection_creates_when_missing() -> None:
     assert isinstance(vectors_config, models.VectorParams)
     assert vectors_config.size == 384
     assert vectors_config.distance == models.Distance.COSINE
+    sparse_config = kwargs.get("sparse_vectors_config")
+    assert isinstance(sparse_config, dict)
+    assert "bm25" in sparse_config
+    assert sparse_config["bm25"].modifier == models.Modifier.IDF
 
     # Payload index must be created
     mock_client.create_payload_index.assert_awaited_once_with(
@@ -155,6 +160,9 @@ async def test_ensure_collection_skips_creation_when_valid() -> None:
         size=384,
         distance=models.Distance.COSINE,
     )
+    mock_info.config.params.sparse_vectors = {
+        "bm25": models.SparseVectorParams(modifier=models.Modifier.IDF)
+    }
     mock_info.payload_schema = {"document_id": MagicMock()}
     mock_client.get_collection.return_value = mock_info
 
@@ -168,9 +176,78 @@ async def test_ensure_collection_skips_creation_when_valid() -> None:
 
     mock_client.collection_exists.assert_awaited_once_with("existing_col")
     mock_client.get_collection.assert_awaited_once_with("existing_col")
-    # Must NOT recreate collection or index
+    # Must NOT recreate collection or update
     mock_client.create_collection.assert_not_called()
+    mock_client.update_collection.assert_not_called()
     mock_client.create_payload_index.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ensure_collection_existing_missing_sparse_schema_safe_addition() -> None:
+    """Safely add sparse schema via update_collection when missing without deleting."""
+    mock_client = AsyncMock()
+    mock_client.collection_exists.return_value = True
+
+    mock_info = MagicMock()
+    mock_info.config.params.vectors = models.VectorParams(
+        size=384,
+        distance=models.Distance.COSINE,
+    )
+    # sparse_vectors is missing or empty
+    mock_info.config.params.sparse_vectors = None
+    mock_info.payload_schema = {"document_id": MagicMock()}
+    mock_client.get_collection.return_value = mock_info
+
+    store = QdrantVectorStore(
+        client=mock_client,
+        collection_name="legacy_col",
+        vector_dimension=384,
+    )
+
+    await store.ensure_collection()
+
+    # Must call update_collection with sparse schema
+    mock_client.update_collection.assert_awaited_once()
+    _, kwargs = mock_client.update_collection.call_args
+    assert kwargs["collection_name"] == "legacy_col"
+    assert "bm25" in kwargs["sparse_vectors_config"]
+    assert kwargs["sparse_vectors_config"]["bm25"].modifier == models.Modifier.IDF
+
+    # Must NOT delete or recreate collection
+    mock_client.create_collection.assert_not_called()
+    mock_client.delete_collection.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ensure_collection_sparse_schema_failure_preserves_data() -> None:
+    """When safe update fails, raise QdrantVectorStoreError without deleting."""
+    mock_client = AsyncMock()
+    mock_client.collection_exists.return_value = True
+
+    mock_info = MagicMock()
+    mock_info.config.params.vectors = models.VectorParams(
+        size=384,
+        distance=models.Distance.COSINE,
+    )
+    mock_info.config.params.sparse_vectors = {}
+    mock_info.payload_schema = {"document_id": MagicMock()}
+    mock_client.get_collection.return_value = mock_info
+    mock_client.update_collection.side_effect = RuntimeError(
+        "Update not supported by server version"
+    )
+
+    store = QdrantVectorStore(
+        client=mock_client,
+        collection_name="legacy_col",
+        vector_dimension=384,
+    )
+
+    with pytest.raises(QdrantVectorStoreError, match="missing sparse vector 'bm25'"):
+        await store.ensure_collection()
+
+    # Must NEVER recreate or delete
+    mock_client.create_collection.assert_not_called()
+    mock_client.delete_collection.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -841,5 +918,306 @@ async def test_qdrant_search_dense_in_memory() -> None:
     assert len(top_1_results) == 1
     assert top_1_results[0].document_id == "doc-A"
     assert top_1_results[0].chunk_index == 0
+
+    await store.close()
+
+
+# ==============================================================================
+# 9. Sparse BM25 Vector Tests (Requirements 16-21, 35-42)
+# ==============================================================================
+
+
+def test_convert_to_points_with_sparse_vectors() -> None:
+    """EmbeddedChunk is converted to PointStruct with dense and sparse vectors."""
+    store = QdrantVectorStore(client=AsyncMock(), sparse_vector_name="bm25")
+    doc_id = "doc-sparse-001"
+
+    chunk = _create_sample_embedded_chunk(
+        chunk_index=0,
+        content="Lexical BM25 testing chunk",
+        embedding=[0.1] * 384,
+    )
+    embedded_doc = EmbeddedDocument(chunks=[chunk])
+    sparse_vecs = [SparseVector(indices=[10, 20], values=[1.5, 2.5])]
+
+    points = store.convert_to_points(doc_id, embedded_doc, sparse_vectors=sparse_vecs)
+
+    assert len(points) == 1
+    point = points[0]
+    assert point.id == generate_point_id(doc_id, 0)
+    assert isinstance(point.vector, dict)
+    assert point.vector[""] == [0.1] * 384
+    assert isinstance(point.vector["bm25"], models.SparseVector)
+    assert point.vector["bm25"].indices == [10, 20]
+    assert point.vector["bm25"].values == [1.5, 2.5]
+    # Payload unchanged
+    assert point.payload["document_id"] == doc_id
+    assert point.payload["content"] == "Lexical BM25 testing chunk"
+
+
+def test_convert_to_points_sparse_vector_length_mismatch_raises() -> None:
+    """Mismatch between chunks and sparse vectors raises QdrantVectorStoreError."""
+    store = QdrantVectorStore(client=AsyncMock())
+    doc = EmbeddedDocument(chunks=[_create_sample_embedded_chunk(chunk_index=0)])
+    with pytest.raises(QdrantVectorStoreError, match="Mismatch between chunks"):
+        store.convert_to_points("doc-1", doc, sparse_vectors=[])
+
+
+@pytest.mark.asyncio
+async def test_search_sparse_correct_parameters_passed() -> None:
+    """search_sparse passes using=bm25, query_vector, with_payload, and limit."""
+    mock_client = AsyncMock()
+    mock_response = MagicMock()
+    mock_scored_point = MagicMock()
+    mock_scored_point.id = "p-sparse-1"
+    mock_scored_point.score = 2.718
+    mock_scored_point.payload = {
+        "document_id": "doc-test",
+        "chunk_index": 0,
+        "content": "Sparse matched content",
+        "token_count": 3,
+        "start_page": 1,
+        "end_page": 1,
+        "page_numbers": [1],
+        "block_types": ["text"],
+    }
+    mock_response.points = [mock_scored_point]
+    mock_client.query_points.return_value = mock_response
+
+    store = QdrantVectorStore(
+        client=mock_client,
+        collection_name="sparse_test_col",
+        sparse_vector_name="bm25",
+    )
+
+    query = SparseVector(indices=[42, 84], values=[1.0, 1.0])
+    results = await store.search_sparse(
+        query_vector=query, limit=5, document_id="doc-test"
+    )
+
+    assert len(results) == 1
+    res = results[0]
+    assert isinstance(res, SparseSearchResult)
+    assert res.point_id == "p-sparse-1"
+    assert res.score == 2.718
+    assert res.rank == 1
+    assert res.content == "Sparse matched content"
+
+    mock_client.query_points.assert_awaited_once()
+    _, kwargs = mock_client.query_points.call_args
+    assert kwargs["collection_name"] == "sparse_test_col"
+    assert kwargs["using"] == "bm25"
+    assert kwargs["limit"] == 5
+    assert kwargs["with_payload"] is True
+    assert kwargs["with_vectors"] is False
+    assert kwargs["query"].indices == [42, 84]
+    assert kwargs["query_filter"] is not None
+
+
+@pytest.mark.asyncio
+async def test_search_sparse_empty_indices_returns_empty_without_querying() -> None:
+    """When query vector has no active indices (stopwords), returns [] immediately."""
+    mock_client = AsyncMock()
+    store = QdrantVectorStore(client=mock_client)
+
+    results = await store.search_sparse(
+        query_vector=SparseVector(indices=[], values=[]),
+        limit=10,
+    )
+    assert results == []
+    mock_client.query_points.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_search_sparse_invalid_limit_raises() -> None:
+    """limit <= 0 raises QdrantVectorStoreError."""
+    store = QdrantVectorStore(client=AsyncMock())
+    with pytest.raises(QdrantVectorStoreError, match="limit must be positive"):
+        await store.search_sparse(
+            query_vector=SparseVector(indices=[1], values=[1.0]),
+            limit=0,
+        )
+
+
+@pytest.mark.asyncio
+async def test_search_sparse_none_query_raises() -> None:
+    """query_vector=None raises QdrantVectorStoreError."""
+    store = QdrantVectorStore(client=AsyncMock())
+    with pytest.raises(QdrantVectorStoreError, match="must not be None"):
+        await store.search_sparse(query_vector=None, limit=10)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_search_sparse_malformed_payload_raises() -> None:
+    """Point missing required payload field raises QdrantVectorStoreError."""
+    mock_client = AsyncMock()
+    mock_response = MagicMock()
+    bad_point = MagicMock()
+    bad_point.id = "bad-p"
+    bad_point.score = 1.0
+    bad_point.payload = {"document_id": "doc-1"}  # Missing content, token_count, etc.
+    mock_response.points = [bad_point]
+    mock_client.query_points.return_value = mock_response
+
+    store = QdrantVectorStore(client=mock_client)
+    with pytest.raises(QdrantVectorStoreError, match="Missing required payload field"):
+        await store.search_sparse(
+            query_vector=SparseVector(indices=[1], values=[1.0]),
+            limit=5,
+        )
+
+
+@pytest.mark.asyncio
+async def test_search_sparse_query_failure_wrapped() -> None:
+    """Exceptions from client.query_points are wrapped into QdrantVectorStoreError."""
+    mock_client = AsyncMock()
+    mock_client.query_points.side_effect = RuntimeError("Qdrant connection reset")
+
+    store = QdrantVectorStore(client=mock_client)
+    with pytest.raises(QdrantVectorStoreError, match="Failed to query sparse vectors"):
+        await store.search_sparse(
+            query_vector=SparseVector(indices=[1], values=[1.0]),
+            limit=5,
+        )
+
+
+# ==============================================================================
+# 10. End-to-End In-Memory Integration Tests
+# ==============================================================================
+
+
+@pytest.mark.asyncio
+async def test_qdrant_store_sparse_search_end_to_end_in_memory() -> None:
+    """
+    Integration test using AsyncQdrantClient(":memory:"):
+    - creates collection with both dense and named sparse BM25 vector configs
+    - indexes points containing both representations
+    - executes sparse search with SparseVector
+    - verifies exact lexical match ranks first with BM25 IDF score
+    - verifies server-side document_id filter
+    """
+    client = AsyncQdrantClient(":memory:")
+    store = QdrantVectorStore(
+        client=client,
+        collection_name="sparse_mem_integration_test",
+        vector_dimension=384,
+        sparse_vector_name="bm25",
+    )
+
+    # Document 1: talks about ERR_CONNECTION_RESET
+    doc1 = EmbeddedDocument(
+        chunks=[
+            _create_sample_embedded_chunk(
+                chunk_index=0,
+                content="TCP failure: ERR_CONNECTION_RESET occurred on port 443.",
+                embedding=[0.01] * 384,
+            )
+        ]
+    )
+    sv1 = [SparseVector(indices=[1001, 1002], values=[2.0, 1.5])]
+
+    # Document 2: talks about RabbitMQ
+    doc2 = EmbeddedDocument(
+        chunks=[
+            _create_sample_embedded_chunk(
+                chunk_index=0,
+                content="RabbitMQ message broker dispatching ingestion tasks.",
+                embedding=[0.02] * 384,
+            )
+        ]
+    )
+    sv2 = [SparseVector(indices=[2001, 2002], values=[2.0, 1.5])]
+
+    await store.index_document("doc-conn-reset", doc1, sparse_vectors=sv1)
+    await store.index_document("doc-rabbitmq", doc2, sparse_vectors=sv2)
+
+    # Search for token 1001 (ERR_CONNECTION_RESET)
+    query_sv = SparseVector(indices=[1001], values=[1.0])
+    results = await store.search_sparse(query_vector=query_sv, limit=5)
+
+    assert len(results) == 1
+    assert results[0].document_id == "doc-conn-reset"
+    assert "ERR_CONNECTION_RESET" in results[0].content
+    assert results[0].score > 0
+    assert results[0].rank == 1
+
+    # Search for token 2001 (RabbitMQ) with document_id filter for doc-rabbitmq
+    query_rabbit = SparseVector(indices=[2001], values=[1.0])
+    rabbit_results = await store.search_sparse(
+        query_vector=query_rabbit,
+        limit=5,
+        document_id="doc-rabbitmq",
+    )
+    assert len(rabbit_results) == 1
+    assert rabbit_results[0].document_id == "doc-rabbitmq"
+    assert "RabbitMQ" in rabbit_results[0].content
+
+    # Search with filter that excludes match
+    no_results = await store.search_sparse(
+        query_vector=query_rabbit,
+        limit=5,
+        document_id="doc-conn-reset",
+    )
+    assert len(no_results) == 0
+
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_real_bm25_lexical_retrieval_integration() -> None:
+    """
+    Integration test with FastEmbed BM25Embedder and in-memory Qdrant:
+    1. Chunks:
+       - "Error code ERR_CONNECTION_RESET occurs when TCP is closed."
+       - "RabbitMQ delivers document processing jobs."
+       - "The image caption model describes visual content."
+    2. Query "ERR_CONNECTION_RESET" -> Chunk 1 ranks first!
+    3. Query "RabbitMQ" -> Chunk 2 ranks first!
+    """
+    try:
+        from src.processing.sparse_embedding import BM25Embedder
+
+        embedder = BM25Embedder()
+    except Exception:
+        pytest.skip("FastEmbed or model not available for live model test")
+
+    client = AsyncQdrantClient(":memory:")
+    store = QdrantVectorStore(
+        client=client,
+        collection_name="real_bm25_test",
+        vector_dimension=384,
+        sparse_vector_name="bm25",
+        sparse_embedder=embedder,
+    )
+
+    texts = [
+        "Error code ERR_CONNECTION_RESET occurs when TCP connection is reset.",
+        "RabbitMQ delivers document processing jobs.",
+        "The image caption model describes visual content.",
+    ]
+    chunks = [
+        _create_sample_embedded_chunk(
+            chunk_index=idx, content=text, embedding=[0.05] * 384
+        )
+        for idx, text in enumerate(texts)
+    ]
+    doc = EmbeddedDocument(chunks=chunks)
+
+    # Index document with auto-generated BM25 sparse vectors
+    await store.index_document("doc-real-bm25", doc)
+
+    # 1. Query for exact technical error code
+    query_reset = embedder.embed_query("ERR_CONNECTION_RESET")
+    results_reset = await store.search_sparse(query_vector=query_reset, limit=3)
+    assert len(results_reset) >= 1
+    assert results_reset[0].chunk_index == 0
+    assert "ERR_CONNECTION_RESET" in results_reset[0].content
+
+    # 2. Query for keyword "RabbitMQ"
+    query_rabbit = embedder.embed_query("RabbitMQ")
+    results_rabbit = await store.search_sparse(query_vector=query_rabbit, limit=3)
+    assert len(results_rabbit) >= 1
+    assert results_rabbit[0].chunk_index == 1
+    assert "RabbitMQ delivers" in results_rabbit[0].content
 
     await store.close()

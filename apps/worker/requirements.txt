@@ -21,6 +21,7 @@ sentence-transformers>=3.0.0
 transformers>=4.44.0
 accelerate>=0.33.0
 qdrant-client>=1.11.0
+fastembed>=0.3.0
 tiktoken>=0.7.0
 
 # LLM Provider SDKs

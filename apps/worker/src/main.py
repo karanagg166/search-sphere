@@ -23,4 +23,3 @@ __all__ = ["process_document_task"]
 
 if __name__ == "__main__":
     logger.info("Worker process starting up...")
-
