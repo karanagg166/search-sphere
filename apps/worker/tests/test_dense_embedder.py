@@ -45,7 +45,6 @@ def clean_embedder_cache() -> Iterator[None]:
     DenseEmbedder._clear_cache()
 
 
-
 def test_exception_hierarchy() -> None:
     assert issubclass(DenseEmbeddingError, Exception)
     assert issubclass(EmbeddingError, Exception)
@@ -185,9 +184,7 @@ def test_normalization_flag_passed() -> None:
 
 def test_lazy_loading() -> None:
     """Model is not instantiated until embedding is requested."""
-    with patch(
-        "sentence_transformers.SentenceTransformer"
-    ) as mock_st_cls:
+    with patch("sentence_transformers.SentenceTransformer") as mock_st_cls:
         mock_instance = MagicMock()
         mock_instance.encode.return_value = [[0.1] * DEFAULT_EMBEDDING_DIMENSION]
         mock_st_cls.return_value = mock_instance
@@ -207,9 +204,7 @@ def test_lazy_loading() -> None:
 
 def test_model_reuse_across_invocations() -> None:
     """Calling embed_document multiple times reuses the same loaded model instance."""
-    with patch(
-        "sentence_transformers.SentenceTransformer"
-    ) as mock_st_cls:
+    with patch("sentence_transformers.SentenceTransformer") as mock_st_cls:
         mock_instance = MagicMock()
         mock_instance.encode.return_value = [[0.1] * DEFAULT_EMBEDDING_DIMENSION]
         mock_st_cls.return_value = mock_instance

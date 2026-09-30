@@ -1,4 +1,4 @@
-.PHONY: help build up down down-v restart status logs logs-api logs-worker logs-web logs-qdrant logs-postgres shell-api shell-worker shell-web shell-db shell-redis test lint format clean
+.PHONY: help build up down down-v restart status logs logs-api logs-worker logs-web shell-api shell-worker shell-web test test-worker test-all lint format clean
 
 help: ## Show available commands
 	@echo "Search Sphere Monorepo Commands:"
@@ -32,17 +32,28 @@ logs: ## View and stream logs from all services
 logs-api: ## View and stream logs from the FastAPI backend service
 	docker compose logs -f api
 
+logs-worker: ## View and stream logs from the Dramatiq worker service
+	docker compose logs -f worker
+
 logs-web: ## View and stream logs from the Next.js frontend service
 	docker compose logs -f web
 
 shell-api: ## Open an interactive bash shell in the API container
 	docker compose exec api bash
 
+shell-worker: ## Open an interactive shell in the worker container
+	docker compose exec worker bash
+
 shell-web: ## Open an interactive shell in the Next.js web container
 	docker compose exec web sh
 
 test: ## Run test suite in the API container
 	docker compose exec api pytest
+
+test-worker: ## Run test suite for the worker service
+	docker compose run --rm worker pytest
+
+test-all: test test-worker ## Run both API and Worker test suites
 
 lint: ## Run linter and type-checker in the API container
 	docker compose exec api ruff check .

@@ -158,4 +158,3 @@ class EmbeddedDocument:
         if not self.chunks:
             return None
         return len(self.chunks[0].embedding)
-

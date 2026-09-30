@@ -26,10 +26,12 @@ search-sphere/
 | Service | Hosting | Technology | Port / URL | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | **web** | Local Docker | Next.js 16 + React 19 | [http://localhost:3000](http://localhost:3000) | Web UI Dashboard |
-| **api** | Local Docker | FastAPI + Python 3.12 | [http://localhost:8000/docs](http://localhost:8000/docs) | Backend REST API & Async Tasks |
-| **database** | Cloud (Supabase) | PostgreSQL 17 | `aws-0-ap-northeast-2.pooler.supabase.com:5432` | Relational Metadata DB |
+| **api** | Local Docker | FastAPI + Python 3.12 | [http://localhost:8000/docs](http://localhost:8000/docs) | Backend REST API & Task Dispatcher |
+| **worker** | Local Docker | Dramatiq + Python 3.12 | Background Service | Async Document Ingestion Worker |
+| **database** | Cloud (Supabase) | PostgreSQL 17 | Supabase Cloud | Relational Metadata DB |
 | **storage** | Cloud (Supabase) | Supabase Storage | `documents` bucket | Cloud Object Storage |
-| **vector db** | Cloud (Qdrant) | Qdrant Cloud | `https://05eee4ff-130e...aws.cloud.qdrant.io` | Distributed Vector Search |
+| **vector db** | Cloud (Qdrant) | Qdrant Cloud | Managed Cluster | Distributed Vector Search |
+| **message broker**| Cloud (CloudAMQP) | RabbitMQ | Cloud AMQP URL | Async Task Queue |
 
 ---
 
@@ -60,8 +62,7 @@ docker compose up -d
 - Next.js Web: [http://localhost:3000](http://localhost:3000)
 - FastAPI Health: [http://localhost:8000/health](http://localhost:8000/health)
 - FastAPI Interactive Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
-- MinIO Web Console: [http://localhost:9001](http://localhost:9001) (Credentials: `minioadmin` / `minioadmin`)
-- Qdrant REST API: [http://localhost:6333](http://localhost:6333)
+- Worker: Background worker processing async ingestion tasks
 
 ---
 

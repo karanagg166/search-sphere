@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 
@@ -110,8 +110,10 @@ async def test_process_document_success_sequence(
     assert "[Image text: Diagram V1]" in first_chunk.content
     assert "[Image description: Architecture workflow chart]" in first_chunk.content
 
-    # 6. Vector store indexed with produced EmbeddedDocument
-    mock_vector_store.index_document.assert_awaited_once_with(doc_id, embedded_doc)
+    # 6. Vector store indexed with produced EmbeddedDocument and sparse vectors
+    mock_vector_store.index_document.assert_awaited_once_with(
+        doc_id, embedded_doc, sparse_vectors=ANY
+    )
 
 
 @pytest.mark.asyncio
@@ -171,8 +173,10 @@ async def test_process_document_handles_empty_and_noisy_blocks(
     assert embedded_doc.chunks[0].content == "Meaningful content line."
     assert len(embedded_doc.chunks[0].embedding) == 384
 
-    # Vector store indexing called
-    mock_vector_store.index_document.assert_awaited_once_with(doc_id, embedded_doc)
+    # Vector store indexing called with sparse vectors
+    mock_vector_store.index_document.assert_awaited_once_with(
+        doc_id, embedded_doc, sparse_vectors=ANY
+    )
 
 
 @pytest.mark.asyncio
@@ -429,5 +433,7 @@ async def test_process_document_end_to_end_pipeline(
     assert embedded_document.chunks[0].start_page == 1
     assert len(embedded_document.chunks[0].embedding) == 384
 
-    # Vector store must have been invoked with exact document_id and embedded_document
-    mock_vector_store.index_document.assert_awaited_once_with(doc_id, embedded_document)
+    # Vector store invoked with document_id, embedded_doc, and sparse_vectors
+    mock_vector_store.index_document.assert_awaited_once_with(
+        doc_id, embedded_document, sparse_vectors=ANY
+    )

@@ -52,9 +52,7 @@ class DocumentFetcher:
         content = await self.storage.download(document.storage_key)
 
         if not content:
-            raise RuntimeError(
-                f"Downloaded document is empty: {document_id}"
-            )
+            raise RuntimeError(f"Downloaded document is empty: {document_id}")
 
         logger.info(
             "Document downloaded for processing",
@@ -74,9 +72,7 @@ class DocumentFetcher:
 
         async with AsyncSessionLocal() as session:
             result = await session.execute(
-                select(Document).where(
-                    Document.id == document_id
-                )
+                select(Document).where(Document.id == document_id)
             )
 
             document = result.scalar_one_or_none()
@@ -87,8 +83,6 @@ class DocumentFetcher:
                 document_id=document_id,
             )
 
-            raise ValueError(
-                f"Document not found: {document_id}"
-            )
+            raise ValueError(f"Document not found: {document_id}")
 
         return document

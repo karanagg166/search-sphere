@@ -9,7 +9,7 @@ from src.tasks.document_tasks import broker, enqueue_document, process_document_
 def test_rabbitmq_broker_configuration():
     """Verify that the Dramatiq broker is configured as a RabbitmqBroker using RABBITMQ_URL."""
     assert isinstance(broker, RabbitmqBroker)
-    assert settings.RABBITMQ_URL.startswith("amqp://")
+    assert settings.RABBITMQ_URL.startswith(("amqp://", "amqps://"))
     assert process_document_task.actor_name == "process_document_task"
     assert process_document_task.queue_name == "default"
 

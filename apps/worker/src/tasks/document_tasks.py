@@ -14,6 +14,10 @@ from src.processing.extraction import (
     DocumentExtractor,
 )
 from src.processing.models.document import EmbeddedDocument
+from src.processing.sparse_embedding import (
+    BM25Embedder,
+    SparseEmbeddingError,
+)
 from src.services.document_fetcher import DocumentFetcher
 from src.vector_store import QdrantVectorStore, QdrantVectorStoreError
 
@@ -55,6 +59,7 @@ async def _process_document(
     cleaner: TextCleaner | None = None,
     chunker: DocumentChunker | None = None,
     embedder: DenseEmbedder | None = None,
+    sparse_embedder: BM25Embedder | None = None,
     vector_store: QdrantVectorStore | None = None,
 ) -> EmbeddedDocument:
     logger.info(
@@ -67,7 +72,10 @@ async def _process_document(
     doc_cleaner = cleaner or TextCleaner()
     doc_chunker = chunker or DocumentChunker()
     doc_embedder = embedder or DenseEmbedder()
-    doc_vector_store = vector_store or QdrantVectorStore()
+    doc_sparse_embedder = sparse_embedder or BM25Embedder()
+    doc_vector_store = vector_store or QdrantVectorStore(
+        sparse_embedder=doc_sparse_embedder
+    )
 
     try:
         fetched_document = await doc_fetcher.fetch(document_id)
@@ -154,9 +162,19 @@ async def _process_document(
             ),
         )
 
+        sparse_vectors = doc_sparse_embedder.embed_chunks(chunked_document.chunks)
+
+        logger.info(
+            "Document sparse BM25 embedding completed",
+            document_id=document_id,
+            chunks=len(sparse_vectors),
+            sparse_model=doc_sparse_embedder.model_name,
+        )
+
         points_written = await doc_vector_store.index_document(
             document_id,
             embedded_document,
+            sparse_vectors=sparse_vectors,
         )
 
         logger.info(
@@ -178,7 +196,15 @@ async def _process_document(
 
     except DenseEmbeddingError as exc:
         logger.error(
-            "Document embedding generation failed",
+            "Document dense embedding generation failed",
+            document_id=document_id,
+            error=str(exc),
+        )
+        raise
+
+    except SparseEmbeddingError as exc:
+        logger.error(
+            "Document sparse embedding generation failed",
             document_id=document_id,
             error=str(exc),
         )
