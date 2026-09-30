@@ -10,6 +10,7 @@ from src.processing.models.document import (
     ExtractedDocument,
     ExtractedPage,
 )
+from src.processing.models.search import DenseSearchResult
 
 __all__ = [
     "ExtractedBlock",
@@ -22,5 +23,6 @@ __all__ = [
     "ChunkedDocument",
     "EmbeddedChunk",
     "EmbeddedDocument",
+    "DenseSearchResult",
 ]
 
