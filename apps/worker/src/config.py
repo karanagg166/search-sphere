@@ -94,6 +94,15 @@ class Settings(BaseSettings):
     HYBRID_SEARCH_MAX_TOP_K: int = 100
 
     # ------------------------------------------------------------------
+    # Cross-Encoder Reranking
+    # ------------------------------------------------------------------
+    RERANKER_MODEL_NAME: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    RERANKER_BATCH_SIZE: int = 32
+    RERANKER_TOP_K: int = 5
+    RERANKER_MAX_TOP_K: int = 100
+    RERANKER_DEVICE: str = "cpu"
+
+    # ------------------------------------------------------------------
     # Redis
     # Redis is NOT the worker queue anymore.
     # Keep configuration available for future caching/temporary state.

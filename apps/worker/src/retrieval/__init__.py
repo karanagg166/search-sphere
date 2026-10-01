@@ -1,6 +1,7 @@
 from src.processing.models.search import (
     DenseSearchResult,
     HybridSearchResult,
+    RerankedSearchResult,
     SparseSearchResult,
 )
 from src.retrieval.dense_retriever import (
@@ -13,6 +14,18 @@ from src.retrieval.hybrid_retriever import (
     HybridQueryValidationError,
     HybridRetrievalError,
     HybridRetriever,
+)
+from src.retrieval.reranked_retriever import (
+    RerankedHybridRetriever,
+    RerankedQueryValidationError,
+    RerankedRetrievalError,
+)
+from src.retrieval.reranker import (
+    CrossEncoderReranker,
+    RerankerError,
+    RerankerValidationError,
+    RerankingError,
+    RerankingValidationError,
 )
 from src.retrieval.sparse_retriever import (
     SparseQueryValidationError,
@@ -34,4 +47,13 @@ __all__ = [
     "HybridRetrievalError",
     "HybridQueryValidationError",
     "HybridSearchResult",
+    "CrossEncoderReranker",
+    "RerankingError",
+    "RerankingValidationError",
+    "RerankerError",
+    "RerankerValidationError",
+    "RerankedSearchResult",
+    "RerankedHybridRetriever",
+    "RerankedRetrievalError",
+    "RerankedQueryValidationError",
 ]
