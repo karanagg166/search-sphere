@@ -93,6 +93,13 @@ class Settings(BaseSettings):
     QUERY_REWRITE_TIMEOUT_SECONDS: float = 5.0
     QUERY_REWRITE_MAX_CONTEXT_MESSAGES: int = 5
 
+    # Grounded RAG Answer Generation (Cohere)
+    RAG_GENERATION_MODEL: str = "command-r-08-2024"
+    RAG_GENERATION_ENABLED: bool = True
+    RAG_GENERATION_TIMEOUT_SECONDS: float = 15.0
+    RAG_MAX_CONTEXT_CHUNKS: int = 5
+    RAG_TEMPERATURE: float = 0.1
+
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
