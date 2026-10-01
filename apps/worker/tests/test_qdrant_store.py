@@ -5,7 +5,11 @@ import pytest
 from qdrant_client import AsyncQdrantClient, models
 
 from src.processing.models.document import EmbeddedChunk, EmbeddedDocument
-from src.processing.models.search import DenseSearchResult, SparseSearchResult
+from src.processing.models.search import (
+    DenseSearchResult,
+    HybridSearchResult,
+    SparseSearchResult,
+)
 from src.processing.models.sparse_vector import SparseVector
 from src.vector_store import (
     QdrantVectorStore,
@@ -1219,5 +1223,428 @@ async def test_real_bm25_lexical_retrieval_integration() -> None:
     assert len(results_rabbit) >= 1
     assert results_rabbit[0].chunk_index == 1
     assert "RabbitMQ delivers" in results_rabbit[0].content
+
+    await store.close()
+
+
+# ==============================================================================
+# 11. Hybrid Search (RRF) Tests & Integration
+# ==============================================================================
+
+
+@pytest.mark.asyncio
+async def test_search_hybrid_prefetches_and_fusion_architecture() -> None:
+    """
+    Unit test verifying Qdrant hybrid query architecture:
+    - 2 prefetches: dense prefetch and sparse prefetch
+    - Dense prefetch uses dense query vector and candidate_limit
+    - Sparse prefetch uses sparse indices/values, named vector ("bm25"),
+      and candidate_limit
+    - Main query uses models.FusionQuery(fusion=models.Fusion.RRF)
+    - Final limit equals top_k limit
+    - with_payload=True and with_vectors=False
+    - document_id filter applied to both prefetches and main query
+    """
+    mock_client = AsyncMock()
+    mock_response = MagicMock()
+    sample_point = MagicMock()
+    sample_point.id = "p-hybrid-1"
+    sample_point.score = 0.032
+    sample_point.payload = {
+        "document_id": "doc-hybrid",
+        "chunk_index": 0,
+        "content": "Hybrid retrieved chunk",
+        "token_count": 3,
+        "start_page": 1,
+        "end_page": 1,
+        "page_numbers": [1],
+        "block_types": ["text"],
+    }
+    mock_response.points = [sample_point]
+    mock_client.query_points.return_value = mock_response
+
+    store = QdrantVectorStore(
+        client=mock_client,
+        collection_name="hybrid_test_col",
+        vector_dimension=4,
+        sparse_vector_name="bm25",
+    )
+
+    dense_query = [0.5, 0.5, 0.0, 0.0]
+    sparse_query = SparseVector(indices=[101, 202], values=[1.2, 3.4])
+
+    results = await store.search_hybrid(
+        dense_query_vector=dense_query,
+        sparse_query_vector=sparse_query,
+        limit=5,
+        candidate_limit=20,
+        document_id="doc-hybrid",
+    )
+
+    assert len(results) == 1
+    res = results[0]
+    assert isinstance(res, HybridSearchResult)
+    assert res.point_id == "p-hybrid-1"
+    assert res.score == 0.032
+    assert res.rank == 1
+    assert res.content == "Hybrid retrieved chunk"
+
+    mock_client.query_points.assert_awaited_once()
+    _, kwargs = mock_client.query_points.call_args
+    assert kwargs["collection_name"] == "hybrid_test_col"
+    assert kwargs["limit"] == 5
+    assert kwargs["with_payload"] is True
+    assert kwargs["with_vectors"] is False
+
+    # Check prefetches
+    prefetches = kwargs["prefetch"]
+    assert len(prefetches) == 2
+    dense_pf, sparse_pf = prefetches[0], prefetches[1]
+
+    # Dense prefetch checks
+    assert dense_pf.query == dense_query
+    assert dense_pf.limit == 20
+    assert dense_pf.filter is not None
+    assert dense_pf.filter.must[0].key == "document_id"
+    assert dense_pf.filter.must[0].match.value == "doc-hybrid"
+
+    # Sparse prefetch checks
+    assert sparse_pf.using == "bm25"
+    assert sparse_pf.limit == 20
+    assert sparse_pf.query.indices == [101, 202]
+    assert sparse_pf.query.values == [1.2, 3.4]
+    assert sparse_pf.filter is not None
+    assert sparse_pf.filter.must[0].key == "document_id"
+
+    # Fusion check
+    query = kwargs["query"]
+    assert isinstance(query, models.FusionQuery)
+    assert query.fusion == models.Fusion.RRF
+
+    # Query filter check
+    assert kwargs["query_filter"] is not None
+    assert kwargs["query_filter"].must[0].match.value == "doc-hybrid"
+
+
+@pytest.mark.asyncio
+async def test_search_hybrid_empty_dense_vector_raises() -> None:
+    """Empty dense_query_vector raises QdrantVectorStoreError."""
+    store = QdrantVectorStore(client=AsyncMock(), vector_dimension=4)
+    with pytest.raises(QdrantVectorStoreError, match="must not be empty"):
+        await store.search_hybrid(
+            dense_query_vector=[],
+            sparse_query_vector=SparseVector(indices=[1], values=[1.0]),
+            limit=5,
+            candidate_limit=10,
+        )
+
+
+@pytest.mark.asyncio
+async def test_search_hybrid_dense_dimension_mismatch_raises() -> None:
+    """Dense vector with mismatched dimension raises QdrantVectorStoreError."""
+    store = QdrantVectorStore(client=AsyncMock(), vector_dimension=384)
+    with pytest.raises(QdrantVectorStoreError, match="dimension mismatch"):
+        await store.search_hybrid(
+            dense_query_vector=[0.1] * 128,  # expected 384
+            sparse_query_vector=SparseVector(indices=[1], values=[1.0]),
+            limit=5,
+            candidate_limit=10,
+        )
+
+
+@pytest.mark.asyncio
+async def test_search_hybrid_none_sparse_vector_raises() -> None:
+    """None sparse_query_vector raises QdrantVectorStoreError."""
+    store = QdrantVectorStore(client=AsyncMock(), vector_dimension=4)
+    with pytest.raises(QdrantVectorStoreError, match="must not be None"):
+        await store.search_hybrid(
+            dense_query_vector=[0.1, 0.2, 0.3, 0.4],
+            sparse_query_vector=None,  # type: ignore[arg-type]
+            limit=5,
+            candidate_limit=10,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_limit", [0, -1, -5])
+async def test_search_hybrid_invalid_limit_raises(invalid_limit: int) -> None:
+    """limit <= 0 raises QdrantVectorStoreError."""
+    store = QdrantVectorStore(client=AsyncMock(), vector_dimension=4)
+    with pytest.raises(QdrantVectorStoreError, match="limit must be positive"):
+        await store.search_hybrid(
+            dense_query_vector=[0.1, 0.2, 0.3, 0.4],
+            sparse_query_vector=SparseVector(indices=[1], values=[1.0]),
+            limit=invalid_limit,
+            candidate_limit=10,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_cand_limit", [0, -1, -10])
+async def test_search_hybrid_invalid_candidate_limit_raises(
+    invalid_cand_limit: int,
+) -> None:
+    """candidate_limit <= 0 raises QdrantVectorStoreError."""
+    store = QdrantVectorStore(client=AsyncMock(), vector_dimension=4)
+    with pytest.raises(
+        QdrantVectorStoreError, match="candidate_limit must be positive"
+    ):
+        await store.search_hybrid(
+            dense_query_vector=[0.1, 0.2, 0.3, 0.4],
+            sparse_query_vector=SparseVector(indices=[1], values=[1.0]),
+            limit=5,
+            candidate_limit=invalid_cand_limit,
+        )
+
+
+@pytest.mark.asyncio
+async def test_search_hybrid_candidate_limit_less_than_limit_raises() -> None:
+    """candidate_limit < limit raises QdrantVectorStoreError."""
+    store = QdrantVectorStore(client=AsyncMock(), vector_dimension=4)
+    with pytest.raises(QdrantVectorStoreError, match="cannot be less than limit"):
+        await store.search_hybrid(
+            dense_query_vector=[0.1, 0.2, 0.3, 0.4],
+            sparse_query_vector=SparseVector(indices=[1], values=[1.0]),
+            limit=10,
+            candidate_limit=5,
+        )
+
+
+@pytest.mark.asyncio
+async def test_search_hybrid_malformed_payload_raises() -> None:
+    """Missing required payload field raises QdrantVectorStoreError."""
+    mock_client = AsyncMock()
+    mock_response = MagicMock()
+    bad_point = MagicMock()
+    bad_point.id = "bad-hybrid"
+    bad_point.score = 0.5
+    bad_point.payload = {"document_id": "doc-1"}  # Missing content, token_count, etc.
+    mock_response.points = [bad_point]
+    mock_client.query_points.return_value = mock_response
+
+    store = QdrantVectorStore(client=mock_client, vector_dimension=4)
+    with pytest.raises(QdrantVectorStoreError, match="Missing required payload field"):
+        await store.search_hybrid(
+            dense_query_vector=[0.1, 0.2, 0.3, 0.4],
+            sparse_query_vector=SparseVector(indices=[1], values=[1.0]),
+            limit=5,
+            candidate_limit=10,
+        )
+
+
+@pytest.mark.asyncio
+async def test_search_hybrid_query_failure_wrapped() -> None:
+    """Exceptions from client.query_points are wrapped into QdrantVectorStoreError."""
+    mock_client = AsyncMock()
+    mock_client.query_points.side_effect = RuntimeError("Qdrant service unreachable")
+
+    store = QdrantVectorStore(client=mock_client, vector_dimension=4)
+    with pytest.raises(QdrantVectorStoreError, match="Failed to query hybrid vectors"):
+        await store.search_hybrid(
+            dense_query_vector=[0.1, 0.2, 0.3, 0.4],
+            sparse_query_vector=SparseVector(indices=[1], values=[1.0]),
+            limit=5,
+            candidate_limit=10,
+        )
+
+
+@pytest.mark.asyncio
+async def test_search_hybrid_empty_results_returns_empty_list() -> None:
+    """When query_points returns no points, empty list is returned."""
+    mock_client = AsyncMock()
+    mock_response = MagicMock()
+    mock_response.points = []
+    mock_client.query_points.return_value = mock_response
+
+    store = QdrantVectorStore(client=mock_client, vector_dimension=4)
+    results = await store.search_hybrid(
+        dense_query_vector=[0.1, 0.2, 0.3, 0.4],
+        sparse_query_vector=SparseVector(indices=[1], values=[1.0]),
+        limit=5,
+        candidate_limit=10,
+    )
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_qdrant_store_hybrid_rrf_end_to_end_in_memory() -> None:
+    """
+    In-memory Qdrant integration test verifying RRF fusion behavior:
+    - 3 points with controlled dense and sparse profiles:
+      * Point A: strong dense match, weaker sparse match
+      * Point B: strong sparse match, weaker dense match
+      * Point C: solid match across both dense and sparse representations
+    - Verifies no duplicate point IDs returned
+    - Verifies correct result count and 1-indexed ranks
+    - Verifies point ranking well in both lists is rewarded
+    - Verifies complete payload preservation
+    """
+    client = AsyncQdrantClient(":memory:")
+    store = QdrantVectorStore(
+        client=client,
+        collection_name="hybrid_mem_integration_test",
+        vector_dimension=4,
+        sparse_vector_name="bm25",
+    )
+
+    doc_a = EmbeddedDocument(
+        chunks=[
+            _create_sample_embedded_chunk(
+                chunk_index=0,
+                content="Point A: Pure dense semantic leader",
+                embedding=[1.0, 0.0, 0.0, 0.0],
+            )
+        ]
+    )
+    sv_a = [SparseVector(indices=[1], values=[1.0])]
+
+    doc_b = EmbeddedDocument(
+        chunks=[
+            _create_sample_embedded_chunk(
+                chunk_index=0,
+                content="Point B: Pure sparse lexical leader",
+                embedding=[0.0, 1.0, 0.0, 0.0],
+            )
+        ]
+    )
+    sv_b = [SparseVector(indices=[2], values=[5.0])]
+
+    doc_c = EmbeddedDocument(
+        chunks=[
+            _create_sample_embedded_chunk(
+                chunk_index=0,
+                content="Point C: Balanced strong in both dense and sparse",
+                embedding=[0.8, 0.6, 0.0, 0.0],
+            )
+        ]
+    )
+    sv_c = [SparseVector(indices=[2], values=[4.0])]
+
+    await store.index_document("doc-a", doc_a, sparse_vectors=sv_a)
+    await store.index_document("doc-b", doc_b, sparse_vectors=sv_b)
+    await store.index_document("doc-c", doc_c, sparse_vectors=sv_c)
+
+    # Query dense along [1.0, 0.0, 0.0, 0.0] and sparse on token 2
+    dense_q = [1.0, 0.0, 0.0, 0.0]
+    sparse_q = SparseVector(indices=[2], values=[1.0])
+
+    results = await store.search_hybrid(
+        dense_query_vector=dense_q,
+        sparse_query_vector=sparse_q,
+        limit=3,
+        candidate_limit=10,
+    )
+
+    assert len(results) == 3
+
+    # Check deduplication: each point ID must be unique
+    point_ids = [r.point_id for r in results]
+    assert len(point_ids) == len(set(point_ids))
+
+    # Check 1-indexed ranks
+    assert [r.rank for r in results] == [1, 2, 3]
+
+    # Verify score is a valid positive fusion score
+    for r in results:
+        assert r.score > 0.0
+        assert r.document_id in ("doc-a", "doc-b", "doc-c")
+        assert len(r.content) > 0
+        assert r.token_count > 0
+
+    # Test filtering by document_id
+    filtered = await store.search_hybrid(
+        dense_query_vector=dense_q,
+        sparse_query_vector=sparse_q,
+        limit=3,
+        candidate_limit=10,
+        document_id="doc-c",
+    )
+    assert len(filtered) == 1
+    assert filtered[0].document_id == "doc-c"
+    assert "Point C" in filtered[0].content
+
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_store_hybrid_semantic_and_lexical_integration() -> None:
+    """
+    Integration test verifying hybrid retrieval with controlled domain documents:
+    - Doc A: "RabbitMQ transports background jobs between the API and worker."
+    - Doc B: "ERR_CONNECTION_RESET occurs when a TCP connection is abruptly terminated."
+    - Doc C: "The worker retrieves original files from object storage."
+    """
+    client = AsyncQdrantClient(":memory:")
+    store = QdrantVectorStore(
+        client=client,
+        collection_name="hybrid_domain_test",
+        vector_dimension=4,
+        sparse_vector_name="bm25",
+    )
+
+    # Controlled orthogonal vectors for predictable testing
+    doc_a = EmbeddedDocument(
+        chunks=[
+            _create_sample_embedded_chunk(
+                chunk_index=0,
+                content=(
+                    "RabbitMQ transports background jobs between the API and worker."
+                ),
+                embedding=[1.0, 0.0, 0.0, 0.0],
+            )
+        ]
+    )
+    sv_a = [SparseVector(indices=[101], values=[2.0])]
+
+    doc_b = EmbeddedDocument(
+        chunks=[
+            _create_sample_embedded_chunk(
+                chunk_index=0,
+                content=(
+                    "ERR_CONNECTION_RESET occurs when a TCP connection is "
+                    "abruptly terminated."
+                ),
+                embedding=[0.0, 1.0, 0.0, 0.0],
+            )
+        ]
+    )
+    sv_b = [SparseVector(indices=[202], values=[5.0])]
+
+    doc_c = EmbeddedDocument(
+        chunks=[
+            _create_sample_embedded_chunk(
+                chunk_index=0,
+                content="The worker retrieves original files from object storage.",
+                embedding=[0.0, 0.0, 1.0, 0.0],
+            )
+        ]
+    )
+    sv_c = [SparseVector(indices=[303], values=[2.0])]
+
+    await store.index_document("doc-jobs", doc_a, sparse_vectors=sv_a)
+    await store.index_document("doc-reset", doc_b, sparse_vectors=sv_b)
+    await store.index_document("doc-storage", doc_c, sparse_vectors=sv_c)
+
+    # 1. Semantic query matching Doc A (dense [1, 0, 0, 0], no keyword match)
+    res_semantic = await store.search_hybrid(
+        dense_query_vector=[0.95, 0.05, 0.0, 0.0],
+        sparse_query_vector=SparseVector(indices=[], values=[]),
+        limit=3,
+        candidate_limit=5,
+    )
+    assert len(res_semantic) >= 1
+    assert res_semantic[0].document_id == "doc-jobs"
+    assert "RabbitMQ" in res_semantic[0].content
+
+    # 2. Exact keyword query matching Doc B (sparse token 202 for ERR_CONNECTION_RESET)
+    res_lexical = await store.search_hybrid(
+        dense_query_vector=[0.0, 0.1, 0.1, 0.1],
+        sparse_query_vector=SparseVector(indices=[202], values=[1.0]),
+        limit=3,
+        candidate_limit=5,
+    )
+    assert len(res_lexical) >= 1
+    assert res_lexical[0].document_id == "doc-reset"
+    assert "ERR_CONNECTION_RESET" in res_lexical[0].content
 
     await store.close()

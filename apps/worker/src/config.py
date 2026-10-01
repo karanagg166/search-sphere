@@ -87,6 +87,13 @@ class Settings(BaseSettings):
     SPARSE_SEARCH_MAX_TOP_K: int = 100
 
     # ------------------------------------------------------------------
+    # Hybrid Retrieval (Dense + BM25 with RRF)
+    # ------------------------------------------------------------------
+    HYBRID_SEARCH_TOP_K: int = 10
+    HYBRID_SEARCH_CANDIDATE_K: int = 20
+    HYBRID_SEARCH_MAX_TOP_K: int = 100
+
+    # ------------------------------------------------------------------
     # Redis
     # Redis is NOT the worker queue anymore.
     # Keep configuration available for future caching/temporary state.
