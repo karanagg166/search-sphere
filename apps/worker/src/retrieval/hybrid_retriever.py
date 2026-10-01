@@ -1,4 +1,5 @@
 import time
+from typing import Any
 
 import structlog
 
@@ -256,3 +257,41 @@ class HybridRetriever:
         )
 
         return results
+
+    async def search_and_rerank(
+        self,
+        query: str,
+        top_k: int | None = None,
+        candidate_k: int | None = None,
+        document_id: str | None = None,
+        reranker: Any = None,
+    ) -> list[Any]:
+        """
+        Retrieve candidate chunks using hybrid retrieval (Dense + BM25 RRF)
+        and rerank them using the CrossEncoderReranker.
+
+        Args:
+            query: User search query string.
+            top_k: Optional final number of reranked results to return.
+            candidate_k: Optional candidate limit fetched from hybrid retrieval.
+            document_id: Optional document ID to filter chunks server-side.
+            reranker: Optional custom CrossEncoderReranker instance.
+
+        Returns:
+            Ordered list of RerankedSearchResult items sorted by rerank_score
+            descending.
+        """
+        from src.retrieval.reranked_retriever import RerankedHybridRetriever
+        from src.retrieval.reranker import CrossEncoderReranker
+
+        active_reranker = reranker or CrossEncoderReranker()
+        orchestrator = RerankedHybridRetriever(
+            hybrid_retriever=self,
+            reranker=active_reranker,
+        )
+        return await orchestrator.search(
+            query=query,
+            top_k=top_k,
+            candidate_k=candidate_k,
+            document_id=document_id,
+        )

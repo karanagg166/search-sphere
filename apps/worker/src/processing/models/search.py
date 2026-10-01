@@ -109,3 +109,49 @@ class HybridSearchResult:
     page_numbers: list[int]
     block_types: list[str]
     rank: int | None = None
+
+
+@dataclass(frozen=True)
+class RerankedSearchResult:
+    """
+    Application-level representation of a retrieved document chunk after
+    cross-encoder reranking.
+
+    The rerank_score is the cross-encoder relevance score output by the model.
+    The rrf_score (if candidate was from hybrid RRF retrieval) is preserved
+    separately without being overwritten.
+
+    Fields:
+    - point_id: deterministic UUID string of the point in Qdrant
+    - document_id: ID of the source document
+    - chunk_index: 0-indexed position within the document
+    - content: clean text content of the chunk
+    - token_count: token count of the chunk
+    - start_page: 1-indexed first page number spanned by the chunk
+    - end_page: 1-indexed last page number spanned by the chunk
+    - page_numbers: list of pages spanned
+    - block_types: source block types contained
+    - rerank_score: cross-encoder relevance score
+    - rrf_score: optional original RRF score from earlier hybrid retrieval
+    - score: float matching rerank_score for polymorphic consistency
+    - rank: optional 1-indexed ranking position after cross-encoder reranking
+    """
+
+    point_id: str
+    document_id: str
+    chunk_index: int
+    content: str
+    token_count: int
+    start_page: int
+    end_page: int
+    page_numbers: list[int]
+    block_types: list[str]
+    rerank_score: float
+    rrf_score: float | None = None
+    score: float | None = None
+    rank: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.score is None:
+            object.__setattr__(self, "score", float(self.rerank_score))
+
