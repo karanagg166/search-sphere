@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.db import init_db
 from src.routers.auth import router as auth_router
 from src.routers.documents import router as documents_router
+from src.routers.search import router as search_router
 
 logger = structlog.get_logger()
 
@@ -46,6 +47,7 @@ app.add_middleware(
 # Include Application Routes
 app.include_router(auth_router)
 app.include_router(documents_router)
+app.include_router(search_router)
 
 
 @app.get("/health", tags=["Health"])
@@ -67,4 +69,5 @@ async def root():
         "health": "/health",
         "docs": "/docs",
         "auth": "/auth",
+        "search": "/search",
     }

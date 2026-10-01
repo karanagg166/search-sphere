@@ -66,6 +66,12 @@ class DocumentRepository:
         result = await self.db.execute(query)
         return result.scalar_one() or 0
 
+    async def get_document_ids_by_user(self, user_id: str) -> list[str]:
+        """Returns all document IDs owned by a user."""
+        query = select(Document.id).where(Document.user_id == user_id)
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
     async def delete(self, document: Document) -> None:
         await self.db.delete(document)
         await self.db.commit()

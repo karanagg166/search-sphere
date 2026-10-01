@@ -1,4 +1,5 @@
 import time
+from typing import Any
 
 import structlog
 
@@ -74,6 +75,7 @@ class RerankedHybridRetriever:
         top_k: int | None = None,
         candidate_k: int | None = None,
         document_id: str | None = None,
+        document_ids: list[str] | None = None,
     ) -> list[RerankedSearchResult]:
         """
         Execute two-stage hybrid retrieval followed by cross-encoder reranking.
@@ -85,6 +87,7 @@ class RerankedHybridRetriever:
             candidate_k: Optional candidate count retrieved by hybrid stage.
                 Defaults to HYBRID_SEARCH_CANDIDATE_K.
             document_id: Optional document ID to filter chunks server-side.
+            document_ids: Optional list of document IDs to filter chunks server-side.
 
         Returns:
             Ordered list of RerankedSearchResult items sorted by rerank_score
@@ -136,7 +139,7 @@ class RerankedHybridRetriever:
                 f"top_k ({resolved_top_k})."
             )
 
-        # 4. document_id validation
+        # 4. document_id / document_ids validation
         resolved_doc_id: str | None = None
         if document_id is not None:
             if not isinstance(document_id, str) or not document_id.strip():
@@ -145,17 +148,37 @@ class RerankedHybridRetriever:
                 )
             resolved_doc_id = document_id.strip()
 
+        resolved_doc_ids: list[str] | None = None
+        if document_ids is not None:
+            if not isinstance(document_ids, (list, tuple)):
+                raise RerankedQueryValidationError(
+                    "document_ids filter must be a list of strings if provided."
+                )
+            if len(document_ids) == 0:
+                return []
+            cleaned_ids = []
+            for did in document_ids:
+                if not isinstance(did, str) or not did.strip():
+                    raise RerankedQueryValidationError(
+                        "Each item in document_ids must be a non-empty string."
+                    )
+                cleaned_ids.append(did.strip())
+            resolved_doc_ids = cleaned_ids
+
         start_total = time.perf_counter()
 
         # 5. Hybrid retrieval stage (fetch top candidate_k chunks)
         start_hybrid = time.perf_counter()
         try:
-            candidates = await self.hybrid_retriever.search(
-                query=clean_query,
-                top_k=resolved_candidate_k,
-                candidate_k=resolved_candidate_k,
-                document_id=resolved_doc_id,
-            )
+            search_kwargs: dict[str, Any] = {
+                "query": clean_query,
+                "top_k": resolved_candidate_k,
+                "candidate_k": resolved_candidate_k,
+                "document_id": resolved_doc_id,
+            }
+            if resolved_doc_ids is not None:
+                search_kwargs["document_ids"] = resolved_doc_ids
+            candidates = await self.hybrid_retriever.search(**search_kwargs)
         except (HybridRetrievalError, HybridQueryValidationError) as exc:
             logger.exception(
                 "Hybrid retrieval failed during two-stage search",

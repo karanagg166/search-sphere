@@ -32,6 +32,7 @@ services:
       RABBITMQ_URL: ${RABBITMQ_URL}
     volumes:
       - ./apps/api:/app
+      - ./apps/worker:/worker:ro
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - search_sphere_network

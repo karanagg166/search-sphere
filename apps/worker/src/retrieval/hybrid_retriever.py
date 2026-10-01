@@ -81,6 +81,7 @@ class HybridRetriever:
         top_k: int | None = None,
         candidate_k: int | None = None,
         document_id: str | None = None,
+        document_ids: list[str] | None = None,
     ) -> list[HybridSearchResult]:
         """
         Retrieve ordered Top-K relevant chunks combining dense semantic and sparse BM25
@@ -93,6 +94,7 @@ class HybridRetriever:
             candidate_k: Optional candidate prefetch limit per retriever branch.
                 Defaults to HYBRID_SEARCH_CANDIDATE_K.
             document_id: Optional document ID to filter chunks server-side.
+            document_ids: Optional list of document IDs to filter chunks server-side.
 
         Returns:
             Ordered list of HybridSearchResult items preserving Qdrant RRF ranking.
@@ -136,7 +138,7 @@ class HybridRetriever:
                 f"top_k ({resolved_top_k})."
             )
 
-        # 4. document_id validation
+        # 4. document_id / document_ids validation
         resolved_doc_id: str | None = None
         if document_id is not None:
             if not isinstance(document_id, str) or not document_id.strip():
@@ -144,6 +146,23 @@ class HybridRetriever:
                     "document_id filter must be a non-empty string if provided."
                 )
             resolved_doc_id = document_id.strip()
+
+        resolved_doc_ids: list[str] | None = None
+        if document_ids is not None:
+            if not isinstance(document_ids, (list, tuple)):
+                raise HybridQueryValidationError(
+                    "document_ids filter must be a list of strings if provided."
+                )
+            if len(document_ids) == 0:
+                return []
+            cleaned_ids = []
+            for did in document_ids:
+                if not isinstance(did, str) or not did.strip():
+                    raise HybridQueryValidationError(
+                        "Each item in document_ids must be a non-empty string."
+                    )
+                cleaned_ids.append(did.strip())
+            resolved_doc_ids = cleaned_ids
 
         start_total = time.perf_counter()
 
@@ -213,13 +232,16 @@ class HybridRetriever:
         # 7. Qdrant hybrid search with server-side RRF fusion
         start_search = time.perf_counter()
         try:
-            results = await self.vector_store.search_hybrid(
-                dense_query_vector=dense_vector,
-                sparse_query_vector=sparse_vector,
-                limit=resolved_top_k,
-                candidate_limit=resolved_candidate_k,
-                document_id=resolved_doc_id,
-            )
+            search_kwargs: dict[str, Any] = {
+                "dense_query_vector": dense_vector,
+                "sparse_query_vector": sparse_vector,
+                "limit": resolved_top_k,
+                "candidate_limit": resolved_candidate_k,
+                "document_id": resolved_doc_id,
+            }
+            if resolved_doc_ids is not None:
+                search_kwargs["document_ids"] = resolved_doc_ids
+            results = await self.vector_store.search_hybrid(**search_kwargs)
         except QdrantVectorStoreError as exc:
             logger.exception(
                 "Qdrant hybrid search failed",

@@ -869,6 +869,7 @@ class QdrantVectorStore:
         limit: int,
         candidate_limit: int,
         document_id: str | None = None,
+        document_ids: list[str] | None = None,
     ) -> list[HybridSearchResult]:
         """
         Execute hybrid search combining dense semantic retrieval and sparse BM25
@@ -887,6 +888,7 @@ class QdrantVectorStore:
             limit: Maximum number of final Top-K fused results (must be > 0).
             candidate_limit: Candidate prefetch limit per branch (must be >= limit).
             document_id: Optional document ID to filter points server-side.
+            document_ids: Optional list of document IDs to filter points server-side.
 
         Returns:
             Ordered list of HybridSearchResult items preserving Qdrant fused ranking.
@@ -935,7 +937,16 @@ class QdrantVectorStore:
             )
 
         query_filter: models.Filter | None = None
-        if document_id is not None:
+        if document_ids is not None:
+            query_filter = models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="document_id",
+                        match=models.MatchAny(any=document_ids),
+                    )
+                ]
+            )
+        elif document_id is not None:
             query_filter = models.Filter(
                 must=[
                     models.FieldCondition(

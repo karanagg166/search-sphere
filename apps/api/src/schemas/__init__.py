@@ -7,6 +7,11 @@ from src.schemas.auth import (
     UserSignupRequest,
 )
 from src.schemas.document import DocumentListResponse, DocumentResponse
+from src.schemas.search import (
+    SearchRequest,
+    SearchResponse,
+    SearchResultResponse,
+)
 
 __all__ = [
     "UserSignupRequest",
@@ -17,4 +22,7 @@ __all__ = [
     "OAuthUrlResponse",
     "DocumentResponse",
     "DocumentListResponse",
+    "SearchRequest",
+    "SearchResponse",
+    "SearchResultResponse",
 ]

@@ -43,6 +43,49 @@ class Settings(BaseSettings):
     # Frontend URL (for OAuth callbacks & CORS)
     FRONTEND_URL: str = "http://localhost:3000"
 
+    # Qdrant Vector Database
+    QDRANT_URL: str = "http://qdrant:6333"
+    QDRANT_API_KEY: str | None = None
+    QDRANT_COLLECTION_NAME: str = "documents"
+    QDRANT_UPSERT_BATCH_SIZE: int = 100
+
+    # Embeddings
+    EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+    EMBEDDING_BATCH_SIZE: int = 32
+    EMBEDDING_DEVICE: str = "cpu"
+
+    # Sparse Retrieval (BM25)
+    SPARSE_MODEL: str = "Qdrant/bm25"
+    QDRANT_SPARSE_VECTOR_NAME: str = "bm25"
+    SPARSE_SEARCH_TOP_K: int = 10
+    SPARSE_SEARCH_MAX_TOP_K: int = 100
+
+    # Hybrid Retrieval (Dense + BM25 with RRF)
+    HYBRID_SEARCH_TOP_K: int = 10
+    HYBRID_SEARCH_CANDIDATE_K: int = 20
+    HYBRID_SEARCH_MAX_TOP_K: int = 100
+
+    # Cross-Encoder Reranking
+    RERANKER_MODEL_NAME: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    RERANKER_BATCH_SIZE: int = 32
+    RERANKER_TOP_K: int = 5
+    RERANKER_MAX_TOP_K: int = 100
+    RERANKER_DEVICE: str = "cpu"
+
+    # OCR & Image Processing
+    TESSERACT_CMD: str | None = None
+    IMAGE_CAPTION_MODEL: str = "Salesforce/blip-image-captioning-base"
+
+    # Chunking
+    CHUNK_TARGET_TOKENS: int = 500
+    CHUNK_MAX_TOKENS: int = 700
+    CHUNK_OVERLAP_TOKENS: int = 60
+    SEMANTIC_CHUNKING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+    SEMANTIC_DISTANCE_THRESHOLD: float = 0.5
+    SEMANTIC_SIMILARITY_PERCENTILE: float = 80.0
+    CHUNK_SIZE: int = 500
+    CHUNK_OVERLAP: int = 60
+
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
