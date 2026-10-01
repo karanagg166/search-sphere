@@ -18,6 +18,7 @@ from src.schemas.search import (
     SearchResponse,
     SearchResultResponse,
 )
+from src.services.query_rewriter import QueryRewriter, get_query_rewriter
 
 logger = structlog.get_logger()
 
@@ -42,6 +43,7 @@ class SearchService:
     Coordinates authenticated semantic search workflows.
 
     Responsibilities:
+    - Reformulate contextual queries into standalone queries via QueryRewriter;
     - Enforce tenant isolation and document authorization at application layer;
     - Resolve document-scoped vs all-user-documents search filters;
     - Delegate execution to RerankedHybridRetriever (Dense + Sparse RRF + Cross-Encoder);
@@ -54,10 +56,12 @@ class SearchService:
         self,
         db: AsyncSession,
         retriever: RerankedHybridRetriever | None = None,
+        query_rewriter: QueryRewriter | None = None,
     ) -> None:
         self.db = db
         self.document_repo = DocumentRepository(db)
         self.retriever = retriever or get_retriever()
+        self.query_rewriter = query_rewriter or get_query_rewriter()
 
     async def search(self, request: SearchRequest, user: User) -> SearchResponse:
         """
@@ -106,15 +110,24 @@ class SearchService:
                 )
                 return SearchResponse(
                     query=request.query,
+                    retrieval_query=request.query,
+                    rewritten=False,
                     total=0,
                     results=[],
                 )
             target_document_ids = user_doc_ids
 
-        # 2. Execute two-stage reranked retrieval pipeline
+        # 2. Query Reformulation (standalone query generation before retrieval)
+        rewrite_result = await self.query_rewriter.rewrite(
+            query=request.query,
+            conversation_context=request.conversation_context,
+        )
+        retrieval_query = rewrite_result.retrieval_query
+
+        # 3. Execute two-stage reranked retrieval pipeline
         try:
             raw_results = await self.retriever.search(
-                query=request.query,
+                query=retrieval_query,
                 top_k=request.top_k,
                 candidate_k=request.candidate_k,
                 document_id=target_document_id,
@@ -151,7 +164,7 @@ class SearchService:
                 detail="An unexpected error occurred during search.",
             ) from exc
 
-        # 3. Defense-in-depth isolation check: ensure no unauthorized documents leak
+        # 4. Defense-in-depth isolation check: ensure no unauthorized documents leak
         if target_document_id is not None:
             filtered_results = [
                 r for r in raw_results if r.document_id == target_document_id
@@ -160,7 +173,7 @@ class SearchService:
             allowed_ids = set(target_document_ids) if target_document_ids else set()
             filtered_results = [r for r in raw_results if r.document_id in allowed_ids]
 
-        # 4. Map domain results to API response schema
+        # 5. Map domain results to API response schema
         result_responses = [
             SearchResultResponse(
                 document_id=r.document_id,
@@ -180,13 +193,17 @@ class SearchService:
         logger.info(
             "Semantic search completed successfully",
             user_id=user.id,
-            query_length=len(request.query),
+            original_query=request.query,
+            retrieval_query=retrieval_query,
+            rewritten=rewrite_result.rewritten,
             results_count=len(result_responses),
             document_scoped=target_document_id is not None,
         )
 
         return SearchResponse(
             query=request.query,
+            retrieval_query=retrieval_query,
+            rewritten=rewrite_result.rewritten,
             total=len(result_responses),
             results=result_responses,
         )

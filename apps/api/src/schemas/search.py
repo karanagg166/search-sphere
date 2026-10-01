@@ -1,6 +1,66 @@
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.config import settings
+
+
+class ConversationMessage(BaseModel):
+    """
+    A single turn of conversation history used for query rewriting context.
+    """
+
+    role: str = Field(
+        ...,
+        description="Role of the speaker: 'user', 'assistant', or 'system'.",
+    )
+    content: str = Field(
+        ...,
+        description="Text content of the conversation message.",
+        min_length=1,
+    )
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("Role must be a non-empty string.")
+        role_clean = v.strip().lower()
+        if role_clean not in ("user", "assistant", "system"):
+            raise ValueError(
+                f"Role must be one of 'user', 'assistant', or 'system', got '{v}'."
+            )
+        return role_clean
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, v: str) -> str:
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("Content must be a non-empty string.")
+        return v.strip()
+
+
+class RewriteResult(BaseModel):
+    """
+    Structured result of standalone query reformulation.
+    """
+
+    original_query: str = Field(
+        ...,
+        description="Original query provided by user.",
+    )
+    retrieval_query: str = Field(
+        ...,
+        description="Standalone query used for retrieval after potential reformulation.",
+    )
+    rewritten: bool = Field(
+        default=False,
+        description="True if query was reformulated, False if original query was preserved.",
+    )
+    reason: str | None = Field(
+        default=None,
+        description="Optional brief explanation of the rewrite decision.",
+    )
 
 
 class SearchRequest(BaseModel):
@@ -9,6 +69,7 @@ class SearchRequest(BaseModel):
 
     Validates:
     - query: non-empty, non-whitespace string
+    - conversation_context: optional list of ConversationMessage items
     - top_k: positive integer, <= RERANKER_MAX_TOP_K
     - candidate_k: positive integer, >= top_k
     - document_id: optional non-empty string filter
@@ -18,6 +79,10 @@ class SearchRequest(BaseModel):
         ...,
         description="Search query string.",
         min_length=1,
+    )
+    conversation_context: list[ConversationMessage] | None = Field(
+        default=None,
+        description="Optional recent conversation history to resolve contextual queries.",
     )
     top_k: int = Field(
         default_factory=lambda: settings.RERANKER_TOP_K,
@@ -101,6 +166,22 @@ class SearchResultResponse(BaseModel):
 class SearchResponse(BaseModel):
     """Top-level semantic search API response."""
 
-    query: str
+    query: str = Field(..., description="Original user search query.")
+    retrieval_query: str = Field(
+        default="",
+        description="Standalone search query used for retrieval after optional reformulation.",
+    )
+    rewritten: bool = Field(
+        default=False,
+        description="Whether the query was reformulated.",
+    )
     total: int
     results: list[SearchResultResponse]
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_retrieval_query(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("retrieval_query") and data.get("query"):
+                data["retrieval_query"] = data["query"]
+        return data

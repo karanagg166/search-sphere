@@ -8,6 +8,8 @@ from src.schemas.auth import (
 )
 from src.schemas.document import DocumentListResponse, DocumentResponse
 from src.schemas.search import (
+    ConversationMessage,
+    RewriteResult,
     SearchRequest,
     SearchResponse,
     SearchResultResponse,
@@ -22,6 +24,8 @@ __all__ = [
     "OAuthUrlResponse",
     "DocumentResponse",
     "DocumentListResponse",
+    "ConversationMessage",
+    "RewriteResult",
     "SearchRequest",
     "SearchResponse",
     "SearchResultResponse",

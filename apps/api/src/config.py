@@ -86,6 +86,13 @@ class Settings(BaseSettings):
     CHUNK_SIZE: int = 500
     CHUNK_OVERLAP: int = 60
 
+    # Cohere & Query Rewriting
+    COHERE_API_KEY: str | None = None
+    QUERY_REWRITE_MODEL: str = "command-r-08-2024"
+    QUERY_REWRITE_ENABLED: bool = True
+    QUERY_REWRITE_TIMEOUT_SECONDS: float = 5.0
+    QUERY_REWRITE_MAX_CONTEXT_MESSAGES: int = 5
+
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )

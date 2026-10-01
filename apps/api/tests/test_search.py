@@ -13,6 +13,8 @@ from src.retrieval.reranked_retriever import (
     RerankedQueryValidationError,
     RerankedRetrievalError,
 )
+from src.schemas.search import RewriteResult
+from src.services.query_rewriter import QueryRewriter, get_query_rewriter
 from src.services.search_service import get_retriever
 
 
@@ -593,3 +595,136 @@ async def test_unexpected_exception_mapped_to_500_without_leaks() -> None:
             assert "sentence_transformers" not in resp.json()["detail"]
         finally:
             app.dependency_overrides.pop(get_retriever, None)
+
+
+# ==============================================================================
+# 9. Query Rewriting Integration Tests
+# ==============================================================================
+
+
+@pytest.mark.asyncio
+async def test_search_with_query_rewriting_context() -> None:
+    """
+    When search query has conversation context and is rewritten:
+    - original query is preserved in response ('query')
+    - rewritten standalone query is exposed ('retrieval_query')
+    - rewritten flag is True
+    - retriever is invoked with the rewritten query
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        user_id, _, headers = await create_user_with_token(client)
+        doc = await insert_test_document(user_id=user_id, filename="redis.pdf")
+
+        mock_retriever = AsyncMock(spec=RerankedHybridRetriever)
+        mock_retriever.search.return_value = [
+            make_reranked_result(
+                document_id=doc.id, content="Allkeys-lru evicts keys based on LRU."
+            )
+        ]
+
+        mock_rewriter = AsyncMock(spec=QueryRewriter)
+        mock_rewriter.rewrite.return_value = RewriteResult(
+            original_query="which one is better?",
+            retrieval_query="Which Redis eviction policy is best for caching?",
+            rewritten=True,
+            reason="Resolved reference using conversation history",
+        )
+
+        app.dependency_overrides[get_retriever] = lambda: mock_retriever
+        app.dependency_overrides[get_query_rewriter] = lambda: mock_rewriter
+
+        try:
+            resp = await client.post(
+                "/search",
+                json={
+                    "query": "which one is better?",
+                    "conversation_context": [
+                        {"role": "user", "content": "Explain Redis eviction policies"}
+                    ],
+                    "document_id": doc.id,
+                },
+                headers=headers,
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+
+            # Verify response schema fields
+            assert data["query"] == "which one is better?"
+            assert (
+                data["retrieval_query"]
+                == "Which Redis eviction policy is best for caching?"
+            )
+            assert data["rewritten"] is True
+            assert data["total"] == 1
+
+            # Verify retriever was passed the rewritten standalone query
+            mock_retriever.search.assert_awaited_once_with(
+                query="Which Redis eviction policy is best for caching?",
+                top_k=5,
+                candidate_k=20,
+                document_id=doc.id,
+                document_ids=None,
+            )
+        finally:
+            app.dependency_overrides.pop(get_retriever, None)
+            app.dependency_overrides.pop(get_query_rewriter, None)
+
+
+@pytest.mark.asyncio
+async def test_search_with_query_rewriting_failure_falls_back_gracefully() -> None:
+    """
+    If query rewriting encounters an error/fallback, the search endpoint
+    proceeds uninterrupted using the original user query.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        user_id, _, headers = await create_user_with_token(client)
+        doc = await insert_test_document(user_id=user_id, filename="redis.pdf")
+
+        mock_retriever = AsyncMock(spec=RerankedHybridRetriever)
+        mock_retriever.search.return_value = [
+            make_reranked_result(document_id=doc.id, content="Fallback search result.")
+        ]
+
+        mock_rewriter = AsyncMock(spec=QueryRewriter)
+        mock_rewriter.rewrite.return_value = RewriteResult(
+            original_query="how does that work?",
+            retrieval_query="how does that work?",
+            rewritten=False,
+            reason="Cohere timed out",
+        )
+
+        app.dependency_overrides[get_retriever] = lambda: mock_retriever
+        app.dependency_overrides[get_query_rewriter] = lambda: mock_rewriter
+
+        try:
+            resp = await client.post(
+                "/search",
+                json={
+                    "query": "how does that work?",
+                    "conversation_context": [
+                        {"role": "user", "content": "Explain Redis cache"}
+                    ],
+                    "document_id": doc.id,
+                },
+                headers=headers,
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+
+            assert data["query"] == "how does that work?"
+            assert data["retrieval_query"] == "how does that work?"
+            assert data["rewritten"] is False
+
+            # Retriever received original query
+            mock_retriever.search.assert_awaited_once_with(
+                query="how does that work?",
+                top_k=5,
+                candidate_k=20,
+                document_id=doc.id,
+                document_ids=None,
+            )
+        finally:
+            app.dependency_overrides.pop(get_retriever, None)
+            app.dependency_overrides.pop(get_query_rewriter, None)

@@ -6,6 +6,7 @@ from src.models.user import User
 from src.retrieval.reranked_retriever import RerankedHybridRetriever
 from src.schemas.search import SearchRequest, SearchResponse
 from src.security.jwt import get_current_user
+from src.services.query_rewriter import QueryRewriter, get_query_rewriter
 from src.services.search_service import SearchService, get_retriever
 
 router = APIRouter(prefix="/search", tags=["Search"])
@@ -19,7 +20,8 @@ router = APIRouter(prefix="/search", tags=["Search"])
     description=(
         "Execute two-stage reranked hybrid search: dense ANN semantic retrieval and "
         "sparse BM25 lexical retrieval fused via Qdrant server-side RRF, then reranked "
-        "with a Cross-Encoder model. Enforces strict tenant isolation."
+        "with a Cross-Encoder model. Automatically resolves conversational queries to "
+        "standalone retrieval queries using Cohere. Enforces strict tenant isolation."
     ),
 )
 async def search_documents(
@@ -27,7 +29,12 @@ async def search_documents(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     retriever: RerankedHybridRetriever = Depends(get_retriever),
+    query_rewriter: QueryRewriter = Depends(get_query_rewriter),
 ) -> SearchResponse:
     """Handle authenticated semantic search requests."""
-    service = SearchService(db=db, retriever=retriever)
+    service = SearchService(
+        db=db,
+        retriever=retriever,
+        query_rewriter=query_rewriter,
+    )
     return await service.search(request=request, user=current_user)
