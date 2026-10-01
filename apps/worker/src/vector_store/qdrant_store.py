@@ -7,7 +7,11 @@ from qdrant_client import AsyncQdrantClient, models
 from src.config import settings
 from src.processing.embedding import DEFAULT_EMBEDDING_DIMENSION
 from src.processing.models.document import EmbeddedDocument
-from src.processing.models.search import DenseSearchResult, SparseSearchResult
+from src.processing.models.search import (
+    DenseSearchResult,
+    HybridSearchResult,
+    SparseSearchResult,
+)
 from src.processing.models.sparse_vector import SparseVector
 
 if TYPE_CHECKING:
@@ -789,6 +793,201 @@ class QdrantVectorStore:
 
         return [
             self.convert_scored_sparse_point(point, rank=idx + 1)
+            for idx, point in enumerate(points)
+        ]
+
+    def convert_scored_hybrid_point(
+        self,
+        point: Any,
+        rank: int | None = None,
+    ) -> HybridSearchResult:
+        """
+        Convert a raw Qdrant ScoredPoint from hybrid search into an application-level
+        HybridSearchResult.
+
+        Validates all required payload fields and preserves the exact Qdrant
+        RRF fusion score.
+
+        Raises:
+            QdrantVectorStoreError: If point payload is missing, incomplete,
+                or malformed.
+        """
+        point_id = getattr(point, "id", None)
+        payload = getattr(point, "payload", None)
+        score = getattr(point, "score", None)
+
+        if not isinstance(payload, dict):
+            raise QdrantVectorStoreError(
+                f"Missing or invalid payload dictionary in Qdrant point '{point_id}'."
+            )
+
+        if score is None:
+            raise QdrantVectorStoreError(
+                f"Missing similarity score in Qdrant point '{point_id}'."
+            )
+
+        required_fields = (
+            "document_id",
+            "chunk_index",
+            "content",
+            "token_count",
+            "start_page",
+            "end_page",
+            "page_numbers",
+            "block_types",
+        )
+        for field in required_fields:
+            if field not in payload or payload[field] is None:
+                raise QdrantVectorStoreError(
+                    f"Missing required payload field '{field}' in Qdrant "
+                    f"point '{point_id}'."
+                )
+
+        try:
+            return HybridSearchResult(
+                point_id=str(point_id),
+                score=float(score),
+                document_id=str(payload["document_id"]),
+                chunk_index=int(payload["chunk_index"]),
+                content=str(payload["content"]),
+                token_count=int(payload["token_count"]),
+                start_page=int(payload["start_page"]),
+                end_page=int(payload["end_page"]),
+                page_numbers=list(payload["page_numbers"]),
+                block_types=list(payload["block_types"]),
+                rank=rank,
+            )
+        except (ValueError, TypeError) as exc:
+            raise QdrantVectorStoreError(
+                f"Invalid payload field types in Qdrant point '{point_id}': {exc}"
+            ) from exc
+
+    async def search_hybrid(
+        self,
+        dense_query_vector: list[float],
+        sparse_query_vector: SparseVector | models.SparseVector,
+        limit: int,
+        candidate_limit: int,
+        document_id: str | None = None,
+    ) -> list[HybridSearchResult]:
+        """
+        Execute hybrid search combining dense semantic retrieval and sparse BM25
+        lexical retrieval using server-side Reciprocal Rank Fusion (RRF) in Qdrant.
+
+        Flow:
+        - Prefetch #1: Dense ANN candidate retrieval against default/unnamed vector
+        - Prefetch #2: Sparse BM25 candidate retrieval against named sparse vector
+        - Query: models.FusionQuery(fusion=models.Fusion.RRF)
+        - Final Limit: limit (Top-K fused results)
+        - Candidate Limit: candidate_limit for both prefetches
+
+        Args:
+            dense_query_vector: Dense vector representing query semantics.
+            sparse_query_vector: SparseVector or models.SparseVector for BM25 match.
+            limit: Maximum number of final Top-K fused results (must be > 0).
+            candidate_limit: Candidate prefetch limit per branch (must be >= limit).
+            document_id: Optional document ID to filter points server-side.
+
+        Returns:
+            Ordered list of HybridSearchResult items preserving Qdrant fused ranking.
+
+        Raises:
+            QdrantVectorStoreError: If parameters are invalid, search request fails,
+                                    or result payloads are missing/malformed.
+        """
+        if not dense_query_vector:
+            raise QdrantVectorStoreError("dense_query_vector must not be empty.")
+
+        if (
+            self.vector_dimension is not None
+            and len(dense_query_vector) != self.vector_dimension
+        ):
+            raise QdrantVectorStoreError(
+                f"Dense query vector dimension mismatch: expected "
+                f"{self.vector_dimension}, got {len(dense_query_vector)}."
+            )
+
+        if sparse_query_vector is None:
+            raise QdrantVectorStoreError("sparse_query_vector must not be None.")
+
+        if isinstance(sparse_query_vector, SparseVector):
+            qdrant_sparse = sparse_query_vector.to_qdrant()
+        elif isinstance(sparse_query_vector, models.SparseVector):
+            qdrant_sparse = sparse_query_vector
+        else:
+            raise QdrantVectorStoreError(
+                f"sparse_query_vector must be a SparseVector or models.SparseVector, "
+                f"got {type(sparse_query_vector)}."
+            )
+
+        if limit <= 0:
+            raise QdrantVectorStoreError(f"limit must be positive, got {limit}.")
+
+        if candidate_limit <= 0:
+            raise QdrantVectorStoreError(
+                f"candidate_limit must be positive, got {candidate_limit}."
+            )
+
+        if candidate_limit < limit:
+            raise QdrantVectorStoreError(
+                f"candidate_limit ({candidate_limit}) cannot be less than "
+                f"limit ({limit})."
+            )
+
+        query_filter: models.Filter | None = None
+        if document_id is not None:
+            query_filter = models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="document_id",
+                        match=models.MatchValue(value=document_id),
+                    )
+                ]
+            )
+
+        dense_prefetch = models.Prefetch(
+            query=dense_query_vector,
+            limit=candidate_limit,
+            filter=query_filter,
+        )
+        sparse_prefetch = models.Prefetch(
+            query=qdrant_sparse,
+            using=self.sparse_vector_name,
+            limit=candidate_limit,
+            filter=query_filter,
+        )
+
+        try:
+            response = await self.client.query_points(
+                collection_name=self.collection_name,
+                prefetch=[dense_prefetch, sparse_prefetch],
+                query=models.FusionQuery(fusion=models.Fusion.RRF),
+                query_filter=query_filter,
+                limit=limit,
+                with_payload=True,
+                with_vectors=False,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Failed to execute hybrid search query in Qdrant",
+                collection=self.collection_name,
+                sparse_vector_name=self.sparse_vector_name,
+                limit=limit,
+                candidate_limit=candidate_limit,
+                document_id=document_id,
+                error=str(exc),
+            )
+            raise QdrantVectorStoreError(
+                f"Failed to query hybrid vectors from collection "
+                f"'{self.collection_name}': {exc}"
+            ) from exc
+
+        points = getattr(response, "points", None)
+        if points is None:
+            return []
+
+        return [
+            self.convert_scored_hybrid_point(point, rank=idx + 1)
             for idx, point in enumerate(points)
         ]
 

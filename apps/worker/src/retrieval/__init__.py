@@ -1,9 +1,18 @@
-from src.processing.models.search import DenseSearchResult, SparseSearchResult
+from src.processing.models.search import (
+    DenseSearchResult,
+    HybridSearchResult,
+    SparseSearchResult,
+)
 from src.retrieval.dense_retriever import (
     DenseRetrievalError,
     DenseRetriever,
     QueryValidationError,
     RetrievalError,
+)
+from src.retrieval.hybrid_retriever import (
+    HybridQueryValidationError,
+    HybridRetrievalError,
+    HybridRetriever,
 )
 from src.retrieval.sparse_retriever import (
     SparseQueryValidationError,
@@ -21,4 +30,8 @@ __all__ = [
     "SparseRetrievalError",
     "SparseQueryValidationError",
     "SparseSearchResult",
+    "HybridRetriever",
+    "HybridRetrievalError",
+    "HybridQueryValidationError",
+    "HybridSearchResult",
 ]
