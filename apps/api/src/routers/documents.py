@@ -5,6 +5,7 @@ from src.db import get_db
 from src.models.user import User
 from src.schemas.document import DocumentListResponse, DocumentResponse
 from src.security.jwt import get_current_user
+from src.security.rate_limiter import rate_limiter
 from src.services.document_service import DocumentService
 from src.storage.object_storage import ObjectStorage, get_object_storage
 
@@ -15,6 +16,7 @@ router = APIRouter(prefix="/documents", tags=["Documents"])
     "",
     response_model=DocumentResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limiter.check)],
     summary="Upload PDF document",
     description="Upload a PDF file. Validates magic bytes, persists to object storage, stores metadata in PostgreSQL, and enqueues background processing.",
 )

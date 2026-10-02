@@ -6,7 +6,17 @@ from src.schemas.auth import (
     UserResponse,
     UserSignupRequest,
 )
+from src.schemas.conversation import (
+    ConversationAnswerRequest,
+    ConversationAnswerResponse,
+    ConversationCreate,
+    ConversationResponse,
+    ConversationSummaryResponse,
+    ConversationUpdate,
+    MessageResponse,
+)
 from src.schemas.document import DocumentListResponse, DocumentResponse
+from src.schemas.feedback import FeedbackCreate, FeedbackResponse
 from src.schemas.search import (
     ConversationMessage,
     RewriteResult,
@@ -29,4 +39,15 @@ __all__ = [
     "SearchRequest",
     "SearchResponse",
     "SearchResultResponse",
+    "ConversationCreate",
+    "ConversationUpdate",
+    "MessageResponse",
+    "ConversationSummaryResponse",
+    "ConversationResponse",
+    "ConversationAnswerRequest",
+    "ConversationAnswerResponse",
+    "FeedbackCreate",
+    "FeedbackResponse",
 ]
+
+

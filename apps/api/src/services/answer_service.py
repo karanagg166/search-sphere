@@ -1,3 +1,6 @@
+import json
+from collections.abc import AsyncIterator
+
 import structlog
 from fastapi import HTTPException, status
 
@@ -12,6 +15,7 @@ from src.services.answer_generator import (
     AnswerGenerationUnavailableError,
     AnswerGenerator,
     get_answer_generator,
+    sanitize_citations,
 )
 from src.services.search_service import SearchService
 
@@ -176,3 +180,71 @@ class AnswerService:
             answer=answer_text,
             sources=sources,
         )
+
+    async def stream_answer(
+        self,
+        request: AnswerRequest,
+        user: User,
+    ) -> AsyncIterator[str]:
+        """
+        Stream SSE formatted events: metadata, source, token, done, error.
+        """
+        search_req = SearchRequest(
+            query=request.query,
+            conversation_context=request.conversation_context,
+            top_k=request.top_k,
+            candidate_k=request.candidate_k,
+            document_id=request.document_id,
+        )
+        search_response = await self.search_service.search(
+            request=search_req,
+            user=user,
+        )
+
+        metadata_payload = {
+            "query": search_response.query,
+            "retrieval_query": search_response.retrieval_query,
+            "rewritten": search_response.rewritten,
+        }
+        yield f"event: metadata\ndata: {json.dumps(metadata_payload)}\n\n"
+
+        if not search_response.results:
+            yield f"event: source\ndata: {json.dumps({'sources': []})}\n\n"
+            yield f"event: token\ndata: {json.dumps({'token': NO_RESULTS_ANSWER})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'answer': NO_RESULTS_ANSWER, 'sources': []})}\n\n"
+            return
+
+        usable_chunks = search_response.results[: self.answer_generator.max_context_chunks]
+        sources = [
+            AnswerSource(
+                source_id=idx + 1,
+                document_id=chunk.document_id,
+                chunk_index=chunk.chunk_index,
+                start_page=chunk.start_page,
+                end_page=chunk.end_page,
+                content=chunk.content,
+                rerank_score=chunk.rerank_score,
+            )
+            for idx, chunk in enumerate(usable_chunks)
+        ]
+        sources_payload = [s.model_dump() for s in sources]
+        yield f"event: source\ndata: {json.dumps({'sources': sources_payload})}\n\n"
+
+        accumulated_tokens: list[str] = []
+        try:
+            token_iter, _ = await self.answer_generator.generate_answer_stream(
+                query=search_response.query,
+                chunks=search_response.results,
+                conversation_context=request.conversation_context,
+            )
+            async for token in token_iter:
+                accumulated_tokens.append(token)
+                yield f"event: token\ndata: {json.dumps({'token': token})}\n\n"
+
+            raw_answer = "".join(accumulated_tokens).strip()
+            clean_answer = sanitize_citations(raw_answer, max_source_id=len(sources))
+            yield f"event: done\ndata: {json.dumps({'answer': clean_answer, 'sources': sources_payload})}\n\n"
+        except Exception as exc:
+            logger.error("Streaming answer failed", error=str(exc), user_id=user.id)
+            yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
+

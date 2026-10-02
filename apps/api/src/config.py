@@ -1,3 +1,4 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -99,6 +100,40 @@ class Settings(BaseSettings):
     RAG_GENERATION_TIMEOUT_SECONDS: float = 15.0
     RAG_MAX_CONTEXT_CHUNKS: int = 5
     RAG_TEMPERATURE: float = 0.1
+
+    # Conversations
+    CONVERSATION_MAX_HISTORY_MESSAGES: int = 10
+
+    # Production Hardening & Security
+    ALLOWED_ORIGINS: list[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_REQUESTS_PER_MINUTE: int = 120
+    MAX_QUERY_LENGTH: int = 1000
+
+    @model_validator(mode="after")
+    def validate_production_secrets(self) -> "Settings":
+        """Fail clearly in production if production secrets are missing or default."""
+        if self.ENVIRONMENT.lower() == "production":
+            dev_defaults = (
+                "search-sphere-super-secure-jwt-secret-key-production-ready-2026",
+                "default_secret",
+                "",
+            )
+            if not self.JWT_SECRET_KEY or self.JWT_SECRET_KEY in dev_defaults:
+                raise ValueError(
+                    "Production security failure: JWT_SECRET_KEY must be explicitly set to a unique, non-default secret in production."
+                )
+            if not self.COHERE_API_KEY or self.COHERE_API_KEY.strip() in (
+                "",
+                "your_cohere_api_key_here",
+            ):
+                raise ValueError(
+                    "Production configuration failure: COHERE_API_KEY must be provided in production."
+                )
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"

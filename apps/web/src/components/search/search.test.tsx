@@ -195,5 +195,25 @@ describe("Search Components", () => {
       fireEvent.click(retryBtn);
       expect(handleRetry).toHaveBeenCalledWith("Trigger error");
     });
+
+    it("renders feedback buttons and triggers onFeedback on click", () => {
+      const turn: ChatTurn = {
+        id: "msg-123",
+        query: "What is caching?",
+        answer: "Caching stores copies of data in fast memory.",
+        status: "success",
+        timestamp: new Date(),
+      };
+      const handleFeedback = vi.fn();
+      render(<AnswerCard turn={turn} onFeedback={handleFeedback} />);
+
+      expect(screen.getByText("Was this answer accurate?")).toBeDefined();
+      const thumbsUp = screen.getByRole("button", { name: /thumbs up/i });
+      fireEvent.click(thumbsUp);
+
+      expect(handleFeedback).toHaveBeenCalledWith("msg-123", 1);
+      expect(screen.getByText("Feedback saved")).toBeDefined();
+    });
   });
 });
+

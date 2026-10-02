@@ -104,7 +104,12 @@ class SearchRequest(BaseModel):
     def validate_query(cls, v: str) -> str:
         if not isinstance(v, str) or not v.strip():
             raise ValueError("Query must be a non-empty, non-whitespace string.")
-        return v.strip()
+        cleaned = v.strip()
+        if len(cleaned) > settings.MAX_QUERY_LENGTH:
+            raise ValueError(
+                f"Query exceeds maximum allowed limit of {settings.MAX_QUERY_LENGTH} characters."
+            )
+        return cleaned
 
     @field_validator("top_k")
     @classmethod

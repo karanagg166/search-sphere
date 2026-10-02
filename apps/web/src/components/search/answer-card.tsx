@@ -8,6 +8,8 @@ import {
   Clock,
   RotateCcw,
   Sparkles,
+  ThumbsUp,
+  ThumbsDown,
 } from "lucide-react";
 import { AnswerSource } from "@/lib/api/search";
 import { SourceList } from "./source-list";
@@ -28,6 +30,7 @@ interface AnswerCardProps {
   turn: ChatTurn;
   documentMap?: Record<string, string>;
   onRetry?: (query: string) => void;
+  onFeedback?: (turnId: string, rating: 1 | -1) => void;
 }
 
 /**
@@ -134,7 +137,9 @@ function renderInlineFormatted(str: string): React.ReactNode[] {
   });
 }
 
-export function AnswerCard({ turn, documentMap = {}, onRetry }: AnswerCardProps) {
+export function AnswerCard({ turn, documentMap = {}, onRetry, onFeedback }: AnswerCardProps) {
+  const [userRating, setUserRating] = React.useState<number | null>(null);
+
   return (
     <div className="flex flex-col gap-4 p-5 rounded-xl border border-border bg-card shadow-sm transition">
       {/* User Query Turn */}
@@ -212,6 +217,40 @@ export function AnswerCard({ turn, documentMap = {}, onRetry }: AnswerCardProps)
               <SafeFormattedAnswer text={turn.answer} />
               {turn.sources && turn.sources.length > 0 && (
                 <SourceList sources={turn.sources} documentMap={documentMap} />
+              )}
+              {turn.status !== "loading" && (
+                <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-border/40 text-xs text-muted-foreground">
+                  <span className="text-[11px]">Was this answer accurate?</span>
+                  <button
+                    type="button"
+                    aria-label="Thumbs up"
+                    onClick={() => {
+                      setUserRating(1);
+                      onFeedback?.(turn.id, 1);
+                    }}
+                    className={`p-1 rounded hover:bg-muted transition-colors ${userRating === 1 ? "text-emerald-500 font-semibold" : ""}`}
+                    title="Accurate / helpful"
+                  >
+                    <ThumbsUp className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Thumbs down"
+                    onClick={() => {
+                      setUserRating(-1);
+                      onFeedback?.(turn.id, -1);
+                    }}
+                    className={`p-1 rounded hover:bg-muted transition-colors ${userRating === -1 ? "text-rose-500 font-semibold" : ""}`}
+                    title="Inaccurate / unhelpful"
+                  >
+                    <ThumbsDown className="w-3.5 h-3.5" />
+                  </button>
+                  {userRating !== null && (
+                    <span className="text-[11px] text-muted-foreground/80 italic ml-1">
+                      Feedback saved
+                    </span>
+                  )}
+                </div>
               )}
             </>
           ) : null}

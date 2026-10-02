@@ -6,10 +6,15 @@ from src.models.user import User
 from src.retrieval.reranked_retriever import RerankedHybridRetriever
 from src.schemas.search import SearchRequest, SearchResponse
 from src.security.jwt import get_current_user
+from src.security.rate_limiter import rate_limiter
 from src.services.query_rewriter import QueryRewriter, get_query_rewriter
 from src.services.search_service import SearchService, get_retriever
 
-router = APIRouter(prefix="/search", tags=["Search"])
+router = APIRouter(
+    prefix="/search",
+    tags=["Search"],
+    dependencies=[Depends(rate_limiter.check)],
+)
 
 
 @router.post(
