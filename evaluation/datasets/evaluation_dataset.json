@@ -1,0 +1,272 @@
+[
+  {
+    "id": "eval-001",
+    "question": "What consensus algorithm does Search Sphere reference for distributed state machine replication?",
+    "expected_answer": "Raft consensus algorithm is used for distributed state machine replication and leader election.",
+    "expected_document_ids": ["doc-distributed-systems"],
+    "expected_chunk_indices": [0],
+    "expected_keywords": ["Raft", "consensus", "leader election", "replication"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-002",
+    "question": "What is the embedding dimension of the sentence-transformers/all-MiniLM-L6-v2 model?",
+    "expected_answer": "The embedding dimension of all-MiniLM-L6-v2 is 384 dimensions.",
+    "expected_document_ids": ["doc-hybrid-search-architecture"],
+    "expected_chunk_indices": [1],
+    "expected_keywords": ["384", "MiniLM", "dimension"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-003",
+    "question": "What HTTP header is propagated across API endpoints for distributed request correlation tracing?",
+    "expected_answer": "The X-Request-ID HTTP header is used for distributed request correlation and structured logging context.",
+    "expected_document_ids": ["doc-rag-security-hardening"],
+    "expected_chunk_indices": [2],
+    "expected_keywords": ["X-Request-ID", "header", "correlation", "tracing"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-004",
+    "question": "What is the maximum allowed query character length enforced by the Search Sphere API?",
+    "expected_answer": "The maximum query character length enforced by request validation is 1000 characters.",
+    "expected_document_ids": ["doc-rag-security-hardening"],
+    "expected_chunk_indices": [3],
+    "expected_keywords": ["1000", "characters", "query", "limit"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-005",
+    "question": "Which cross-encoder model is utilized to rerank candidate chunks after hybrid retrieval?",
+    "expected_answer": "The cross-encoder/ms-marco-MiniLM-L-6-v2 model is used for cross-encoder reranking.",
+    "expected_document_ids": ["doc-hybrid-search-architecture"],
+    "expected_chunk_indices": [2],
+    "expected_keywords": ["cross-encoder", "ms-marco-MiniLM-L-6-v2", "rerank"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-006",
+    "question": "How do dense vector search and sparse BM25 retrieval complement each other when merged via Reciprocal Rank Fusion?",
+    "expected_answer": "Dense embeddings capture semantic meaning and conceptual similarity, while sparse BM25 excels at exact keyword and lexical matching. Reciprocal Rank Fusion (RRF) combines their ranked lists to achieve robust retrieval across vocabulary mismatch and technical domain queries.",
+    "expected_document_ids": ["doc-hybrid-search-architecture"],
+    "expected_chunk_indices": [1, 2],
+    "expected_keywords": ["dense", "sparse", "BM25", "semantic", "Reciprocal Rank Fusion", "RRF"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-007",
+    "question": "How does the document ingestion pipeline split text into chunks while preserving paragraph coherence?",
+    "expected_answer": "The ingestion worker uses semantic chunking based on cosine distance between adjacent sentences with a target of 500 tokens, maximum limit of 700 tokens, and 60 tokens overlap.",
+    "expected_document_ids": ["doc-hybrid-search-architecture"],
+    "expected_chunk_indices": [0, 1],
+    "expected_keywords": ["semantic chunking", "500 tokens", "overlap", "sentences"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-008",
+    "question": "How is multi-tenant isolation maintained across PostgreSQL database records and Qdrant vector points?",
+    "expected_answer": "In PostgreSQL, all document and conversation queries filter strictly by authenticated user ID. In Qdrant, searches specify document_id or user document ID payload filters, and an application-layer defense-in-depth filter discards any unauthorized points before returning.",
+    "expected_document_ids": ["doc-rag-security-hardening"],
+    "expected_chunk_indices": [0, 1],
+    "expected_keywords": ["multi-tenant", "isolation", "user_id", "Qdrant", "filter", "PostgreSQL"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-009",
+    "question": "Describe the multi-step lifecycle of a conversational query from input to SSE streaming answer.",
+    "expected_answer": "First, the user question and conversation history are evaluated by the query rewriter into a standalone search query. Hybrid retrieval retrieves candidate chunks from Qdrant, which are reranked by the cross-encoder. The top chunks and conversation context are fed into the Cohere LLM, which streams tokens via Server-Sent Events with verified citations before committing the final message.",
+    "expected_document_ids": ["doc-hybrid-search-architecture", "doc-rag-security-hardening"],
+    "expected_chunk_indices": [2, 3],
+    "expected_keywords": ["rewriter", "hybrid retrieval", "reranker", "Cohere", "Server-Sent Events", "streaming"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-010",
+    "question": "What is the maxmemory-policy configuration used in Redis for eviction?",
+    "expected_answer": "Redis maxmemory-policy specifies the key eviction strategy (such as volatile-lru, allkeys-lru, or noeviction) when RAM capacity is exceeded.",
+    "expected_document_ids": ["doc-database-storage-engines"],
+    "expected_chunk_indices": [2],
+    "expected_keywords": ["maxmemory-policy", "eviction", "Redis", "LRU"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-011",
+    "question": "What do the HNSW parameters M and ef_construct control in vector indexing?",
+    "expected_answer": "M controls the number of bidirectional links per node in the hierarchical graph, while ef_construct determines the search depth and candidate queue size during index construction.",
+    "expected_document_ids": ["doc-hybrid-search-architecture"],
+    "expected_chunk_indices": [1],
+    "expected_keywords": ["HNSW", "M", "ef_construct", "graph", "index"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-012",
+    "question": "How is structured logging enriched with correlation IDs using structlog?",
+    "expected_answer": "RequestCorrelationMiddleware binds request_id into structlog contextvars, ensuring every log line across service layers contains the unique correlation ID.",
+    "expected_document_ids": ["doc-rag-security-hardening"],
+    "expected_chunk_indices": [2],
+    "expected_keywords": ["structlog", "contextvars", "request_id", "middleware"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-013",
+    "question": "What database tables are initialized by the 001_initial_schema Alembic migration?",
+    "expected_answer": "The migration creates users, documents, document_contents, conversations, messages, and feedbacks tables.",
+    "expected_document_ids": ["doc-database-storage-engines"],
+    "expected_chunk_indices": [0],
+    "expected_keywords": ["users", "documents", "document_contents", "conversations", "messages", "feedbacks"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-014",
+    "question": "How does python-multipart handle streaming PDF uploads in FastAPI?",
+    "expected_answer": "python-multipart parses multipart/form-data payloads in chunks to prevent buffering entire large file binaries into RAM.",
+    "expected_document_ids": ["doc-rag-security-hardening"],
+    "expected_chunk_indices": [3],
+    "expected_keywords": ["python-multipart", "FastAPI", "upload", "streaming"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-015",
+    "question": "How does the system prevent split brain scenarios in leader election protocols?",
+    "expected_answer": "Raft prevents split brain by requiring a strict majority (quorum of N/2 + 1 votes) across term-stamped election ballots before declaring a leader.",
+    "expected_document_ids": ["doc-distributed-systems"],
+    "expected_chunk_indices": [0],
+    "expected_keywords": ["majority", "quorum", "split brain", "leader", "term"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-016",
+    "question": "What strategy is used to prevent old updates from overwriting newer database states?",
+    "expected_answer": "Multi-Version Concurrency Control (MVCC) and PostgreSQL Write-Ahead Logging (WAL) ensure transaction snapshot isolation without read locks.",
+    "expected_document_ids": ["doc-database-storage-engines"],
+    "expected_chunk_indices": [1],
+    "expected_keywords": ["MVCC", "concurrency", "isolation", "WAL"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-017",
+    "question": "How are ambiguous pronouns in user chat questions resolved before querying the vector database?",
+    "expected_answer": "Query rewriting leverages recent conversational message context to produce an explicit, self-contained standalone search query.",
+    "expected_document_ids": ["doc-hybrid-search-architecture"],
+    "expected_chunk_indices": [3],
+    "expected_keywords": ["query rewriting", "standalone", "context", "pronouns"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-018",
+    "question": "What mechanism stops malicious users from exhausting system resources with rapid requests?",
+    "expected_answer": "An in-memory sliding-window rate limiter tracks client request timestamps and enforces a limit of 120 requests per minute with 429 Too Many Requests responses.",
+    "expected_document_ids": ["doc-rag-security-hardening"],
+    "expected_chunk_indices": [1],
+    "expected_keywords": ["rate limiter", "sliding-window", "429", "120"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-019",
+    "question": "Can you explain its failover mechanism when the primary node crashes?",
+    "expected_answer": "When followers stop receiving periodic heartbeat signals, an election timeout fires and a candidate transitions to request votes for a new term.",
+    "expected_document_ids": ["doc-distributed-systems"],
+    "expected_chunk_indices": [0],
+    "expected_keywords": ["heartbeat", "election timeout", "candidate", "failover"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-020",
+    "question": "What are the latency tradeoffs of using it with large candidate pools?",
+    "expected_answer": "Cross-encoders process query and document tokens jointly through multi-layer transformer attention, resulting in O(N) quadratic latency compared to fast bi-encoder dot products.",
+    "expected_document_ids": ["doc-hybrid-search-architecture"],
+    "expected_chunk_indices": [2],
+    "expected_keywords": ["cross-encoder", "latency", "tradeoff", "attention", "candidate"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-021",
+    "question": "How does it handle transaction pooling under high connection loads?",
+    "expected_answer": "PgBouncer in transaction pooling mode assigns a backend server connection only during the lifetime of an active transaction, releasing it immediately upon commit or rollback.",
+    "expected_document_ids": ["doc-database-storage-engines"],
+    "expected_chunk_indices": [1],
+    "expected_keywords": ["PgBouncer", "transaction pooling", "connections", "commit"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-022",
+    "question": "Does it support granular chunk-level permissions for shared files?",
+    "expected_answer": "Search Sphere enforces tenant boundaries at the document ownership level; documents belong to specific users and chunk access inherits document authorization.",
+    "expected_document_ids": ["doc-rag-security-hardening"],
+    "expected_chunk_indices": [0],
+    "expected_keywords": ["tenant", "document", "authorization", "ownership"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-023",
+    "question": "What is the secret recipe for Kentucky Fried Chicken original seasoning?",
+    "expected_answer": "The provided documents do not contain enough information to answer this question.",
+    "expected_document_ids": [],
+    "expected_chunk_indices": [],
+    "expected_keywords": [],
+    "should_refuse": true
+  },
+  {
+    "id": "eval-024",
+    "question": "What were the quarterly financial earnings and revenue of Nvidia in fiscal year 2012?",
+    "expected_answer": "The provided documents do not contain enough information to answer this question.",
+    "expected_document_ids": [],
+    "expected_chunk_indices": [],
+    "expected_keywords": [],
+    "should_refuse": true
+  },
+  {
+    "id": "eval-025",
+    "question": "How many moons currently orbit the planet Saturn?",
+    "expected_answer": "The provided documents do not contain enough information to answer this question.",
+    "expected_document_ids": [],
+    "expected_chunk_indices": [],
+    "expected_keywords": [],
+    "should_refuse": true
+  },
+  {
+    "id": "eval-026",
+    "question": "What is the exact chemical synthesis procedure for the Moderna mRNA-1273 vaccine?",
+    "expected_answer": "The provided documents do not contain enough information to answer this question.",
+    "expected_document_ids": [],
+    "expected_chunk_indices": [],
+    "expected_keywords": [],
+    "should_refuse": true
+  },
+  {
+    "id": "eval-027",
+    "question": "On which page is the constant k for Reciprocal Rank Fusion defined?",
+    "expected_answer": "The RRF fusion constant k is configured as 60 in the hybrid retrieval specification on page 1.",
+    "expected_document_ids": ["doc-hybrid-search-architecture"],
+    "expected_chunk_indices": [1],
+    "expected_keywords": ["RRF", "60", "constant", "page 1"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-028",
+    "question": "What specific section defines the JWT token expiration time and signing algorithm?",
+    "expected_answer": "The JWT authentication settings define HS256 algorithm and a 7-day expiration window.",
+    "expected_document_ids": ["doc-rag-security-hardening"],
+    "expected_chunk_indices": [0],
+    "expected_keywords": ["HS256", "7 days", "JWT", "algorithm"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-029",
+    "question": "According to the architecture specification, what is the default target token size for semantic chunks?",
+    "expected_answer": "The default target chunk size is 500 tokens with an overlap of 60 tokens.",
+    "expected_document_ids": ["doc-hybrid-search-architecture"],
+    "expected_chunk_indices": [0],
+    "expected_keywords": ["500 tokens", "overlap", "60"],
+    "should_refuse": false
+  },
+  {
+    "id": "eval-030",
+    "question": "Where in the configuration are CORS allowed origins specified for production environments?",
+    "expected_answer": "CORS allowed origins are specified in ALLOWED_ORIGINS setting, defaulting to http://localhost:3000 and http://127.0.0.1:3000.",
+    "expected_document_ids": ["doc-rag-security-hardening"],
+    "expected_chunk_indices": [1],
+    "expected_keywords": ["ALLOWED_ORIGINS", "production", "CORS"],
+    "should_refuse": false
+  }
+]

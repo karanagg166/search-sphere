@@ -107,7 +107,7 @@ class DocumentService:
                 detail="Failed to save document metadata in database.",
             ) from exc
 
-        # 5. Push document to worker queue for background processing (next phase)
+        # 5. Push document to worker queue for background processing
         enqueue_document(document_id)
 
         logger.info(

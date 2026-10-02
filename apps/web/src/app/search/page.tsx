@@ -43,6 +43,10 @@ import {
   ChatTurn,
 } from "@/components/search";
 
+function generateTurnId(): string {
+  return `turn-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+}
+
 export default function SearchPage() {
   const { user, token, isAuthenticated, logout } = useAuth();
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -171,7 +175,7 @@ export default function SearchPage() {
       return;
     }
 
-    const turnId = `turn-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const turnId = generateTurnId();
     const newTurn: ChatTurn = {
       id: turnId,
       query: queryText,

@@ -11,35 +11,37 @@ function CallbackHandler() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { setSession } = useAuth();
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const token = searchParams.get("token");
+  const error = searchParams.get("error");
+  const provider = searchParams.get("provider") || "OAuth";
+
+  const initialError = error
+    ? `Authentication failed via ${provider}: ${error}`
+    : (!token ? "No authorization token received in callback." : null);
+
+  const [asyncError, setAsyncError] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState<boolean>(false);
 
-  useEffect(() => {
-    const token = searchParams.get("token");
-    const error = searchParams.get("error");
-    const provider = searchParams.get("provider") || "OAuth";
+  const errorMsg = initialError || asyncError;
 
-    if (error) {
-      setErrorMsg(`Authentication failed via ${provider}: ${error}`);
+  useEffect(() => {
+    if (!token || error) {
       return;
     }
 
-    if (token) {
-      setSession(token)
-        .then(() => {
-          setIsSuccess(true);
-          setTimeout(() => {
-            router.push("/");
-          }, 1000);
-        })
-        .catch((err) => {
-          console.error("Failed to establish session:", err);
-          setErrorMsg("Could not verify your authenticated session token.");
-        });
-    } else {
-      setErrorMsg("No authorization token received in callback.");
-    }
-  }, [searchParams, setSession, router]);
+    setSession(token)
+      .then(() => {
+        setIsSuccess(true);
+        setTimeout(() => {
+          router.push("/");
+        }, 1000);
+      })
+      .catch((err) => {
+        console.error("Failed to establish session:", err);
+        setAsyncError("Could not verify your authenticated session token.");
+      });
+  }, [token, error, setSession, router]);
 
   if (errorMsg) {
     return (

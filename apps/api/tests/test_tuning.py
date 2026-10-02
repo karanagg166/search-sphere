@@ -5,9 +5,8 @@ from src.evaluation import (
     EvalDataset,
     EvalItem,
     EvaluationSummary,
-    SingleEvalResult,
 )
-from src.evaluation.tuning import ComparisonResult, ExperimentRunner, TuningConfig
+from src.evaluation.tuning import ExperimentRunner, TuningConfig
 
 
 def test_tuning_config_validation():

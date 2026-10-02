@@ -33,7 +33,7 @@ def process_document_task(document_id: str) -> None:
     """
     Background job responsible for processing a single document.
 
-    Current pipeline stages:
+    Ingestion pipeline stages:
     1. Load document metadata from PostgreSQL.
     2. Download original PDF from object storage.
     3. Extract document content (native text, OCR text, and BLIP image captions).
@@ -41,13 +41,6 @@ def process_document_task(document_id: str) -> None:
     5. Structure-aware semantic chunking into ChunkedDocument.
     6. Batch dense embedding generation into EmbeddedDocument.
     7. Qdrant vector indexing and stale chunk synchronization.
-
-    Future pipeline stages:
-    - Query embedding
-    - Dense ANN retrieval / search
-    - Sparse / BM25 hybrid search fusion (RRF)
-    - Cross-encoder reranking
-    - RAG answer generation
     """
     asyncio.run(_process_document(document_id))
 

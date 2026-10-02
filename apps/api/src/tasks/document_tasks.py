@@ -16,12 +16,12 @@ except Exception as e:
 
 @dramatiq.actor(queue_name="default", actor_name="process_document_task")
 def process_document_task(document_id: str) -> None:
-    """Worker actor placeholder. Processing logic will be implemented in the next phase."""
+    """Dispatches document ingestion tasks to the background worker via RabbitMQ."""
     logger.info("process_document_task dispatched", document_id=document_id)
 
 
 def enqueue_document(document_id: str) -> bool:
-    """Pushes document_id to the worker queue for future extraction/processing."""
+    """Pushes document_id to the worker queue for background extraction and processing."""
     try:
         process_document_task.send(document_id)
         logger.info("Pushed document to worker queue", document_id=document_id)

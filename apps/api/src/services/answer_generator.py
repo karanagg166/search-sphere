@@ -132,7 +132,7 @@ class BaseAnswerProvider(ABC):
         pass
 
     @abstractmethod
-    async def generate_stream(
+    def generate_stream(
         self,
         query: str,
         context_chunks: list[Any],

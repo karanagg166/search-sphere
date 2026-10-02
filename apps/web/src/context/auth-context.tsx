@@ -91,16 +91,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loginWithGoogle = useCallback(() => {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
     window.location.href = `${apiUrl}/auth/google/login`;
   }, []);
 
   const loginWithGitHub = useCallback(() => {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
     window.location.href = `${apiUrl}/auth/github/login`;
   }, []);
 
   const loginWithDevOAuth = useCallback((provider: "google" | "github") => {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
     window.location.href = `${apiUrl}/auth/dev-login?provider=${provider}`;
   }, []);
 

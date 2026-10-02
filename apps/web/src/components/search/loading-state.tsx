@@ -8,21 +8,18 @@ interface LoadingStateProps {
 }
 
 export function LoadingState({ stage }: LoadingStateProps) {
-  const [currentStage, setCurrentStage] = useState<"searching" | "generating">(
-    stage || "searching"
-  );
+  const [simulatedStage, setSimulatedStage] = useState<"searching" | "generating">("searching");
 
   useEffect(() => {
-    if (stage) {
-      setCurrentStage(stage);
-      return;
-    }
+    if (stage) return;
     // Simulate progression from searching to generating if stage is not explicitly managed
     const timer = setTimeout(() => {
-      setCurrentStage("generating");
+      setSimulatedStage("generating");
     }, 1800);
     return () => clearTimeout(timer);
   }, [stage]);
+
+  const currentStage = stage || simulatedStage;
 
   return (
     <div

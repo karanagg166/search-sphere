@@ -55,14 +55,15 @@ jobs:
 
       - name: Lint with Ruff
         run: |
-          ruff check apps/api/src apps/worker/src || true
+          ruff check apps/api/src apps/api/tests apps/worker/src apps/worker/tests
 
-      - name: Initialize Database Schema
+      - name: Apply Database Migrations (Alembic)
+        working-directory: apps/api
         env:
           DATABASE_URL: "postgresql+asyncpg://test_user:test_password@localhost:5432/search_sphere_test"
-          PYTHONPATH: "apps/api"
+          PYTHONPATH: "."
         run: |
-          python -c "import asyncio; from src.db import init_db; asyncio.run(init_db())"
+          alembic upgrade head
 
       - name: Run Backend Unit & Hardening Tests
         env:
@@ -75,7 +76,7 @@ jobs:
           LOCAL_STORAGE_DIR: "/tmp/storage"
           PYTHONPATH: "apps/api"
         run: |
-          pytest apps/api/tests/test_evaluation.py apps/api/tests/test_tuning.py apps/api/tests/test_hardening.py apps/api/tests/test_feedback.py -v
+          pytest apps/api/tests -v
 
   frontend-test:
     name: Frontend Lint, Test & Build
@@ -103,6 +104,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install
+
+      - name: Lint Frontend
+        run: pnpm lint
 
       - name: Run Frontend Tests
         run: pnpm test

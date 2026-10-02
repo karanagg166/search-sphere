@@ -47,6 +47,12 @@ shell-worker: ## Open an interactive shell in the worker container
 shell-web: ## Open an interactive shell in the Next.js web container
 	docker compose exec web sh
 
+migrate: ## Run Alembic database migrations
+	docker compose exec api alembic upgrade head
+
+eval: ## Run RAG evaluation framework benchmark
+	docker compose exec api python -m src.evaluation.run_eval
+
 test: ## Run test suite in the API container
 	docker compose exec api pytest
 

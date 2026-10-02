@@ -62,15 +62,14 @@ app = FastAPI(
 # Request Correlation ID Middleware
 app.add_middleware(RequestCorrelationMiddleware)
 
-# CORS Configuration: strict origins in production, open in local development
-allowed_origins = (
-    settings.ALLOWED_ORIGINS
-    if settings.ENVIRONMENT.lower() == "production"
-    else ["*"]
-)
+# CORS Configuration: strict environment-configured origins with credentials
+cors_origins = list(settings.ALLOWED_ORIGINS)
+if settings.FRONTEND_URL and settings.FRONTEND_URL not in cors_origins:
+    cors_origins.append(settings.FRONTEND_URL)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
