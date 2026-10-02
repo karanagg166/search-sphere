@@ -30,6 +30,9 @@ services:
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://localhost:8000/auth/github/callback}
       RABBITMQ_URL: ${RABBITMQ_URL}
+      COHERE_API_KEY: ${COHERE_API_KEY:-}
+      QUERY_REWRITE_MODEL: ${QUERY_REWRITE_MODEL:-command-a-03-2025}
+      RAG_GENERATION_MODEL: ${RAG_GENERATION_MODEL:-command-a-03-2025}
     volumes:
       - ./apps/api:/app
       - ./apps/worker:/worker:ro
