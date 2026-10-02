@@ -1,6 +1,6 @@
 import math
 import re
-from typing import Sequence
+from collections.abc import Sequence
 
 
 def calculate_recall_at_k(

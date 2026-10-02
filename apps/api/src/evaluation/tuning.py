@@ -1,4 +1,6 @@
-from typing import Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from src.evaluation.dataset import EvalDataset

@@ -41,6 +41,9 @@ async def get_db():
 
 async def init_db():
     """Creates database tables if they do not already exist."""
+    # Ensure all ORM models are registered on Base.metadata before creating tables
+    import src.models  # noqa: F401
+
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)

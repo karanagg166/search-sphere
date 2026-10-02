@@ -1,6 +1,7 @@
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from datetime import UTC, datetime
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from src.evaluation.dataset import EvalDataset, EvalItem
@@ -35,7 +36,7 @@ class SingleEvalResult(BaseModel):
 class EvaluationSummary(BaseModel):
     """Aggregated evaluation metrics across the test dataset."""
 
-    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    timestamp: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     total_cases: int
     avg_recall_at_5: float
     avg_precision_at_5: float

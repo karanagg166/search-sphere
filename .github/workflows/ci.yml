@@ -57,6 +57,13 @@ jobs:
         run: |
           ruff check apps/api/src apps/worker/src || true
 
+      - name: Initialize Database Schema
+        env:
+          DATABASE_URL: "postgresql+asyncpg://test_user:test_password@localhost:5432/search_sphere_test"
+          PYTHONPATH: "apps/api"
+        run: |
+          python -c "import asyncio; from src.db import init_db; asyncio.run(init_db())"
+
       - name: Run Backend Unit & Hardening Tests
         env:
           ENVIRONMENT: "test"
@@ -82,28 +89,17 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
       - name: Install pnpm
         uses: pnpm/action-setup@v3
         with:
           version: 9
 
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
         with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('apps/web/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: "apps/web/pnpm-lock.yaml"
 
       - name: Install dependencies
         run: pnpm install
