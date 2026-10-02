@@ -6,12 +6,12 @@ export async function GET(request: NextRequest) {
   const error = searchParams.get("error");
   const errorDescription = searchParams.get("error_description");
 
-  // Handle OAuth rejection or error from Google
+  // Handle OAuth rejection or error from GitHub
   if (error) {
     const errorDetails = errorDescription || error;
     return NextResponse.redirect(
       new URL(
-        `/auth/callback?error=${encodeURIComponent(errorDetails)}&provider=google`,
+        `/auth/callback?error=${encodeURIComponent(errorDetails)}&provider=github`,
         request.url
       )
     );
@@ -20,16 +20,14 @@ export async function GET(request: NextRequest) {
   if (!code) {
     return NextResponse.redirect(
       new URL(
-        `/auth/callback?error=${encodeURIComponent("Authorization code missing from Google callback")}&provider=google`,
+        `/auth/callback?error=${encodeURIComponent("Authorization code missing from GitHub callback")}&provider=github`,
         request.url
       )
     );
   }
 
-  // Determine authorized redirect URI passed to Google
-  const redirectUri = `${request.nextUrl.origin}/api/auth/callback/google`;
+  const redirectUri = `${request.nextUrl.origin}/api/auth/callback/github`;
 
-  // Attempt token exchange with FastAPI backend
   const targetApis = [
     process.env.INTERNAL_API_URL,
     process.env.NEXT_PUBLIC_API_URL,
@@ -47,7 +45,7 @@ export async function GET(request: NextRequest) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          provider: "google",
+          provider: "github",
           code,
           redirect_uri: redirectUri,
         }),
@@ -60,7 +58,7 @@ export async function GET(request: NextRequest) {
       } else {
         const errorJson = await resp.json().catch(() => ({}));
         exchangeError = errorJson.detail || `OAuth exchange failed (HTTP ${resp.status})`;
-        console.error("Backend OAuth exchange failed:", {
+        console.error("Backend GitHub OAuth exchange failed:", {
           status: resp.status,
           apiBase,
           error: exchangeError,
@@ -68,7 +66,7 @@ export async function GET(request: NextRequest) {
         break;
       }
     } catch (err) {
-      console.warn(`OAuth exchange attempt failed at ${apiBase}:`, err);
+      console.warn(`GitHub OAuth exchange attempt failed at ${apiBase}:`, err);
       continue;
     }
   }
@@ -76,7 +74,7 @@ export async function GET(request: NextRequest) {
   if (tokenData?.access_token) {
     return NextResponse.redirect(
       new URL(
-        `/auth/callback?token=${encodeURIComponent(tokenData.access_token)}&provider=google`,
+        `/auth/callback?token=${encodeURIComponent(tokenData.access_token)}&provider=github`,
         request.url
       )
     );
@@ -84,7 +82,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.redirect(
     new URL(
-      `/auth/callback?error=${encodeURIComponent(exchangeError)}&provider=google`,
+      `/auth/callback?error=${encodeURIComponent(exchangeError)}&provider=github`,
       request.url
     )
   );
