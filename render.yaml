@@ -1,0 +1,43 @@
+services:
+  - type: web
+    name: search-sphere-api
+    runtime: docker
+    dockerfilePath: apps/api/Dockerfile
+    dockerContext: apps/api
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: FRONTEND_URL
+        value: https://search-sphere-rose.vercel.app
+      - key: ALLOWED_ORIGINS
+        value: '["https://search-sphere-rose.vercel.app","https://search-sphere-karan-aggarwals-projects.vercel.app","http://localhost:3000"]'
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        value: https://jyzjgoniuwexvipbbpwa.supabase.co
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        value: sb_publishable_akdD07TJBdKVGZ16monKaQ_MEjd8GG7
+      - key: GOOGLE_CLIENT_ID
+        value: 819492193967-4j16egplrleocade2fqhiv0lcs0nl1mg.apps.googleusercontent.com
+      - key: GOOGLE_REDIRECT_URI
+        value: https://search-sphere-rose.vercel.app/api/auth/callback/google
+      - key: RATE_LIMIT_ENABLED
+        value: "false"
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_SYNC
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: COHERE_API_KEY
+        sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
