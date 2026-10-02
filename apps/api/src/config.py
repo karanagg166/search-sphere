@@ -88,13 +88,13 @@ class Settings(BaseSettings):
 
     # Cohere & Query Rewriting
     COHERE_API_KEY: str | None = None
-    QUERY_REWRITE_MODEL: str = "command-r-08-2024"
+    QUERY_REWRITE_MODEL: str = "command-a-03-2025"
     QUERY_REWRITE_ENABLED: bool = True
     QUERY_REWRITE_TIMEOUT_SECONDS: float = 5.0
     QUERY_REWRITE_MAX_CONTEXT_MESSAGES: int = 5
 
     # Grounded RAG Answer Generation (Cohere)
-    RAG_GENERATION_MODEL: str = "command-r-08-2024"
+    RAG_GENERATION_MODEL: str = "command-a-03-2025"
     RAG_GENERATION_ENABLED: bool = True
     RAG_GENERATION_TIMEOUT_SECONDS: float = 15.0
     RAG_MAX_CONTEXT_CHUNKS: int = 5

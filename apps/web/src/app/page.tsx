@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { fetchHealth } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
@@ -10,6 +11,7 @@ import {
   Activity,
   CheckCircle2,
   Search,
+  Sparkles,
   XCircle,
   LogIn,
   UserPlus,
@@ -49,6 +51,15 @@ export default function Home() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          {/* Ask AI / Search Link */}
+          <Link
+            href="/search"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border border-primary/40 bg-primary/10 hover:bg-primary/20 text-primary text-xs font-medium transition-colors shadow-sm"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Search &amp; Q&amp;A</span>
+          </Link>
+
           {/* Backend Connection Indicator */}
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-border bg-card text-xs font-medium">
             <Activity className="w-3.5 h-3.5 text-primary" />
