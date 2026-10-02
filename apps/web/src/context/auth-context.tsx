@@ -90,21 +90,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const loginWithGoogle = useCallback(() => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-    window.location.href = `${apiUrl}/auth/google/login`;
+    window.location.href = "/api/auth/google/login";
   }, []);
 
   const loginWithGitHub = useCallback(() => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-    window.location.href = `${apiUrl}/auth/github/login`;
+    window.location.href = "/api/auth/github/login";
   }, []);
 
   const loginWithDevOAuth = useCallback((provider: "google" | "github") => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-    window.location.href = `${apiUrl}/auth/dev-login?provider=${provider}`;
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+    const isLocalhost =
+      typeof window !== "undefined" &&
+      (window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1");
+
+    if (apiUrl && (!apiUrl.includes("localhost") || isLocalhost)) {
+      window.location.href = `${apiUrl}/auth/dev-login?provider=${provider}`;
+    } else {
+      window.location.href = `/login?error=${encodeURIComponent(
+        "Development login is only available when a local backend is running."
+      )}`;
+    }
   }, []);
 
   const logout = useCallback(() => {
