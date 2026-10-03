@@ -107,6 +107,10 @@ class ConversationAnswerRequest(BaseModel):
         default=None,
         description="Optional document ID to scope retrieval to a single document.",
     )
+    score_threshold: float | None = Field(
+        default_factory=lambda: settings.RERANKER_SCORE_THRESHOLD,
+        description="Optional minimum relevance score threshold for retrieved chunks.",
+    )
 
     @field_validator("query")
     @classmethod

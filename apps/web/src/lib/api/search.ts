@@ -11,6 +11,7 @@ export interface AnswerRequestPayload {
   top_k?: number;
   candidate_k?: number;
   document_id?: string;
+  score_threshold?: number;
 }
 
 export interface AnswerSource {

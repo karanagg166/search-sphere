@@ -108,7 +108,7 @@ describe("Search Components", () => {
       },
     ];
 
-    it("renders source citations with document names, page numbers, and excerpts", () => {
+    it("renders source citations with document names, page numbers, and excerpts when expanded", () => {
       const docMap = {
         "doc-abc": "Deep Learning Guide.pdf",
         "doc-xyz": "Math Fundamentals.pdf",
@@ -116,18 +116,31 @@ describe("Search Components", () => {
 
       render(<SourceList sources={mockSources} documentMap={docMap} />);
 
+      // Initially collapsed by default as requested
+      expect(screen.queryByText("Deep Learning Guide.pdf")).toBeNull();
+
+      // Click to show sources
+      const showButton = screen.getByRole("button", { name: /show sources/i });
+      fireEvent.click(showButton);
+
       expect(screen.getByText("Deep Learning Guide.pdf")).toBeDefined();
       expect(screen.getByText("Pages 10–12")).toBeDefined();
+      expect(screen.getByText("Math Fundamentals.pdf")).toBeDefined();
+      expect(screen.getByText("Page 4")).toBeDefined();
+
+      // Click the first source to expand its excerpt
+      const firstSourceCard = screen.getByRole("button", {
+        name: /Deep Learning Guide\.pdf/i,
+      });
+      fireEvent.click(firstSourceCard);
+
       expect(
         screen.getByText(/Neural networks utilize backpropagation/i)
       ).toBeDefined();
-
-      expect(screen.getByText("Math Fundamentals.pdf")).toBeDefined();
-      expect(screen.getByText("Page 4")).toBeDefined();
     });
 
     it("does not expose internal backend scores like rerank_score", () => {
-      render(<SourceList sources={mockSources} />);
+      render(<SourceList sources={mockSources} defaultExpanded={true} />);
       expect(screen.queryByText(/9\.15/)).toBeNull();
       expect(screen.queryByText(/8\.72/)).toBeNull();
       expect(screen.queryByText(/rerank/i)).toBeNull();
@@ -170,6 +183,12 @@ describe("Search Components", () => {
       expect(
         screen.getByText(/Backpropagation computes the gradient of the loss function/)
       ).toBeDefined();
+
+      // Show sources button should be present
+      const showSourcesBtn = screen.getByRole("button", { name: /show sources/i });
+      expect(showSourcesBtn).toBeDefined();
+      fireEvent.click(showSourcesBtn);
+
       expect(screen.getByText("ML Book.pdf")).toBeDefined();
       expect(screen.getByText("Pages 1–2")).toBeDefined();
     });

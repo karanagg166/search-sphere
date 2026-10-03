@@ -53,6 +53,9 @@ class CrossEncoderReranker:
         device: str | None = None,
         default_top_k: int | None = None,
         max_top_k: int | None = None,
+        default_score_threshold: float | None = None,
+        deduplicate: bool | None = None,
+        similarity_threshold: float | None = None,
     ) -> None:
         self.model_name = model_name or getattr(
             settings, "RERANKER_MODEL_NAME", "cross-encoder/ms-marco-MiniLM-L-6-v2"
@@ -73,6 +76,21 @@ class CrossEncoderReranker:
             if max_top_k is not None
             else getattr(settings, "RERANKER_MAX_TOP_K", 100)
         )
+        self.default_score_threshold = (
+            default_score_threshold
+            if default_score_threshold is not None
+            else getattr(settings, "RERANKER_SCORE_THRESHOLD", None)
+        )
+        self.default_deduplicate = (
+            deduplicate
+            if deduplicate is not None
+            else getattr(settings, "CHUNK_DEDUPLICATION_ENABLED", True)
+        )
+        self.default_similarity_threshold = (
+            similarity_threshold
+            if similarity_threshold is not None
+            else getattr(settings, "CHUNK_SIMILARITY_THRESHOLD", 0.70)
+        )
         self._model = model
 
     def rerank(
@@ -80,6 +98,9 @@ class CrossEncoderReranker:
         query: str,
         candidates: Sequence[Any],
         top_k: int | None = None,
+        score_threshold: float | None = None,
+        deduplicate: bool | None = None,
+        similarity_threshold: float | None = None,
     ) -> list[RerankedSearchResult]:
         """
         Rerank candidate document chunks against the user query.
@@ -164,7 +185,13 @@ class CrossEncoderReranker:
                 key=lambda item: item[1],
                 reverse=True,
             )
-            top_candidates = sorted_candidates[:resolved_top_k]
+            top_candidates = self._filter_and_deduplicate(
+                sorted_candidates,
+                top_k=resolved_top_k,
+                score_threshold=score_threshold,
+                deduplicate=deduplicate,
+                similarity_threshold=similarity_threshold,
+            )
         except Exception as exc:
             score_duration_ms = (time.perf_counter() - start_score) * 1000
             logger.warning(
@@ -189,7 +216,13 @@ class CrossEncoderReranker:
                 key=lambda item: item[1],
                 reverse=True,
             )
-            top_candidates = sorted_by_rrf[:resolved_top_k]
+            top_candidates = self._filter_and_deduplicate(
+                sorted_by_rrf,
+                top_k=resolved_top_k,
+                score_threshold=score_threshold,
+                deduplicate=deduplicate,
+                similarity_threshold=similarity_threshold,
+            )
 
         # 7. Build RerankedSearchResult objects
         results: list[RerankedSearchResult] = []
@@ -290,19 +323,125 @@ class CrossEncoderReranker:
 
         return results
 
+    def _filter_and_deduplicate(
+        self,
+        scored_candidates: list[tuple[Any, float]],
+        top_k: int,
+        score_threshold: float | None = None,
+        deduplicate: bool | None = None,
+        similarity_threshold: float | None = None,
+    ) -> list[tuple[Any, float]]:
+        """Filter out low-scoring candidates and suppress redundant overlapping chunks."""
+        resolved_threshold = (
+            score_threshold
+            if score_threshold is not None
+            else self.default_score_threshold
+        )
+        resolved_dedup = (
+            deduplicate
+            if deduplicate is not None
+            else self.default_deduplicate
+        )
+        resolved_sim = (
+            similarity_threshold
+            if similarity_threshold is not None
+            else self.default_similarity_threshold
+        )
+
+        # 1. Minimum score threshold filter
+        if resolved_threshold is not None:
+            scored_candidates = [
+                (c, s) for c, s in scored_candidates if s >= resolved_threshold
+            ]
+
+        if not scored_candidates:
+            return []
+
+        # 2. Redundancy suppression and chunk deduplication
+        if resolved_dedup:
+            deduped: list[tuple[Any, float]] = []
+            seen_doc_chunks: set[tuple[str, int]] = set()
+
+            for cand, score in scored_candidates:
+                doc_id = (
+                    getattr(cand, "document_id", None)
+                    or (cand.get("document_id") if isinstance(cand, dict) else "")
+                    or ""
+                )
+                chunk_idx = (
+                    getattr(cand, "chunk_index", None)
+                    if hasattr(cand, "chunk_index")
+                    else (cand.get("chunk_index") if isinstance(cand, dict) else None)
+                )
+
+                # Strict identifier deduplication
+                if doc_id and chunk_idx is not None:
+                    key = (str(doc_id), int(chunk_idx))
+                    if key in seen_doc_chunks:
+                        continue
+
+                # Content overlap / containment deduplication against already accepted candidates
+                content = (
+                    getattr(cand, "content", "")
+                    if hasattr(cand, "content")
+                    else (cand.get("content", "") if isinstance(cand, dict) else "")
+                )
+                words = set(content.lower().split())
+                if words:
+                    is_redundant = False
+                    for prev_cand, _ in deduped:
+                        prev_content = (
+                            getattr(prev_cand, "content", "")
+                            if hasattr(prev_cand, "content")
+                            else (prev_cand.get("content", "") if isinstance(prev_cand, dict) else "")
+                        )
+                        prev_words = set(prev_content.lower().split())
+                        if not prev_words:
+                            continue
+
+                        overlap = len(words & prev_words)
+                        min_len = min(len(words), len(prev_words))
+                        if min_len > 0 and (overlap / min_len) >= resolved_sim:
+                            is_redundant = True
+                            break
+
+                    if is_redundant:
+                        continue
+
+                if doc_id and chunk_idx is not None:
+                    seen_doc_chunks.add((str(doc_id), int(chunk_idx)))
+                deduped.append((cand, score))
+                if len(deduped) >= top_k:
+                    break
+
+            return deduped
+
+        return scored_candidates[:top_k]
+
     async def arerank(
         self,
         query: str,
         candidates: Sequence[Any],
         top_k: int | None = None,
+        score_threshold: float | None = None,
+        deduplicate: bool | None = None,
+        similarity_threshold: float | None = None,
     ) -> list[RerankedSearchResult]:
         """
-        Asynchronously rerank candidates by executing the model inference in a
-        worker thread pool to avoid blocking the event loop.
+        Asynchronously rerank candidates by executing model inference and
+        deduplication in a worker thread pool.
         """
         import asyncio
 
-        return await asyncio.to_thread(self.rerank, query, candidates, top_k)
+        return await asyncio.to_thread(
+            self.rerank,
+            query,
+            candidates,
+            top_k,
+            score_threshold,
+            deduplicate,
+            similarity_threshold,
+        )
 
     def _score_pairs(self, pairs: list[tuple[str, str]]) -> list[float]:
         """Run batched model inference and validate returned scores."""

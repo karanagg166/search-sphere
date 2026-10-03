@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     RERANKER_TOP_K: int = 5
     RERANKER_MAX_TOP_K: int = 100
     RERANKER_DEVICE: str = "cpu"
+    RERANKER_SCORE_THRESHOLD: float | None = None
+    CHUNK_DEDUPLICATION_ENABLED: bool = True
+    CHUNK_SIMILARITY_THRESHOLD: float = 0.70
 
     # OCR & Image Processing
     TESSERACT_CMD: str | None = None

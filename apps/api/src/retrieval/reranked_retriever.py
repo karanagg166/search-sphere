@@ -76,6 +76,8 @@ class RerankedHybridRetriever:
         candidate_k: int | None = None,
         document_id: str | None = None,
         document_ids: list[str] | None = None,
+        score_threshold: float | None = None,
+        deduplicate: bool | None = None,
     ) -> list[RerankedSearchResult]:
         """
         Execute two-stage hybrid retrieval followed by cross-encoder reranking.
@@ -218,6 +220,8 @@ class RerankedHybridRetriever:
                 query=clean_query,
                 candidates=candidates,
                 top_k=resolved_top_k,
+                score_threshold=score_threshold,
+                deduplicate=deduplicate,
             )
         except (RerankingError, RerankingValidationError) as exc:
             logger.exception(

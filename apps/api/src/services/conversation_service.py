@@ -210,6 +210,7 @@ class ConversationService:
             top_k=request.top_k,
             candidate_k=request.candidate_k,
             document_id=request.document_id,
+            score_threshold=request.score_threshold,
         )
         answer_resp = await self.answer_service.generate_answer(
             request=answer_req,
@@ -300,6 +301,7 @@ class ConversationService:
             top_k=request.top_k,
             candidate_k=request.candidate_k,
             document_id=request.document_id,
+            score_threshold=request.score_threshold,
         )
         search_response = await self.answer_service.search_service.search(
             request=search_req,

@@ -312,6 +312,7 @@ async def test_successful_reranked_search() -> None:
                 candidate_k=20,
                 document_id=doc.id,
                 document_ids=None,
+                score_threshold=None,
             )
         finally:
             app.dependency_overrides.pop(get_retriever, None)
@@ -665,6 +666,7 @@ async def test_search_with_query_rewriting_context() -> None:
                 candidate_k=20,
                 document_id=doc.id,
                 document_ids=None,
+                score_threshold=None,
             )
         finally:
             app.dependency_overrides.pop(get_retriever, None)
@@ -724,7 +726,89 @@ async def test_search_with_query_rewriting_failure_falls_back_gracefully() -> No
                 candidate_k=20,
                 document_id=doc.id,
                 document_ids=None,
+                score_threshold=None,
             )
         finally:
             app.dependency_overrides.pop(get_retriever, None)
             app.dependency_overrides.pop(get_query_rewriter, None)
+
+
+@pytest.mark.asyncio
+async def test_search_forwards_score_threshold_parameter() -> None:
+    """Verify that score_threshold in search request is passed to retriever."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        user_id, token, headers = await create_user_with_token(client, prefix="score_th")
+        doc = await insert_test_document(user_id=user_id, filename="redis.pdf")
+
+        mock_retriever = AsyncMock()
+        mock_retriever.search.return_value = [
+            make_reranked_result(document_id=doc.id, rerank_score=2.5)
+        ]
+        app.dependency_overrides[get_retriever] = lambda: mock_retriever
+
+        try:
+            resp = await client.post(
+                "/search",
+                json={
+                    "query": "redis caching",
+                    "score_threshold": 1.0,
+                    "document_id": doc.id,
+                },
+                headers=headers,
+            )
+            assert resp.status_code == 200
+            mock_retriever.search.assert_awaited_once_with(
+                query="redis caching",
+                top_k=5,
+                candidate_k=20,
+                document_id=doc.id,
+                document_ids=None,
+                score_threshold=1.0,
+            )
+        finally:
+            app.dependency_overrides.pop(get_retriever, None)
+
+
+def test_cross_encoder_score_threshold_and_deduplication() -> None:
+    """Verify that CrossEncoderReranker prunes below threshold and deduplicates overlapping chunks."""
+    from unittest.mock import MagicMock
+
+    from src.retrieval.reranker import CrossEncoderReranker
+
+    class DummyCandidate:
+        def __init__(self, doc_id: str, chunk_idx: int, content: str, score: float = 0.0):
+            self.document_id = doc_id
+            self.chunk_index = chunk_idx
+            self.content = content
+            self.score = score
+
+    candidates = [
+        DummyCandidate("doc-1", 0, "Harsh Mishra Contact Info Email LinkedIn"),
+        DummyCandidate("doc-1", 2, "Education IIITDM Jabalpur B.Tech Experience at Clink AI"),
+        DummyCandidate("doc-1", 1, "Education IIITDM Jabalpur B.Tech"),  # Overlaps chunk 2!
+        DummyCandidate("doc-1", 3, "Irrelevant project Quick Clinic details"),
+    ]
+
+    mock_model = MagicMock()
+    # Mock scores: cand 0 -> 2.0, cand 1 -> 1.5, cand 2 -> 1.4, cand 3 -> -12.0
+    mock_model.rerank.return_value = [2.0, 1.5, 1.4, -12.0]
+
+    reranker = CrossEncoderReranker(model=mock_model)
+
+    # With score_threshold = 0.0, the -12.0 chunk is pruned; chunk 1 is pruned due to overlap with chunk 2
+    results = reranker.rerank(
+        query="what college harsh mishra ?",
+        candidates=candidates,
+        top_k=5,
+        score_threshold=0.0,
+        deduplicate=True,
+    )
+
+    # Should only return chunk 0 and chunk 2 (chunk 1 dropped due to redundancy, chunk 3 dropped due to score < 0.0)
+    assert len(results) == 2
+    assert results[0].chunk_index == 0
+    assert results[0].rerank_score == 2.0
+    assert results[1].chunk_index == 2
+    assert results[1].rerank_score == 1.5
+

@@ -132,6 +132,7 @@ class SearchService:
                 candidate_k=request.candidate_k,
                 document_id=target_document_id,
                 document_ids=target_document_ids,
+                score_threshold=request.score_threshold,
             )
         except (RerankedQueryValidationError, HybridQueryValidationError) as exc:
             logger.warning(

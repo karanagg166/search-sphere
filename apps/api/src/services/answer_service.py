@@ -73,6 +73,7 @@ class AnswerService:
             top_k=request.top_k,
             candidate_k=request.candidate_k,
             document_id=request.document_id,
+            score_threshold=request.score_threshold,
         )
         search_response = await self.search_service.search(
             request=search_req,
@@ -195,6 +196,7 @@ class AnswerService:
             top_k=request.top_k,
             candidate_k=request.candidate_k,
             document_id=request.document_id,
+            score_threshold=request.score_threshold,
         )
         search_response = await self.search_service.search(
             request=search_req,
