@@ -162,6 +162,32 @@ async def readiness_check():
         )
 
 
+@app.get("/diag", tags=["Health"])
+async def diagnostic_check():
+    """Diagnostic check of FastEmbed models and Qdrant connectivity."""
+    import time
+    res: dict = {"database": "ok", "fastembed": "unknown", "qdrant": "unknown"}
+    try:
+        t0 = time.perf_counter()
+        from fastembed import TextEmbedding
+        cache_path = getattr(settings, "FASTEMBED_CACHE_PATH", None)
+        emb = TextEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2", cache_dir=cache_path)
+        vecs = list(emb.embed(["ping"]))
+        res["fastembed"] = f"ok ({len(vecs[0])} dims, {(time.perf_counter() - t0)*1000:.1f}ms)"
+    except Exception as exc:
+        res["fastembed"] = f"error: {exc}"
+
+    try:
+        from src.vector_store.qdrant_store import QdrantVectorStore
+        store = QdrantVectorStore()
+        info = store.client.get_collection(store.collection_name)
+        res["qdrant"] = f"ok (collection '{store.collection_name}', {info.points_count} points)"
+    except Exception as exc:
+        res["qdrant"] = f"error: {exc}"
+
+    return res
+
+
 @app.get("/", tags=["Root"])
 async def root():
     """Root endpoint with basic navigation links."""

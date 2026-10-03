@@ -59,6 +59,19 @@ async def list_documents(
     )
 
 
+@router.post(
+    "/sync-unindexed",
+    status_code=status.HTTP_200_OK,
+    summary="Sync all unindexed documents",
+    description="Scan and index any uploaded documents that are pending indexing.",
+)
+async def sync_all_unindexed(
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    indexed = await sync_unindexed_documents()
+    return {"message": "Sync completed", "indexed_count": len(indexed), "indexed_ids": indexed}
+
+
 @router.get(
     "/{document_id}",
     response_model=DocumentResponse,
@@ -113,16 +126,3 @@ async def reindex_document(
     await index_document_pipeline(document_id=doc.id)
     updated_doc = await service.get_user_document(document_id=document_id, user_id=current_user.id)
     return DocumentResponse.model_validate(updated_doc)
-
-
-@router.post(
-    "/sync-unindexed",
-    status_code=status.HTTP_200_OK,
-    summary="Sync all unindexed documents",
-    description="Scan and index any uploaded documents that are pending indexing.",
-)
-async def sync_all_unindexed(
-    current_user: User = Depends(get_current_user),
-) -> dict:
-    indexed = await sync_unindexed_documents()
-    return {"message": "Sync completed", "indexed_count": len(indexed), "indexed_ids": indexed}

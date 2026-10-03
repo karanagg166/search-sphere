@@ -1,4 +1,5 @@
 import math
+import os
 from typing import Any
 
 import structlog
@@ -273,11 +274,16 @@ class DenseEmbedder:
             if not fastembed_model_name.startswith("sentence-transformers/") and fastembed_model_name == "all-MiniLM-L6-v2":
                 fastembed_model_name = "sentence-transformers/all-MiniLM-L6-v2"
 
+            cache_path = getattr(settings, "FASTEMBED_CACHE_PATH", None) or os.getenv("FASTEMBED_CACHE_PATH")
             logger.info(
                 "Loading FastEmbed TextEmbedding model (ONNX Runtime)",
                 model_name=fastembed_model_name,
+                cache_path=cache_path,
             )
-            loaded_model = TextEmbedding(model_name=fastembed_model_name)
+            loaded_model = TextEmbedding(
+                model_name=fastembed_model_name,
+                cache_dir=cache_path,
+            )
             DenseEmbedder._cached_model = loaded_model
             DenseEmbedder._cached_model_name = self.model_name
             self._model = loaded_model
@@ -288,10 +294,14 @@ class DenseEmbedder:
             return self._model
         except Exception as fastembed_exc:
             logger.warning(
-                "FastEmbed unavailable or failed to initialize, falling back to SentenceTransformer",
+                "FastEmbed unavailable or failed to initialize",
                 model_name=self.model_name,
                 error=str(fastembed_exc),
             )
+            if getattr(settings, "ENVIRONMENT", "").lower() == "production":
+                raise DenseEmbeddingError(
+                    f"FastEmbed failed to initialize in production: {fastembed_exc}"
+                ) from fastembed_exc
 
         # 2. Fallback to SentenceTransformer
         logger.info(

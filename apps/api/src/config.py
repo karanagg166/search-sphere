@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
     EMBEDDING_BATCH_SIZE: int = 32
     EMBEDDING_DEVICE: str = "cpu"
+    FASTEMBED_CACHE_PATH: str = "/app/.fastembed_cache"
 
     # Sparse Retrieval (BM25)
     SPARSE_MODEL: str = "Qdrant/bm25"

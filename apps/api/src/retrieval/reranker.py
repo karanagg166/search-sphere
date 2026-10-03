@@ -1,4 +1,5 @@
 import math
+import os
 import time
 from collections.abc import Sequence
 from typing import Any
@@ -400,8 +401,9 @@ class CrossEncoderReranker:
             from fastembed.rerank.cross_encoder import TextCrossEncoder
 
             fastembed_model = "Xenova/ms-marco-MiniLM-L-6-v2"
-            logger.info("Loading FastEmbed TextCrossEncoder", model_name=fastembed_model)
-            loaded_model = TextCrossEncoder(model_name=fastembed_model)
+            cache_path = getattr(settings, "FASTEMBED_CACHE_PATH", None) or os.getenv("FASTEMBED_CACHE_PATH")
+            logger.info("Loading FastEmbed TextCrossEncoder", model_name=fastembed_model, cache_path=cache_path)
+            loaded_model = TextCrossEncoder(model_name=fastembed_model, cache_dir=cache_path)
             CrossEncoderReranker._cached_model = loaded_model
             CrossEncoderReranker._cached_model_name = self.model_name
             self._model = loaded_model
@@ -409,9 +411,13 @@ class CrossEncoderReranker:
             return self._model
         except Exception as fe_exc:
             logger.warning(
-                "FastEmbed TextCrossEncoder unavailable or failed to load, falling back to SentenceTransformer",
+                "FastEmbed TextCrossEncoder unavailable or failed to load",
                 error=str(fe_exc),
             )
+            if getattr(settings, "ENVIRONMENT", "").lower() == "production":
+                raise RerankingError(
+                    f"FastEmbed TextCrossEncoder failed in production: {fe_exc}"
+                ) from fe_exc
 
         # 2. Fallback to SentenceTransformer CrossEncoder
         logger.info(
