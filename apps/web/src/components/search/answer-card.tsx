@@ -212,9 +212,20 @@ export function AnswerCard({ turn, documentMap = {}, onRetry, onFeedback }: Answ
                 </button>
               )}
             </div>
-          ) : turn.answer ? (
+          ) : turn.status === "loading" && !turn.answer ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground py-2 animate-pulse">
+              <span className="w-2 h-2 rounded-full bg-primary" />
+              <span>Synthesizing answer from retrieved documents...</span>
+            </div>
+          ) : (
             <>
-              <SafeFormattedAnswer text={turn.answer} />
+              {turn.answer ? (
+                <SafeFormattedAnswer text={turn.answer} />
+              ) : (
+                <p className="text-sm leading-relaxed text-muted-foreground italic">
+                  I couldn&apos;t find relevant information in your documents to answer that question.
+                </p>
+              )}
               {turn.sources && turn.sources.length > 0 && (
                 <SourceList sources={turn.sources} documentMap={documentMap} />
               )}
@@ -253,7 +264,7 @@ export function AnswerCard({ turn, documentMap = {}, onRetry, onFeedback }: Answ
                 </div>
               )}
             </>
-          ) : null}
+          )}
         </div>
       </div>
     </div>

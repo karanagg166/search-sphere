@@ -76,4 +76,53 @@ describe("streamAnswer SSE client", () => {
 
     expect(receivedError).toBe("Cohere API unavailable");
   });
+
+  it("correctly handles split / fragmented chunks across read boundaries", async () => {
+    // Chunks split across arbitrary boundaries
+    const chunks = [
+      'event: token\n',
+      'data: {"token": "Chunked "}\n\n',
+      'event: to',
+      'ken\ndata: {"token": "Stream"}\n',
+      '\n',
+      'event: done\n',
+      'data: {"message_id": "msg-1", "answer": "Chunked Stream", "sources": []}\n\n',
+    ];
+
+    const mockBody = new ReadableStream({
+      async start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        }
+        controller.close();
+      },
+    });
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      body: mockBody,
+    });
+
+    const tokens: string[] = [];
+    let receivedDone: any = null;
+
+    await streamAnswer(
+      "http://test/answer/stream",
+      { query: "test" },
+      null,
+      {
+        onToken: (t) => tokens.push(t),
+        onDone: (d) => {
+          receivedDone = d;
+        },
+      }
+    );
+
+    expect(tokens.join("")).toBe("Chunked Stream");
+    expect(receivedDone).toEqual({
+      message_id: "msg-1",
+      answer: "Chunked Stream",
+      sources: [],
+    });
+  });
 });

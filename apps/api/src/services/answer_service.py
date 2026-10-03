@@ -242,9 +242,42 @@ class AnswerService:
                 yield f"event: token\ndata: {json.dumps({'token': token})}\n\n"
 
             raw_answer = "".join(accumulated_tokens).strip()
+            if not raw_answer:
+                logger.warning(
+                    "Stream completed with empty tokens; invoking non-streaming fallback",
+                    user_id=user.id,
+                )
+                try:
+                    fallback_answer, _ = await self.answer_generator.generate_answer(
+                        query=search_response.query,
+                        chunks=usable_chunks,
+                        conversation_context=request.conversation_context,
+                    )
+                    raw_answer = fallback_answer.strip() if fallback_answer else ""
+                    if raw_answer:
+                        yield f"event: token\ndata: {json.dumps({'token': raw_answer})}\n\n"
+                except Exception as fb_exc:
+                    logger.error("Fallback generation failed", error=str(fb_exc))
+
+            if not raw_answer:
+                raw_answer = NO_RESULTS_ANSWER
+                yield f"event: token\ndata: {json.dumps({'token': raw_answer})}\n\n"
+
             clean_answer = sanitize_citations(raw_answer, max_source_id=len(sources))
             yield f"event: done\ndata: {json.dumps({'answer': clean_answer, 'sources': sources_payload})}\n\n"
         except Exception as exc:
             logger.error("Streaming answer failed", error=str(exc), user_id=user.id)
-            yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
+            try:
+                fallback_answer, _ = await self.answer_generator.generate_answer(
+                    query=search_response.query,
+                    chunks=usable_chunks,
+                    conversation_context=request.conversation_context,
+                )
+                raw_answer = fallback_answer.strip() if fallback_answer else NO_RESULTS_ANSWER
+                clean_answer = sanitize_citations(raw_answer, max_source_id=len(sources))
+                yield f"event: token\ndata: {json.dumps({'token': clean_answer})}\n\n"
+                yield f"event: done\ndata: {json.dumps({'answer': clean_answer, 'sources': sources_payload})}\n\n"
+            except Exception as fb_exc:
+                logger.error("Non-streaming fallback failed", error=str(fb_exc))
+                yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
 

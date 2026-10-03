@@ -56,10 +56,13 @@ export function ConversationSidebar({
 
         {conversations.map((conv) => {
           const isActive = conv.id === activeId;
-          const formattedDate = new Date(conv.updated_at).toLocaleDateString(
-            undefined,
-            { month: "short", day: "numeric" }
-          );
+          const formattedDate = conv.updated_at
+            ? new Date(conv.updated_at).toLocaleDateString(undefined, {
+                month: "short",
+                day: "numeric",
+              })
+            : "";
+          const displayTitle = conv.title?.trim() || "Untitled Conversation";
 
           return (
             <div
@@ -72,7 +75,7 @@ export function ConversationSidebar({
               }`}
             >
               <div className="flex flex-col gap-0.5 truncate flex-1">
-                <span className="truncate text-left">{conv.title}</span>
+                <span className="truncate text-left">{displayTitle}</span>
                 <div className="flex items-center gap-2 text-[10px] text-muted-foreground/80">
                   <span className="flex items-center gap-1">
                     <Clock className="w-2.5 h-2.5" />

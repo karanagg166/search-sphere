@@ -16,6 +16,7 @@ import {
   UserPlus,
   LogOut,
   HelpCircle,
+  Loader2,
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { fetchDocuments, fetchHealth } from "@/lib/api";
@@ -56,7 +57,9 @@ export default function SearchPage() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [isAnswering, setIsAnswering] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [selectedDocId, setSelectedDocId] = useState<string | undefined>(undefined);
+  const hasAutoLoadedRef = React.useRef(false);
 
   // Health status
   const { data: health, isLoading: healthLoading, isError: healthError } = useQuery({
@@ -85,6 +88,21 @@ export default function SearchPage() {
     refetchOnWindowFocus: false,
   });
 
+  // Automatically restore active conversation or load latest conversation on mount
+  useEffect(() => {
+    if (!isAuthenticated || conversations.length === 0 || hasAutoLoadedRef.current) return;
+
+    hasAutoLoadedRef.current = true;
+    const savedConvId = typeof window !== "undefined" ? localStorage.getItem("search_sphere_active_conv") : null;
+    const targetConv = savedConvId && conversations.some((c) => c.id === savedConvId)
+      ? savedConvId
+      : conversations[0]?.id;
+
+    if (targetConv) {
+      handleSelectConversation(targetConv);
+    }
+  }, [isAuthenticated, conversations]);
+
   // Create document ID to filename mapping
   const documentMap = useMemo<Record<string, string>>(() => {
     const map: Record<string, string> = {};
@@ -110,20 +128,30 @@ export default function SearchPage() {
   };
 
   const handleNewChat = () => {
+    if (isAnswering) return;
     setActiveConversationId(null);
     setTurns([]);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("search_sphere_active_conv");
+    }
   };
 
   const handleSelectConversation = async (convId: string) => {
-    if (convId === activeConversationId || isAnswering) return;
+    if (isAnswering) return;
+    if (convId === activeConversationId && turns.length > 0) return;
+
     setActiveConversationId(convId);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("search_sphere_active_conv", convId);
+    }
+    setIsLoadingHistory(true);
 
     try {
       const detail = await getConversation(convId);
       const loadedTurns: ChatTurn[] = [];
       let pendingUserTurn: ChatTurn | null = null;
 
-      for (const msg of detail.messages) {
+      for (const msg of detail.messages || []) {
         if (msg.role === "user") {
           if (pendingUserTurn) {
             loadedTurns.push(pendingUserTurn);
@@ -134,13 +162,27 @@ export default function SearchPage() {
             status: "success",
             timestamp: new Date(msg.created_at),
           };
-        } else if (msg.role === "assistant" && pendingUserTurn) {
-          pendingUserTurn.answer = msg.content;
-          pendingUserTurn.retrievalQuery = msg.retrieval_query || undefined;
-          pendingUserTurn.rewritten = msg.rewritten;
-          pendingUserTurn.sources = msg.sources || [];
-          loadedTurns.push(pendingUserTurn);
-          pendingUserTurn = null;
+        } else if (msg.role === "assistant") {
+          const answerContent = msg.content?.trim() || "I couldn't find relevant information in your documents to answer that question.";
+          if (pendingUserTurn) {
+            pendingUserTurn.answer = answerContent;
+            pendingUserTurn.retrievalQuery = msg.retrieval_query || undefined;
+            pendingUserTurn.rewritten = msg.rewritten;
+            pendingUserTurn.sources = msg.sources || [];
+            loadedTurns.push(pendingUserTurn);
+            pendingUserTurn = null;
+          } else {
+            loadedTurns.push({
+              id: msg.id,
+              query: msg.original_query || "Previous Question",
+              answer: answerContent,
+              retrievalQuery: msg.retrieval_query || undefined,
+              rewritten: msg.rewritten,
+              sources: msg.sources || [],
+              status: "success",
+              timestamp: new Date(msg.created_at),
+            });
+          }
         }
       }
 
@@ -151,6 +193,8 @@ export default function SearchPage() {
       setTurns(loadedTurns);
     } catch (err) {
       console.error("Failed to load conversation messages", err);
+    } finally {
+      setIsLoadingHistory(false);
     }
   };
 
@@ -187,99 +231,152 @@ export default function SearchPage() {
     setTurns((prev) => [...prev, newTurn]);
     setIsAnswering(true);
 
-    try {
-      let targetConvId = activeConversationId;
+    let targetConvId = activeConversationId;
 
+    try {
       // If no active conversation, create one first
       if (!targetConvId) {
         const created = await createConversation();
         targetConvId = created.id;
         setActiveConversationId(created.id);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("search_sphere_active_conv", created.id);
+        }
       }
 
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
       const streamUrl = `${apiUrl}/conversations/${targetConvId}/answer/stream`;
       let accumulatedText = "";
+      let receivedDone = false;
+      let streamError: string | null = null;
 
-      await streamAnswer(
-        streamUrl,
-        {
-          query: queryText,
-          document_id: docIdFilter || undefined,
-          top_k: 5,
-          candidate_k: 20,
-        },
-        token,
-        {
-          onMetadata: (meta) => {
-            setTurns((prev) =>
-              prev.map((t) =>
-                t.id === turnId
-                  ? {
-                      ...t,
-                      retrievalQuery: meta.retrieval_query,
-                      rewritten: meta.rewritten,
-                    }
-                  : t
-              )
-            );
+      try {
+        await streamAnswer(
+          streamUrl,
+          {
+            query: queryText,
+            document_id: docIdFilter || undefined,
+            top_k: 5,
+            candidate_k: 20,
           },
-          onSources: (sources) => {
-            setTurns((prev) =>
-              prev.map((t) =>
-                t.id === turnId
-                  ? {
-                      ...t,
-                      sources,
-                    }
-                  : t
-              )
-            );
-          },
-          onToken: (chunk) => {
-            accumulatedText += chunk;
-            setTurns((prev) =>
-              prev.map((t) =>
-                t.id === turnId
-                  ? {
-                      ...t,
-                      answer: accumulatedText,
-                    }
-                  : t
-              )
-            );
-          },
-          onDone: (donePayload) => {
-            setTurns((prev) =>
-              prev.map((t) =>
-                t.id === turnId
-                  ? {
-                      ...t,
-                      id: donePayload.message_id || t.id,
-                      status: "success",
-                      answer: donePayload.answer || accumulatedText,
-                      sources: donePayload.sources || t.sources,
-                    }
-                  : t
-              )
-            );
-            refetchConversations();
-          },
-          onError: (errMsg) => {
-            setTurns((prev) =>
-              prev.map((t) =>
-                t.id === turnId
-                  ? {
-                      ...t,
-                      status: "error",
-                      errorMessage: errMsg,
-                    }
-                  : t
-              )
-            );
-          },
+          token,
+          {
+            onMetadata: (meta) => {
+              setTurns((prev) =>
+                prev.map((t) =>
+                  t.id === turnId
+                    ? {
+                        ...t,
+                        retrievalQuery: meta.retrieval_query,
+                        rewritten: meta.rewritten,
+                      }
+                    : t
+                )
+              );
+            },
+            onSources: (sources) => {
+              setTurns((prev) =>
+                prev.map((t) =>
+                  t.id === turnId
+                    ? {
+                        ...t,
+                        sources,
+                      }
+                    : t
+                )
+              );
+            },
+            onToken: (chunk) => {
+              accumulatedText += chunk;
+              setTurns((prev) =>
+                prev.map((t) =>
+                  t.id === turnId
+                    ? {
+                        ...t,
+                        answer: accumulatedText,
+                      }
+                    : t
+                )
+              );
+            },
+            onDone: (donePayload) => {
+              receivedDone = true;
+              const finalAnswer = donePayload.answer || accumulatedText;
+              setTurns((prev) =>
+                prev.map((t) =>
+                  t.id === turnId
+                    ? {
+                        ...t,
+                        id: donePayload.message_id || t.id,
+                        status: "success",
+                        answer: finalAnswer,
+                        sources: donePayload.sources || t.sources,
+                      }
+                    : t
+                )
+              );
+              refetchConversations();
+            },
+            onError: (errMsg) => {
+              streamError = errMsg;
+            },
+          }
+        );
+      } catch (err: any) {
+        streamError = err?.message || "Streaming connection failed";
+      }
+
+      // If streaming failed or ended without yielding an answer, perform seamless fallback
+      if (!receivedDone || !accumulatedText.trim()) {
+        try {
+          const directResp = await answerInConversation(targetConvId, {
+            query: queryText,
+            document_id: docIdFilter || undefined,
+            top_k: 5,
+            candidate_k: 20,
+          });
+
+          const finalAnswer =
+            directResp.answer?.trim() ||
+            "I couldn't find relevant information in your documents to answer that question.";
+
+          setTurns((prev) =>
+            prev.map((t) =>
+              t.id === turnId
+                ? {
+                    ...t,
+                    id: directResp.message?.id || directResp.conversation_id || t.id,
+                    status: "success",
+                    answer: finalAnswer,
+                    sources: directResp.sources || [],
+                    retrievalQuery: directResp.retrieval_query,
+                    rewritten: directResp.rewritten,
+                  }
+                : t
+            )
+          );
+          refetchConversations();
+          return;
+        } catch (directErr: any) {
+          const finalErrMsg =
+            directErr?.response?.data?.detail ||
+            streamError ||
+            directErr?.message ||
+            "Unable to generate answer. Please try again.";
+
+          setTurns((prev) =>
+            prev.map((t) =>
+              t.id === turnId
+                ? {
+                    ...t,
+                    status: "error",
+                    errorMessage: finalErrMsg,
+                  }
+                : t
+            )
+          );
         }
-      );
+      }
     } catch (err: any) {
       const backendMessage =
         err?.response?.data?.detail ||
@@ -448,8 +545,18 @@ export default function SearchPage() {
             </div>
           )}
 
+          {/* Loading Conversation History State */}
+          {isLoadingHistory && (
+            <div className="py-20 px-6 text-center border border-border/70 rounded-xl bg-card/40 flex flex-col items-center justify-center gap-3 my-auto shadow-sm">
+              <Loader2 className="w-6 h-6 animate-spin text-primary" />
+              <p className="text-xs text-muted-foreground font-medium">
+                Loading conversation history...
+              </p>
+            </div>
+          )}
+
           {/* Empty State */}
-          {turns.length === 0 && (
+          {!isLoadingHistory && turns.length === 0 && (
             <div className="py-14 px-6 text-center border border-dashed border-border rounded-xl bg-card/40 flex flex-col items-center justify-center gap-4 my-auto">
               <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
                 <Search className="w-7 h-7" />
@@ -499,20 +606,22 @@ export default function SearchPage() {
           )}
 
           {/* Thread of Turns */}
-          <div className="flex flex-col gap-4">
-            {turns.map((turn) => (
-              <AnswerCard
-                key={turn.id}
-                turn={turn}
-                documentMap={documentMap}
-                onRetry={(q) => handleAskQuestion(q, selectedDocId)}
-                onFeedback={handleFeedback}
-              />
-            ))}
+          {!isLoadingHistory && turns.length > 0 && (
+            <div className="flex flex-col gap-4">
+              {turns.map((turn) => (
+                <AnswerCard
+                  key={turn.id}
+                  turn={turn}
+                  documentMap={documentMap}
+                  onRetry={(q) => handleAskQuestion(q, selectedDocId)}
+                  onFeedback={handleFeedback}
+                />
+              ))}
 
-            {/* Active Loading State */}
-            {isAnswering && <LoadingState />}
-          </div>
+              {/* Active Loading State before first token arrives */}
+              {isAnswering && !turns.some((t) => t.status === "loading" && t.answer) && <LoadingState />}
+            </div>
+          )}
 
           {/* Bottom Search Input */}
           <div className="sticky bottom-6 pt-2">

@@ -65,44 +65,97 @@ export async function streamAnswer(
     return;
   }
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   try {
+    reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let currentEvent = "message";
+    const dataLines: string[] = [];
+
+    const dispatchEvent = () => {
+      if (dataLines.length === 0) return;
+      const dataStr = dataLines.join("\n").trim();
+      dataLines.length = 0;
+      const eventType = currentEvent;
+      currentEvent = "message";
+
+      if (!dataStr) return;
+
+      try {
+        const parsed = JSON.parse(dataStr);
+        if (eventType === "metadata") {
+          handlers.onMetadata?.(parsed);
+        } else if (eventType === "source") {
+          handlers.onSources?.(parsed.sources || (Array.isArray(parsed) ? parsed : []));
+        } else if (eventType === "token") {
+          handlers.onToken?.(parsed.token ?? parsed.text ?? "");
+        } else if (eventType === "done") {
+          handlers.onDone?.({
+            message_id: parsed.message_id,
+            answer: parsed.answer ?? "",
+            sources: parsed.sources || [],
+          });
+        } else if (eventType === "error") {
+          handlers.onError?.(parsed.error || parsed.detail || "Streaming error occurred.");
+        } else {
+          // Untyped / message event fallback
+          if (parsed.token !== undefined || parsed.text !== undefined) {
+            handlers.onToken?.(parsed.token ?? parsed.text ?? "");
+          } else if (parsed.answer !== undefined) {
+            handlers.onDone?.(parsed);
+          } else if (parsed.error !== undefined) {
+            handlers.onError?.(parsed.error);
+          }
+        }
+      } catch {
+        // Raw non-JSON text fallback
+        if (eventType === "token") {
+          handlers.onToken?.(dataStr);
+        } else if (eventType === "error") {
+          handlers.onError?.(dataStr);
+        }
+      }
+    };
+
+    const processBuffer = (flushRemaining: boolean) => {
+      const lines = buffer.split(/\r?\n/);
+      if (!flushRemaining) {
+        buffer = lines.pop() || "";
+      } else {
+        buffer = "";
+      }
+
+      for (const rawLine of lines) {
+        const line = rawLine.trimStart();
+        if (line.startsWith("event:")) {
+          currentEvent = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          dataLines.push(line.slice(5).trim());
+        } else if (line.trim() === "") {
+          dispatchEvent();
+        }
+      }
+
+      if (flushRemaining) {
+        dispatchEvent();
+      }
+    };
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
+      processBuffer(false);
+    }
 
-      let currentEvent = "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith("event:")) {
-          currentEvent = trimmed.replace("event:", "").trim();
-        } else if (trimmed.startsWith("data:")) {
-          const dataStr = trimmed.replace("data:", "").trim();
-          try {
-            const parsed = JSON.parse(dataStr);
-            if (currentEvent === "metadata") {
-              handlers.onMetadata?.(parsed);
-            } else if (currentEvent === "source") {
-              handlers.onSources?.(parsed.sources || []);
-            } else if (currentEvent === "token") {
-              handlers.onToken?.(parsed.token || "");
-            } else if (currentEvent === "done") {
-              handlers.onDone?.(parsed);
-            } else if (currentEvent === "error") {
-              handlers.onError?.(parsed.error || "Streaming error occurred.");
-            }
-          } catch {
-            // malformed data chunk
-          }
-        }
-      }
+    // Flush any remaining characters at the end of the stream
+    buffer += decoder.decode();
+    if (buffer.length > 0) {
+      processBuffer(true);
+    } else if (dataLines.length > 0) {
+      dispatchEvent();
     }
   } catch (err: any) {
     if (err.name === "AbortError") {
@@ -111,6 +164,12 @@ export async function streamAnswer(
     }
     handlers.onError?.(err.message || "Streaming connection failed.");
   } finally {
-    reader.releaseLock();
+    if (reader) {
+      try {
+        reader.releaseLock();
+      } catch {
+        // ignore lock release error
+      }
+    }
   }
 }

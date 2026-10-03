@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import re
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
@@ -318,6 +319,7 @@ class CohereAnswerProvider(BaseAnswerProvider):
             f"User Question: {clean_query}"
         )
 
+        tokens_yielded = 0
         try:
             client = self._get_client()
             stream = client.chat_stream(
@@ -326,15 +328,56 @@ class CohereAnswerProvider(BaseAnswerProvider):
                 model=self.model,
                 temperature=self.temperature,
             )
+            if inspect.isawaitable(stream):
+                stream = await stream
+
             async for event in stream:
                 if getattr(event, "event_type", None) == "text-generation":
                     text_chunk = getattr(event, "text", "")
                     if text_chunk:
+                        tokens_yielded += 1
                         yield text_chunk
+                elif getattr(event, "type", None) == "content-delta":
+                    delta = getattr(event, "delta", None)
+                    if delta:
+                        message = getattr(delta, "message", None)
+                        if message:
+                            content = getattr(message, "content", None)
+                            if content:
+                                delta_text = getattr(content, "text", "")
+                                if delta_text:
+                                    tokens_yielded += 1
+                                    yield delta_text
+                        delta_text = getattr(delta, "text", "")
+                        if delta_text:
+                            tokens_yielded += 1
+                            yield delta_text
                 elif hasattr(event, "delta") and hasattr(event.delta, "message") and hasattr(event.delta.message, "content"):
                     delta_text = getattr(event.delta.message.content, "text", "")
                     if delta_text:
+                        tokens_yielded += 1
                         yield delta_text
+                elif hasattr(event, "text") and getattr(event, "text", None):
+                    text_val = getattr(event, "text")
+                    if isinstance(text_val, str) and text_val:
+                        tokens_yielded += 1
+                        yield text_val
+
+            # Fallback if streaming completed without yielding tokens
+            if tokens_yielded == 0:
+                logger.warning(
+                    "Cohere stream completed without yielding tokens; falling back to direct chat",
+                    query=clean_query,
+                )
+                direct_resp = await client.chat(
+                    message=user_message,
+                    preamble=ANSWER_SYSTEM_PREAMBLE,
+                    model=self.model,
+                    temperature=self.temperature,
+                )
+                direct_text = getattr(direct_resp, "text", "")
+                if direct_text:
+                    yield direct_text
         except TimeoutError as exc:
             logger.error("Cohere stream timed out", timeout=self.timeout_seconds, query=clean_query)
             raise AnswerGenerationTimeoutError(
