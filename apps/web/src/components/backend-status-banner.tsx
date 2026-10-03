@@ -1,22 +1,21 @@
 "use client";
 
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { fetchHealth } from "@/lib/api";
 import { Loader2, Zap, CheckCircle2 } from "lucide-react";
 
 export function BackendStatusBanner() {
   const [status, setStatus] = useState<"idle" | "waking" | "online" | "offline">("idle");
   const [elapsed, setElapsed] = useState<number>(0);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const pingBackend = useCallback(async () => {
-    const startTime = Date.now();
     let hasResponded = false;
 
     // If it takes more than 2 seconds, assume the server is waking from cold sleep
     const slowTimer = setTimeout(() => {
       if (!hasResponded) {
         setStatus("waking");
+        setElapsed(0);
       }
     }, 2000);
 
@@ -30,36 +29,37 @@ export function BackendStatusBanner() {
       clearTimeout(slowTimer);
       // If error, could be still spinning up on Render (502/503 during cold boot)
       setStatus("waking");
+      setElapsed(0);
     }
   }, []);
 
   // Poll until online if waking
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-    if (status === "waking") {
-      interval = setInterval(() => {
-        setElapsed((prev) => prev + 3);
-        fetchHealth()
-          .then(() => {
-            setStatus("online");
-            setElapsed(0);
-          })
-          .catch(() => {
-            // Server still waking up; keep retrying without throwing noise
-          });
-      }, 3500);
-    } else {
-      setElapsed(0);
+    if (status !== "waking") {
+      return;
     }
 
+    const interval = setInterval(() => {
+      setElapsed((prev) => prev + 3);
+      fetchHealth()
+        .then(() => {
+          setStatus("online");
+        })
+        .catch(() => {
+          // Server still waking up; keep retrying without throwing noise
+        });
+    }, 3500);
+
     return () => {
-      if (interval) clearInterval(interval);
+      clearInterval(interval);
     };
   }, [status]);
 
   // Initial check & auto-wake on tab focus
   useEffect(() => {
-    pingBackend();
+    const initialTimer = setTimeout(() => {
+      pingBackend();
+    }, 0);
 
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
@@ -71,9 +71,9 @@ export function BackendStatusBanner() {
     window.addEventListener("focus", pingBackend);
 
     return () => {
+      clearTimeout(initialTimer);
       window.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("focus", pingBackend);
-      if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [pingBackend]);
 

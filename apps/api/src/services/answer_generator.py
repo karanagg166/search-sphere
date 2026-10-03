@@ -358,7 +358,7 @@ class CohereAnswerProvider(BaseAnswerProvider):
                         tokens_yielded += 1
                         yield delta_text
                 elif hasattr(event, "text") and getattr(event, "text", None):
-                    text_val = getattr(event, "text")
+                    text_val = event.text
                     if isinstance(text_val, str) and text_val:
                         tokens_yielded += 1
                         yield text_val

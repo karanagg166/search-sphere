@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -88,6 +88,71 @@ export default function SearchPage() {
     refetchOnWindowFocus: false,
   });
 
+  const handleSelectConversation = useCallback(
+    async (convId: string) => {
+      if (isAnswering) return;
+      if (convId === activeConversationId && turns.length > 0) return;
+
+      setActiveConversationId(convId);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("search_sphere_active_conv", convId);
+      }
+      setIsLoadingHistory(true);
+
+      try {
+        const detail = await getConversation(convId);
+        const loadedTurns: ChatTurn[] = [];
+        let pendingUserTurn: ChatTurn | null = null;
+
+        for (const msg of detail.messages || []) {
+          if (msg.role === "user") {
+            if (pendingUserTurn) {
+              loadedTurns.push(pendingUserTurn);
+            }
+            pendingUserTurn = {
+              id: msg.id,
+              query: msg.content,
+              status: "success",
+              timestamp: new Date(msg.created_at),
+            };
+          } else if (msg.role === "assistant") {
+            const answerContent = msg.content?.trim() || "I couldn't find relevant information in your documents to answer that question.";
+            if (pendingUserTurn) {
+              pendingUserTurn.answer = answerContent;
+              pendingUserTurn.retrievalQuery = msg.retrieval_query || undefined;
+              pendingUserTurn.rewritten = msg.rewritten;
+              pendingUserTurn.sources = msg.sources || [];
+              loadedTurns.push(pendingUserTurn);
+              pendingUserTurn = null;
+            } else {
+              loadedTurns.push({
+                id: msg.id,
+                query: msg.original_query || "Previous Question",
+                answer: answerContent,
+                retrievalQuery: msg.retrieval_query || undefined,
+                rewritten: msg.rewritten,
+                sources: msg.sources || [],
+                status: "success",
+                timestamp: new Date(msg.created_at),
+              });
+            }
+          }
+        }
+
+        if (pendingUserTurn) {
+          loadedTurns.push(pendingUserTurn);
+        }
+
+        setTurns(loadedTurns);
+      } catch (err) {
+        console.error("Failed to load conversation messages", err);
+      } finally {
+        setIsLoadingHistory(false);
+      }
+    },
+    [activeConversationId, isAnswering, turns.length]
+  );
+
   // Automatically restore active conversation or load latest conversation on mount
   useEffect(() => {
     if (!isAuthenticated || conversations.length === 0 || hasAutoLoadedRef.current) return;
@@ -99,9 +164,12 @@ export default function SearchPage() {
       : conversations[0]?.id;
 
     if (targetConv) {
-      handleSelectConversation(targetConv);
+      const timer = setTimeout(() => {
+        handleSelectConversation(targetConv);
+      }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [isAuthenticated, conversations]);
+  }, [isAuthenticated, conversations, handleSelectConversation]);
 
   // Create document ID to filename mapping
   const documentMap = useMemo<Record<string, string>>(() => {
@@ -133,68 +201,6 @@ export default function SearchPage() {
     setTurns([]);
     if (typeof window !== "undefined") {
       localStorage.removeItem("search_sphere_active_conv");
-    }
-  };
-
-  const handleSelectConversation = async (convId: string) => {
-    if (isAnswering) return;
-    if (convId === activeConversationId && turns.length > 0) return;
-
-    setActiveConversationId(convId);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("search_sphere_active_conv", convId);
-    }
-    setIsLoadingHistory(true);
-
-    try {
-      const detail = await getConversation(convId);
-      const loadedTurns: ChatTurn[] = [];
-      let pendingUserTurn: ChatTurn | null = null;
-
-      for (const msg of detail.messages || []) {
-        if (msg.role === "user") {
-          if (pendingUserTurn) {
-            loadedTurns.push(pendingUserTurn);
-          }
-          pendingUserTurn = {
-            id: msg.id,
-            query: msg.content,
-            status: "success",
-            timestamp: new Date(msg.created_at),
-          };
-        } else if (msg.role === "assistant") {
-          const answerContent = msg.content?.trim() || "I couldn't find relevant information in your documents to answer that question.";
-          if (pendingUserTurn) {
-            pendingUserTurn.answer = answerContent;
-            pendingUserTurn.retrievalQuery = msg.retrieval_query || undefined;
-            pendingUserTurn.rewritten = msg.rewritten;
-            pendingUserTurn.sources = msg.sources || [];
-            loadedTurns.push(pendingUserTurn);
-            pendingUserTurn = null;
-          } else {
-            loadedTurns.push({
-              id: msg.id,
-              query: msg.original_query || "Previous Question",
-              answer: answerContent,
-              retrievalQuery: msg.retrieval_query || undefined,
-              rewritten: msg.rewritten,
-              sources: msg.sources || [],
-              status: "success",
-              timestamp: new Date(msg.created_at),
-            });
-          }
-        }
-      }
-
-      if (pendingUserTurn) {
-        loadedTurns.push(pendingUserTurn);
-      }
-
-      setTurns(loadedTurns);
-    } catch (err) {
-      console.error("Failed to load conversation messages", err);
-    } finally {
-      setIsLoadingHistory(false);
     }
   };
 

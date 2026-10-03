@@ -21,12 +21,6 @@ function LoginForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (urlError) {
-      setError(urlError);
-    }
-  }, [urlError]);
-
-  useEffect(() => {
     if (isAuthenticated) {
       router.push("/");
     }
