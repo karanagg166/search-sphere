@@ -1,8 +1,6 @@
 from io import BytesIO
+from typing import Any
 
-import cv2
-import numpy as np
-import pytesseract
 import structlog
 from PIL import Image, UnidentifiedImageError
 
@@ -32,7 +30,12 @@ class OcrProcessor:
 
     def __init__(self) -> None:
         if settings.TESSERACT_CMD:
-            pytesseract.pytesseract.tesseract_cmd = settings.TESSERACT_CMD
+            try:
+                import pytesseract
+
+                pytesseract.pytesseract.tesseract_cmd = settings.TESSERACT_CMD
+            except Exception:
+                pass
 
     def extract_text(self, image_bytes: bytes) -> str:
         """
@@ -58,18 +61,20 @@ class OcrProcessor:
         processed_image = self._preprocess(image_bytes)
 
         try:
+            import pytesseract
+
             text = pytesseract.image_to_string(
                 processed_image,
                 config="--oem 3 --psm 6",
             )
-        except pytesseract.TesseractNotFoundError as exc:
-            logger.exception("Tesseract executable was not found.")
-
-            raise OcrProcessingError(
-                "Tesseract OCR is not installed or is not configured correctly."
-            ) from exc
-
         except Exception as exc:
+            err_name = type(exc).__name__
+            if "TesseractNotFoundError" in err_name:
+                logger.exception("Tesseract executable was not found.")
+                raise OcrProcessingError(
+                    "Tesseract OCR is not installed or is not configured correctly."
+                ) from exc
+
             logger.exception(
                 "OCR extraction failed",
                 error=str(exc),
@@ -101,7 +106,7 @@ class OcrProcessor:
 
             raise OcrProcessingError("OCR input is not a valid image.") from exc
 
-    def _preprocess(self, image_bytes: bytes) -> np.ndarray:
+    def _preprocess(self, image_bytes: bytes) -> Any:
         """
         Prepare an image for OCR.
 
@@ -114,6 +119,8 @@ class OcrProcessor:
         The result generally gives Tesseract cleaner text than the
         original image.
         """
+        import cv2
+        import numpy as np
 
         image_array = np.frombuffer(
             image_bytes,

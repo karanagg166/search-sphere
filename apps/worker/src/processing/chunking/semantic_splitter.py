@@ -153,6 +153,18 @@ class SemanticEmbedder:
 
         model = self._get_model()
 
+        # Check if model has embed method (FastEmbed)
+        if hasattr(model, "embed"):
+            embeddings = list(model.embed(texts))
+            return [
+                vec.tolist()
+                if hasattr(vec, "tolist")
+                else list(vec)
+                if hasattr(vec, "__iter__") and not isinstance(vec, (str, bytes))
+                else vec
+                for vec in embeddings
+            ]
+
         # Check if model has encode method (SentenceTransformer or Mock)
         if hasattr(model, "encode"):
             embeddings = model.encode(
@@ -171,7 +183,7 @@ class SemanticEmbedder:
         return list(results)
 
     def _get_model(self) -> Any:
-        """Lazily load and cache the SentenceTransformer model on CPU."""
+        """Lazily load and cache the embedding model on CPU."""
         if self._model is not None:
             return self._model
 
@@ -182,6 +194,33 @@ class SemanticEmbedder:
             self._model = SemanticEmbedder._cached_model
             return self._model
 
+        # 1. Prefer FastEmbed (ONNX Runtime) for lightweight CPU execution
+        try:
+            from fastembed import TextEmbedding
+
+            fastembed_model_name = self.model_name
+            if (
+                not fastembed_model_name.startswith("sentence-transformers/")
+                and fastembed_model_name == "all-MiniLM-L6-v2"
+            ):
+                fastembed_model_name = "sentence-transformers/all-MiniLM-L6-v2"
+
+            logger.info(
+                "Loading FastEmbed model for semantic chunking",
+                model_name=fastembed_model_name,
+            )
+            loaded_model = TextEmbedding(model_name=fastembed_model_name)
+            SemanticEmbedder._cached_model = loaded_model
+            SemanticEmbedder._cached_model_name = self.model_name
+            self._model = loaded_model
+            return self._model
+        except Exception as fe_exc:
+            logger.warning(
+                "FastEmbed not available for semantic chunking",
+                error=str(fe_exc),
+            )
+
+        # 2. Fallback to SentenceTransformer
         logger.info(
             "Loading semantic chunking sentence-transformer model",
             model_name=self.model_name,
@@ -202,8 +241,8 @@ class SemanticEmbedder:
             return self._model
 
         except Exception as exc:
-            logger.exception(
-                "Failed to load sentence-transformer model",
+            logger.warning(
+                "Failed to load sentence-transformer model for semantic chunking",
                 model_name=self.model_name,
                 error=str(exc),
             )

@@ -1,27 +1,32 @@
-import dramatiq
 import structlog
-from dramatiq.brokers.rabbitmq import RabbitmqBroker
 
 from src.config import settings
 
 logger = structlog.get_logger()
 
-# Setup RabbitMQ broker for the API producer
+# Setup RabbitMQ broker for the API producer if dramatiq is available
+process_document_task = None
 try:
+    import dramatiq
+    from dramatiq.brokers.rabbitmq import RabbitmqBroker
+
     broker = RabbitmqBroker(url=settings.RABBITMQ_URL)
     dramatiq.set_broker(broker)
+
+    @dramatiq.actor(queue_name="default", actor_name="process_document_task")
+    def process_document_task(document_id: str) -> None:
+        """Dispatches document ingestion tasks to the background worker via RabbitMQ."""
+        logger.info("process_document_task dispatched", document_id=document_id)
+
 except Exception as e:
     logger.warning("Could not initialize RabbitMQ broker for Dramatiq", error=str(e))
-
-
-@dramatiq.actor(queue_name="default", actor_name="process_document_task")
-def process_document_task(document_id: str) -> None:
-    """Dispatches document ingestion tasks to the background worker via RabbitMQ."""
-    logger.info("process_document_task dispatched", document_id=document_id)
+    process_document_task = None
 
 
 def enqueue_document(document_id: str) -> bool:
     """Pushes document_id to the worker queue for background extraction and processing."""
+    if process_document_task is None:
+        return False
     try:
         process_document_task.send(document_id)
         logger.info("Pushed document to worker queue", document_id=document_id)

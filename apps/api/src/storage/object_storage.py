@@ -30,6 +30,11 @@ class ObjectStorage(ABC):
         pass
 
     @abstractmethod
+    async def download(self, key: str) -> bytes:
+        """Downloads file content as bytes by storage key."""
+        pass
+
+    @abstractmethod
     async def exists(self, key: str) -> bool:
         """Checks whether the object exists in storage."""
         pass
@@ -95,6 +100,24 @@ class SupabaseStorage(ObjectStorage):
             resp = await client.delete(url, headers=headers)
             return resp.status_code in (200, 204)
 
+    async def download(self, key: str) -> bytes:
+        url = f"{self.base_url}/storage/v1/object/{self.bucket}/{key}"
+        headers = self._headers()
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(url, headers=headers)
+
+        if response.status_code != 200:
+            logger.error(
+                "Supabase storage download failed",
+                key=key,
+                status_code=response.status_code,
+                response=response.text,
+            )
+            raise RuntimeError(f"Failed to download object from Supabase ({response.status_code}): {key}")
+
+        return response.content
+
     async def exists(self, key: str) -> bool:
         url = await self.get_url(key)
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -128,6 +151,12 @@ class LocalStorage(ObjectStorage):
             file_path.unlink()
             return True
         return False
+
+    async def download(self, key: str) -> bytes:
+        file_path = self.base_dir / key
+        if not file_path.exists():
+            raise FileNotFoundError(f"Object not found in local storage: {key}")
+        return file_path.read_bytes()
 
     async def exists(self, key: str) -> bool:
         file_path = self.base_dir / key

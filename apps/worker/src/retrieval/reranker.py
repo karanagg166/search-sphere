@@ -151,18 +151,44 @@ class CrossEncoderReranker:
 
         # 5. Score candidate pairs
         start_score = time.perf_counter()
-        scores = self._score_pairs(pairs)
-        score_duration_ms = (time.perf_counter() - start_score) * 1000
+        try:
+            scores = self._score_pairs(pairs)
+            score_duration_ms = (time.perf_counter() - start_score) * 1000
 
-        # 6. Sort descending by rerank score
-        scored_candidates = list(zip(candidates, scores, strict=True))
-        # Stable sort preserves relative order for identical scores
-        sorted_candidates = sorted(
-            scored_candidates,
-            key=lambda item: item[1],
-            reverse=True,
-        )
-        top_candidates = sorted_candidates[:resolved_top_k]
+            # 6. Sort descending by rerank score
+            scored_candidates = list(zip(candidates, scores, strict=True))
+            # Stable sort preserves relative order for identical scores
+            sorted_candidates = sorted(
+                scored_candidates,
+                key=lambda item: item[1],
+                reverse=True,
+            )
+            top_candidates = sorted_candidates[:resolved_top_k]
+        except Exception as exc:
+            score_duration_ms = (time.perf_counter() - start_score) * 1000
+            logger.warning(
+                "Cross-encoder scoring failed, falling back to RRF retriever ranking",
+                query=clean_query,
+                error=str(exc),
+            )
+
+            def _get_fallback_score(cand_item: Any) -> float:
+                if hasattr(cand_item, "rrf_score") and cand_item.rrf_score is not None:
+                    return float(cand_item.rrf_score)
+                if hasattr(cand_item, "score") and cand_item.score is not None:
+                    return float(cand_item.score)
+                if isinstance(cand_item, dict):
+                    raw = cand_item.get("rrf_score", cand_item.get("score"))
+                    if raw is not None:
+                        return float(raw)
+                return 0.0
+
+            sorted_by_rrf = sorted(
+                [(c, _get_fallback_score(c)) for c in candidates],
+                key=lambda item: item[1],
+                reverse=True,
+            )
+            top_candidates = sorted_by_rrf[:resolved_top_k]
 
         # 7. Build RerankedSearchResult objects
         results: list[RerankedSearchResult] = []
@@ -282,7 +308,11 @@ class CrossEncoderReranker:
         model = self._get_model()
 
         try:
-            if hasattr(model, "predict"):
+            if hasattr(model, "rerank"):
+                query = pairs[0][0]
+                documents = [p[1] for p in pairs]
+                raw_scores = list(model.rerank(query, documents))
+            elif hasattr(model, "predict"):
                 raw_scores = model.predict(
                     pairs,
                     batch_size=self.batch_size,
@@ -292,8 +322,7 @@ class CrossEncoderReranker:
                 raw_scores = model(pairs)
             else:
                 raise RerankingError(
-                    f"Model of type {type(model)} does not provide a 'predict' "
-                    f"method and is not callable."
+                    f"Model {type(model)} lacks 'predict' or 'rerank' and is not callable."
                 )
         except RerankingError:
             raise
@@ -315,7 +344,12 @@ class CrossEncoderReranker:
         elif isinstance(raw_scores, (int, float)):
             scores_list = [raw_scores]
         elif isinstance(raw_scores, (list, tuple)):
-            scores_list = list(raw_scores)
+            scores_list = [
+                s.tolist() if hasattr(s, "tolist")
+                else float(s) if isinstance(s, (int, float))
+                else s
+                for s in raw_scores
+            ]
         else:
             raise RerankingError(
                 f"Unexpected cross-encoder output type: {type(raw_scores)}"
@@ -360,6 +394,25 @@ class CrossEncoderReranker:
             self._model = CrossEncoderReranker._cached_model
             return self._model
 
+        # 1. Prefer FastEmbed TextCrossEncoder (ONNX Runtime)
+        try:
+            from fastembed.rerank.cross_encoder import TextCrossEncoder
+
+            fastembed_model = "Xenova/ms-marco-MiniLM-L-6-v2"
+            logger.info("Loading FastEmbed TextCrossEncoder", model=fastembed_model)
+            loaded_model = TextCrossEncoder(model_name=fastembed_model)
+            CrossEncoderReranker._cached_model = loaded_model
+            CrossEncoderReranker._cached_model_name = self.model_name
+            self._model = loaded_model
+            logger.info("FastEmbed TextCrossEncoder loaded", model=fastembed_model)
+            return self._model
+        except Exception as fe_exc:
+            logger.warning(
+                "FastEmbed TextCrossEncoder unavailable; using SentenceTransformer",
+                error=str(fe_exc),
+            )
+
+        # 2. Fallback to SentenceTransformer CrossEncoder
         logger.info(
             "Loading sentence-transformer cross-encoder model",
             model_name=self.model_name,
@@ -382,7 +435,7 @@ class CrossEncoderReranker:
             return self._model
 
         except Exception as exc:
-            logger.exception(
+            logger.warning(
                 "Failed to load sentence-transformer cross-encoder model",
                 model_name=self.model_name,
                 error=str(exc),

@@ -205,7 +205,11 @@ class DenseEmbedder:
         model = self._get_model()
 
         try:
-            if hasattr(model, "encode"):
+            if hasattr(model, "embed"):
+                # FastEmbed returns a generator yielding numpy arrays
+                batch_sz = self.batch_size if self.batch_size else 32
+                embeddings = list(model.embed(texts, batch_size=batch_sz))
+            elif hasattr(model, "encode"):
                 embeddings = model.encode(
                     texts,
                     batch_size=self.batch_size,
@@ -217,7 +221,7 @@ class DenseEmbedder:
             else:
                 raise DenseEmbeddingError(
                     f"Model of type {type(model)} does not provide an "
-                    f"'encode' method and is not callable."
+                    f"'embed' or 'encode' method and is not callable."
                 )
         except DenseEmbeddingError:
             raise
@@ -237,7 +241,9 @@ class DenseEmbedder:
             raw_vectors = embeddings.tolist()
         elif isinstance(embeddings, (list, tuple)):
             raw_vectors = [
-                list(vec)
+                vec.tolist()
+                if hasattr(vec, "tolist")
+                else list(vec)
                 if hasattr(vec, "__iter__") and not isinstance(vec, (str, bytes))
                 else vec
                 for vec in embeddings
@@ -250,7 +256,7 @@ class DenseEmbedder:
         return raw_vectors
 
     def _get_model(self) -> Any:
-        """Lazily load and cache the SentenceTransformer model on CPU."""
+        """Lazily load and cache embedding model."""
         if self._model is not None:
             return self._model
 
@@ -261,6 +267,38 @@ class DenseEmbedder:
             self._model = DenseEmbedder._cached_model
             return self._model
 
+        # 1. Prefer FastEmbed (ONNX Runtime) to avoid PyTorch OOM
+        try:
+            from fastembed import TextEmbedding
+
+            fastembed_model_name = self.model_name
+            if (
+                not fastembed_model_name.startswith("sentence-transformers/")
+                and fastembed_model_name == "all-MiniLM-L6-v2"
+            ):
+                fastembed_model_name = "sentence-transformers/all-MiniLM-L6-v2"
+
+            logger.info(
+                "Loading FastEmbed TextEmbedding model (ONNX Runtime)",
+                model_name=fastembed_model_name,
+            )
+            loaded_model = TextEmbedding(model_name=fastembed_model_name)
+            DenseEmbedder._cached_model = loaded_model
+            DenseEmbedder._cached_model_name = self.model_name
+            self._model = loaded_model
+            logger.info(
+                "FastEmbed model loaded and cached successfully",
+                model_name=fastembed_model_name,
+            )
+            return self._model
+        except Exception as fastembed_exc:
+            logger.warning(
+                "FastEmbed unavailable or failed to initialize, falling back to SentenceTransformer",
+                model_name=self.model_name,
+                error=str(fastembed_exc),
+            )
+
+        # 2. Fallback to SentenceTransformer
         logger.info(
             "Loading sentence-transformer embedding model",
             model_name=self.model_name,

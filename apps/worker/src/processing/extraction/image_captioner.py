@@ -2,9 +2,7 @@ from io import BytesIO
 from typing import Any
 
 import structlog
-import torch
 from PIL import Image
-from transformers import pipeline
 
 from src.config import settings
 
@@ -120,6 +118,9 @@ class ImageCaptioner:
         )
 
         try:
+            import torch
+            from transformers import pipeline
+
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
             pipe = pipeline(

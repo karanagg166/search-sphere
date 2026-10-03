@@ -6,6 +6,10 @@ from src.models.user import User
 from src.schemas.document import DocumentListResponse, DocumentResponse
 from src.security.jwt import get_current_user
 from src.security.rate_limiter import rate_limiter
+from src.services.document_indexer import (
+    index_document_pipeline,
+    sync_unindexed_documents,
+)
 from src.services.document_service import DocumentService
 from src.storage.object_storage import ObjectStorage, get_object_storage
 
@@ -89,3 +93,36 @@ async def delete_document(
 ) -> None:
     service = DocumentService(db=db, storage=storage)
     await service.delete_user_document(document_id=document_id, user_id=current_user.id)
+
+
+@router.post(
+    "/{document_id}/reindex",
+    response_model=DocumentResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Reindex document",
+    description="Trigger in-process re-extraction and indexing into Qdrant for a document.",
+)
+async def reindex_document(
+    document_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: ObjectStorage = Depends(get_object_storage),
+) -> DocumentResponse:
+    service = DocumentService(db=db, storage=storage)
+    doc = await service.get_user_document(document_id=document_id, user_id=current_user.id)
+    await index_document_pipeline(document_id=doc.id)
+    updated_doc = await service.get_user_document(document_id=document_id, user_id=current_user.id)
+    return DocumentResponse.model_validate(updated_doc)
+
+
+@router.post(
+    "/sync-unindexed",
+    status_code=status.HTTP_200_OK,
+    summary="Sync all unindexed documents",
+    description="Scan and index any uploaded documents that are pending indexing.",
+)
+async def sync_all_unindexed(
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    indexed = await sync_unindexed_documents()
+    return {"message": "Sync completed", "indexed_count": len(indexed), "indexed_ids": indexed}

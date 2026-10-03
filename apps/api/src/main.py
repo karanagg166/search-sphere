@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from contextlib import asynccontextmanager
 
@@ -28,6 +29,15 @@ async def lifespan(app: FastAPI):
         await init_db()
     except Exception as e:
         logger.error("Failed to run init_db on startup", error=str(e))
+
+    # Auto-index any uploaded documents in background
+    try:
+        from src.services.document_indexer import sync_unindexed_documents
+
+        asyncio.create_task(sync_unindexed_documents())
+    except Exception as e:
+        logger.warning("Could not launch sync_unindexed_documents on startup", error=str(e))
+
     yield
     # Shutdown: Dispose database connections gracefully
     logger.info("Shutting down Search Sphere application...")

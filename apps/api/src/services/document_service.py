@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from src.config import settings
 from src.models.document import Document
 from src.models.user import User
 from src.repositories.document_repository import DocumentRepository
+from src.services.document_indexer import index_document_pipeline
 from src.storage.object_storage import ObjectStorage
 from src.tasks.document_tasks import enqueue_document
 
@@ -107,8 +109,14 @@ class DocumentService:
                 detail="Failed to save document metadata in database.",
             ) from exc
 
-        # 5. Push document to worker queue for background processing
-        enqueue_document(document_id)
+        # 5. Push document to worker queue for background processing (or fallback to in-process task)
+        enqueued = enqueue_document(document_id)
+        if not enqueued:
+            logger.info(
+                "Worker queue unavailable; launching in-process background indexing task",
+                document_id=document_id,
+            )
+            asyncio.create_task(index_document_pipeline(document_id))
 
         logger.info(
             "Document uploaded successfully",
