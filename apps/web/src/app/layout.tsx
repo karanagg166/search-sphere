@@ -9,6 +9,20 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "Search Sphere | Semantic Search & RAG Platform",
   description: "Search Sphere - Scalable semantic search and RAG platform",
+  icons: {
+    icon: [
+      { url: "/favicon.ico" },
+      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/favicon-96x96.png", sizes: "96x96", type: "image/png" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: "/apple-touch-icon.png",
+  },
+  manifest: "/site.webmanifest",
+  appleWebApp: {
+    title: "Search Sphere",
+    statusBarStyle: "default",
+  },
 };
 
 export default function RootLayout({

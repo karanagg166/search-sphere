@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background Gradient: Deep Midnight Obsidian -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090E1A" />
+      <stop offset="50%" stop-color="#0F172A" />
+      <stop offset="100%" stop-color="#050811" />
+    </linearGradient>
+
+    <!-- Squircle Border: Electric Cyan to Cobalt to Dark Slate -->
+    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.85" />
+      <stop offset="45%" stop-color="#2563EB" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="#1E293B" stop-opacity="0.8" />
+    </linearGradient>
+
+    <!-- Radial Core Ambient Glow -->
+    <radialGradient id="coreGlow" cx="44%" cy="44%" r="56%">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.5" />
+      <stop offset="40%" stop-color="#2563EB" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#0F172A" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- 3D Sphere Spherical Volume Gradient -->
+    <radialGradient id="sphereGrad" cx="35%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#E0F2FE" />
+      <stop offset="15%" stop-color="#7DD3FC" />
+      <stop offset="38%" stop-color="#0284C7" />
+      <stop offset="68%" stop-color="#1D4ED8" />
+      <stop offset="90%" stop-color="#1E1B4B" />
+      <stop offset="100%" stop-color="#0B0F19" />
+    </radialGradient>
+
+    <!-- Search Lens Rim & Handle Gradient -->
+    <linearGradient id="lensGrad" x1="10%" y1="10%" x2="90%" y2="90%">
+      <stop offset="0%" stop-color="#F0F9FF" />
+      <stop offset="20%" stop-color="#38BDF8" />
+      <stop offset="55%" stop-color="#2563EB" />
+      <stop offset="100%" stop-color="#4F46E5" />
+    </linearGradient>
+
+    <!-- Geodesic Mesh Coordinate Rings Gradient -->
+    <linearGradient id="geoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.9" />
+      <stop offset="50%" stop-color="#38BDF8" stop-opacity="0.7" />
+      <stop offset="100%" stop-color="#1D4ED8" stop-opacity="0.15" />
+    </linearGradient>
+
+    <!-- Orbital Ring Gradient -->
+    <linearGradient id="orbitGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.9" />
+      <stop offset="50%" stop-color="#60A5FA" stop-opacity="0.7" />
+      <stop offset="100%" stop-color="#818CF8" stop-opacity="0.3" />
+    </linearGradient>
+
+    <!-- Clipping squircle to guarantee zero bleed -->
+    <clipPath id="tileClip">
+      <rect x="16" y="16" width="480" height="480" rx="104" />
+    </clipPath>
+  </defs>
+
+  <!-- Clip Group to keep everything inside the squircle -->
+  <g clip-path="url(#tileClip)">
+    <!-- Base Squircle Surface -->
+    <rect x="16" y="16" width="480" height="480" rx="104" fill="url(#bgGrad)" />
+
+    <!-- Ambient Glow Behind Sphere -->
+    <circle cx="224" cy="224" r="190" fill="url(#coreGlow)" />
+
+    <!-- 3D Dimensional Sphere Body -->
+    <circle cx="220" cy="220" r="124" fill="url(#sphereGrad)" />
+
+    <!-- Geodesic Coordinate Vector Rings (Latitude & Longitude) -->
+    <!-- Top Latitude Arc -->
+    <path d="M 116 172 C 145 146, 295 146, 324 172" fill="none" stroke="url(#geoGrad)" stroke-width="5" stroke-linecap="round" />
+
+    <!-- Equator Ellipse Ring -->
+    <ellipse cx="220" cy="220" rx="124" ry="34" fill="none" stroke="url(#geoGrad)" stroke-width="5.5" stroke-opacity="0.8" />
+
+    <!-- Bottom Latitude Arc -->
+    <path d="M 116 268 C 145 294, 295 294, 324 268" fill="none" stroke="url(#geoGrad)" stroke-width="5" stroke-linecap="round" />
+
+    <!-- Central Longitude Meridian Arc -->
+    <ellipse cx="220" cy="220" rx="42" ry="124" fill="none" stroke="url(#geoGrad)" stroke-width="5.5" stroke-opacity="0.8" />
+
+    <!-- Diagonal Planetary/Neural Orbit Ring encircling Sphere -->
+    <ellipse cx="220" cy="220" rx="174" ry="52" transform="rotate(-28 220 220)" fill="none" stroke="url(#orbitGrad)" stroke-width="7" />
+    
+    <!-- Orbit Satellite Node -->
+    <circle cx="370" cy="140" r="7.5" fill="#FFFFFF" />
+
+    <!-- Bold Search Lens Rim surrounding Sphere -->
+    <circle cx="220" cy="220" r="142" fill="none" stroke="url(#lensGrad)" stroke-width="17" />
+
+    <!-- Glass Specular Reflection on Upper-Left of Lens Rim -->
+    <path d="M 118 132 A 142 142 0 0 1 268 80" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" stroke-opacity="0.9" />
+
+    <!-- Search Magnifier Handle extending to Bottom-Right -->
+    <path d="M 324 324 L 420 420" stroke="url(#lensGrad)" stroke-width="28" stroke-linecap="round" />
+    <!-- Handle Interior Light Streak -->
+    <path d="M 328 322 L 414 408" stroke="#E0F2FE" stroke-width="7" stroke-linecap="round" stroke-opacity="0.75" />
+
+    <!-- Central AI Semantic Sparkle / Intelligence Beacon -->
+    <g transform="translate(220, 220)">
+      <path d="M 0 -26 Q 0 0 -26 0 Q 0 0 0 26 Q 0 0 26 0 Q 0 0 0 -26 Z" fill="#FFFFFF" />
+      <circle cx="0" cy="0" r="5" fill="#7DD3FC" />
+    </g>
+
+    <!-- Specular Highlight Shine on Sphere Surface -->
+    <circle cx="170" cy="170" r="12" fill="#FFFFFF" fill-opacity="0.7" />
+    <circle cx="166" cy="166" r="5" fill="#FFFFFF" fill-opacity="0.9" />
+  </g>
+
+  <!-- Squircle Border Stroke -->
+  <rect x="16" y="16" width="480" height="480" rx="104" fill="none" stroke="url(#borderGrad)" stroke-width="5" />
+</svg>
