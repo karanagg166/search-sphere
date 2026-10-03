@@ -25,6 +25,11 @@ class ObjectStorage(ABC):
         pass
 
     @abstractmethod
+    async def create_signed_url(self, key: str, expires_in: int = 600) -> str:
+        """Generates a short-lived signed URL for accessing the storage key."""
+        pass
+
+    @abstractmethod
     async def delete(self, key: str) -> bool:
         """Deletes an object by key. Returns True if deleted or did not exist."""
         pass
@@ -92,13 +97,57 @@ class SupabaseStorage(ObjectStorage):
     async def get_url(self, key: str) -> str:
         return f"{self.base_url}/storage/v1/object/public/{self.bucket}/{key}"
 
-    async def delete(self, key: str) -> bool:
-        url = f"{self.base_url}/storage/v1/object/{self.bucket}/{key}"
-        headers = self._headers()
+    async def create_signed_url(self, key: str, expires_in: int = 600) -> str:
+        """Generates a short-lived signed URL using Supabase Storage REST endpoint."""
+        url = f"{self.base_url}/storage/v1/object/sign/{self.bucket}/{key}"
+        headers = self._headers("application/json")
+        body = {"expiresIn": expires_in}
 
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.delete(url, headers=headers)
-            return resp.status_code in (200, 204)
+            resp = await client.post(url, json=body, headers=headers)
+            if resp.status_code not in (200, 201):
+                logger.error(
+                    "Supabase signed URL generation failed",
+                    status_code=resp.status_code,
+                    response=resp.text,
+                    key=key,
+                )
+                raise RuntimeError(f"Storage signed URL generation failed: {resp.text}")
+
+            data = resp.json()
+            signed_path = (
+                data.get("signedURL")
+                or data.get("signedUrl")
+                or data.get("url")
+            )
+            if not signed_path:
+                raise RuntimeError(f"Unexpected response from Supabase sign endpoint: {resp.text}")
+
+            if signed_path.startswith("http://") or signed_path.startswith("https://"):
+                return signed_path
+
+            if signed_path.startswith("/storage/v1"):
+                return f"{self.base_url}{signed_path}"
+            elif signed_path.startswith("/"):
+                return f"{self.base_url}/storage/v1{signed_path}"
+            else:
+                return f"{self.base_url}/storage/v1/{signed_path}"
+
+    async def delete(self, key: str) -> bool:
+        headers = self._headers("application/json")
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            # 1. Try prefix-based deletion (standard Supabase Storage API)
+            url_prefix = f"{self.base_url}/storage/v1/object/{self.bucket}"
+            resp = await client.request(
+                "DELETE", url_prefix, json={"prefixes": [key]}, headers=headers
+            )
+            if resp.status_code in (200, 204):
+                return True
+
+            # 2. Fallback to direct key endpoint
+            url_direct = f"{self.base_url}/storage/v1/object/{self.bucket}/{key}"
+            resp_direct = await client.delete(url_direct, headers=self._headers())
+            return resp_direct.status_code in (200, 204)
 
     async def download(self, key: str) -> bytes:
         url = f"{self.base_url}/storage/v1/object/{self.bucket}/{key}"
@@ -145,12 +194,18 @@ class LocalStorage(ObjectStorage):
     async def get_url(self, key: str) -> str:
         return f"/storage/{self.bucket}/{key}"
 
+    async def create_signed_url(self, key: str, expires_in: int = 600) -> str:
+        file_path = self.base_dir / key
+        if not file_path.exists():
+            raise FileNotFoundError(f"Object not found in local storage: {key}")
+        return f"/storage/{self.bucket}/{key}?token=mock-signed-url&expiresIn={expires_in}"
+
     async def delete(self, key: str) -> bool:
         file_path = self.base_dir / key
         if file_path.exists():
             file_path.unlink()
             return True
-        return False
+        return True
 
     async def download(self, key: str) -> bytes:
         file_path = self.base_dir / key

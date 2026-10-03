@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     LOCAL_STORAGE_DIR: str = "./data/storage"
     MAX_UPLOAD_SIZE_BYTES: int = 20 * 1024 * 1024  # 20 MB max upload
 
+    # Quick Clinic Service Integration
+    QUICK_CLINIC_SERVICE_SECRET: str = "quick-clinic-internal-service-secret-2026"
+
     # Caching
     REDIS_URL: str = "redis://redis:6379/0"
 
