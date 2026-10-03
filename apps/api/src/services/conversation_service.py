@@ -358,31 +358,8 @@ class ConversationService:
             stream_completed = True
         except Exception as exc:
             logger.error("Streaming conversation answer failed", error=str(exc), user_id=user.id)
-            # Seamless fallback to non-streaming answer generation
-            try:
-                fallback_answer, _ = await self.answer_service.answer_generator.generate_answer(
-                    query=search_response.query,
-                    chunks=usable_chunks,
-                    conversation_context=conversation_context,
-                )
-                raw_answer = fallback_answer.strip() if fallback_answer else NO_RESULTS_ANSWER
-                yield f"event: token\ndata: {json.dumps({'token': raw_answer})}\n\n"
-                clean_answer = sanitize_citations(raw_answer, max_source_id=len(sources))
-                assistant_msg = await self.repo.create_message(
-                    conversation_id=conversation_id,
-                    role="assistant",
-                    content=clean_answer,
-                    original_query=search_response.query,
-                    retrieval_query=search_response.retrieval_query,
-                    rewritten=search_response.rewritten,
-                    sources=sources_payload,
-                )
-                yield f"event: done\ndata: {json.dumps({'message_id': assistant_msg.id, 'answer': clean_answer, 'sources': sources_payload})}\n\n"
-                return
-            except Exception as fb_exc:
-                logger.error("Non-streaming fallback also failed", error=str(fb_exc))
-                yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
-                return
+            yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
+            return
 
         if stream_completed:
             raw_answer = "".join(accumulated_tokens).strip()

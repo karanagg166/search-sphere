@@ -1,8 +1,10 @@
 import uuid
+from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from src.config import settings
 from src.main import app
 from src.security.jwt import (
     create_access_token,
@@ -118,12 +120,13 @@ async def test_auth_workflow_and_endpoints():
         assert unauth_resp.status_code == 401
 
         # 8. Test Google auth URL endpoint
-        google_url_resp = await client.get("/auth/google/url")
-        assert google_url_resp.status_code == 200
-        google_data = google_url_resp.json()
-        assert "url" in google_data
-        assert "accounts.google.com" in google_data["url"]
-        assert (
-            "http%3A%2F%2Flocalhost%3A3000%2Fapi%2Fauth%2Fcallback%2Fgoogle"
-            in google_data["url"]
-        )
+        with patch.object(settings, "GOOGLE_CLIENT_ID", "mock-google-client-id"):
+            google_url_resp = await client.get("/auth/google/url")
+            assert google_url_resp.status_code == 200
+            google_data = google_url_resp.json()
+            assert "url" in google_data
+            assert "accounts.google.com" in google_data["url"]
+            assert (
+                "http%3A%2F%2Flocalhost%3A3000%2Fapi%2Fauth%2Fcallback%2Fgoogle"
+                in google_data["url"]
+            )
