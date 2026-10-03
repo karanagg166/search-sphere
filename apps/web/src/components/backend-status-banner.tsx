@@ -38,16 +38,16 @@ export function BackendStatusBanner() {
     let interval: NodeJS.Timeout | null = null;
     if (status === "waking") {
       interval = setInterval(() => {
-        setElapsed((prev) => prev + 2);
+        setElapsed((prev) => prev + 3);
         fetchHealth()
           .then(() => {
             setStatus("online");
             setElapsed(0);
           })
           .catch(() => {
-            // Keep retrying
+            // Server still waking up; keep retrying without throwing noise
           });
-      }, 2500);
+      }, 3500);
     } else {
       setElapsed(0);
     }

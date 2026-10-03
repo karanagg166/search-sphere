@@ -1,4 +1,6 @@
-from pydantic import model_validator
+import json
+import re
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -108,10 +110,59 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: list[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "https://search-sphere-rose.vercel.app",
+        "https://search-sphere-karan-aggarwals-projects.vercel.app",
     ]
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_REQUESTS_PER_MINUTE: int = 120
     MAX_QUERY_LENGTH: int = 1000
+
+    @field_validator("FRONTEND_URL", mode="before")
+    @classmethod
+    def clean_frontend_url(cls, v: object) -> str:
+        if not v:
+            return "http://localhost:3000"
+        return str(v).strip().strip("'\"").rstrip("/")
+
+    @field_validator("ALLOWED_ORIGINS", mode="before")
+    @classmethod
+    def parse_allowed_origins(cls, v: object) -> list[str]:
+        default_origins = [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "https://search-sphere-rose.vercel.app",
+            "https://search-sphere-karan-aggarwals-projects.vercel.app",
+        ]
+        if not v:
+            return default_origins
+
+        origins: list[str] = []
+        if isinstance(v, str):
+            v = v.strip()
+            if (v.startswith("[") and v.endswith("]")) or (v.startswith("(") and v.endswith(")")):
+                try:
+                    cleaned = v.replace("'", '"')
+                    parsed = json.loads(cleaned)
+                    if isinstance(parsed, list):
+                        origins = [str(x).strip().strip("'\"").rstrip("/") for x in parsed if str(x).strip()]
+                except Exception:
+                    pass
+            if not origins:
+                origins = [
+                    p.strip().strip("'\"").rstrip("/")
+                    for p in re.split(r"[,;\s]+", v)
+                    if p.strip()
+                ]
+        elif isinstance(v, (list, tuple, set)):
+            origins = [str(x).strip().strip("'\"").rstrip("/") for x in v if str(x).strip()]
+        else:
+            return default_origins
+
+        for default in default_origins:
+            if default not in origins:
+                origins.append(default)
+
+        return origins
 
     @model_validator(mode="after")
     def validate_production_secrets(self) -> "Settings":

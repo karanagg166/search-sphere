@@ -45,9 +45,18 @@ class RequestCorrelationMiddleware(BaseHTTPMiddleware):
         request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(request_id=request_id)
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request_id
-        return response
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = request_id
+            return response
+        except Exception as exc:
+            logger.error("Unhandled error in request middleware", error=str(exc), path=request.url.path)
+            res = JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content={"detail": "An internal server error occurred. Please try again later."},
+            )
+            res.headers["X-Request-ID"] = request_id
+            return res
 
 
 app = FastAPI(
@@ -62,17 +71,31 @@ app = FastAPI(
 # Request Correlation ID Middleware
 app.add_middleware(RequestCorrelationMiddleware)
 
-# CORS Configuration: strict environment-configured origins with credentials
+# CORS Configuration: strict environment-configured origins + wildcard regex for all Vercel domains
 cors_origins = list(settings.ALLOWED_ORIGINS)
-if settings.FRONTEND_URL and settings.FRONTEND_URL not in cors_origins:
-    cors_origins.append(settings.FRONTEND_URL)
+if settings.FRONTEND_URL:
+    clean_frontend = settings.FRONTEND_URL.rstrip("/")
+    if clean_frontend not in cors_origins:
+        cors_origins.append(clean_frontend)
+
+for default_origin in [
+    "https://search-sphere-rose.vercel.app",
+    "https://search-sphere-karan-aggarwals-projects.vercel.app",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]:
+    if default_origin not in cors_origins:
+        cors_origins.append(default_origin)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
+    allow_origin_regex=r"^https://([a-zA-Z0-9_-]+\.)?vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=86400,
 )
 
 

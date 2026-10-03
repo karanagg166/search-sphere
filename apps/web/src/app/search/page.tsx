@@ -358,11 +358,18 @@ export default function SearchPage() {
           refetchConversations();
           return;
         } catch (directErr: any) {
-          const finalErrMsg =
-            directErr?.response?.data?.detail ||
-            streamError ||
-            directErr?.message ||
-            "Unable to generate answer. Please try again.";
+          const isNetworkOrCors =
+            directErr?.code === "ERR_NETWORK" ||
+            directErr?.message === "Network Error" ||
+            directErr?.message?.includes("CORS") ||
+            directErr?.message?.includes("preflight");
+
+          const finalErrMsg = isNetworkOrCors
+            ? "Backend is currently waking up or unreachable. Render free-tier services take ~30–45 seconds to spin up on cold start. Please wait a moment and try again."
+            : directErr?.response?.data?.detail ||
+              streamError ||
+              directErr?.message ||
+              "Unable to generate answer. Please try again.";
 
           setTurns((prev) =>
             prev.map((t) =>
@@ -378,10 +385,17 @@ export default function SearchPage() {
         }
       }
     } catch (err: any) {
-      const backendMessage =
-        err?.response?.data?.detail ||
-        err?.message ||
-        "Unable to generate answer. Please try again.";
+      const isNetworkOrCors =
+        err?.code === "ERR_NETWORK" ||
+        err?.message === "Network Error" ||
+        err?.message?.includes("CORS") ||
+        err?.message?.includes("preflight");
+
+      const backendMessage = isNetworkOrCors
+        ? "Backend is currently waking up or unreachable. Render free-tier services take ~30–45 seconds to spin up on cold start. Please wait a moment and try again."
+        : err?.response?.data?.detail ||
+          err?.message ||
+          "Unable to generate answer. Please try again.";
 
       setTurns((prev) =>
         prev.map((t) =>
