@@ -244,7 +244,10 @@ export default function SearchPage() {
         }
       }
 
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const apiUrl =
+        typeof window !== "undefined"
+          ? "/api/proxy"
+          : process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
       const streamUrl = `${apiUrl}/conversations/${targetConvId}/answer/stream`;
       let accumulatedText = "";
       let receivedDone = false;
