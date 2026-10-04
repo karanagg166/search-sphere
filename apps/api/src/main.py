@@ -17,6 +17,7 @@ from src.routers.conversations import router as conversations_router
 from src.routers.documents import router as documents_router
 from src.routers.feedback import router as feedback_router
 from src.routers.internal_medical_documents import router as internal_medical_docs_router
+from src.routers.internal_medical_ingestion import router as internal_medical_ingest_router
 from src.routers.search import router as search_router
 
 logger = structlog.get_logger()
@@ -128,6 +129,7 @@ app.include_router(answer_router)
 app.include_router(conversations_router)
 app.include_router(feedback_router)
 app.include_router(internal_medical_docs_router)
+app.include_router(internal_medical_ingest_router)
 
 
 @app.get("/health", tags=["Health"])

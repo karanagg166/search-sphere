@@ -16,9 +16,10 @@ logger.info("Worker initialized with RabbitMQ broker", rabbitmq_url=rabbitmq_url
 # Import actors to register with Dramatiq broker
 from src.tasks.document_tasks import (  # noqa: E402
     process_document_task,
+    process_medical_document_task,
 )
 
-__all__ = ["process_document_task"]
+__all__ = ["process_document_task", "process_medical_document_task"]
 
 
 if __name__ == "__main__":

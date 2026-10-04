@@ -32,6 +32,8 @@ class DenseSearchResult:
     page_numbers: list[int]
     block_types: list[str]
     rank: int | None = None
+    patient_id: str | None = None
+    source_system: str | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +60,8 @@ class SparseSearchResult:
     - page_numbers: list of pages spanned
     - block_types: source block types contained
     - rank: optional 1-indexed ranking position in search results
+    - patient_id: optional source patient identifier
+    - source_system: optional source system identifier
     """
 
     point_id: str
@@ -71,6 +75,8 @@ class SparseSearchResult:
     page_numbers: list[int]
     block_types: list[str]
     rank: int | None = None
+    patient_id: str | None = None
+    source_system: str | None = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +102,8 @@ class HybridSearchResult:
     - page_numbers: list of pages spanned
     - block_types: source block types contained
     - rank: optional 1-indexed ranking position in fused search results
+    - patient_id: optional source patient identifier
+    - source_system: optional source system identifier
     """
 
     point_id: str
@@ -109,6 +117,8 @@ class HybridSearchResult:
     page_numbers: list[int]
     block_types: list[str]
     rank: int | None = None
+    patient_id: str | None = None
+    source_system: str | None = None
 
 
 @dataclass(frozen=True)
@@ -135,6 +145,8 @@ class RerankedSearchResult:
     - rrf_score: optional original RRF score from earlier hybrid retrieval
     - score: float matching rerank_score for polymorphic consistency
     - rank: optional 1-indexed ranking position after cross-encoder reranking
+    - patient_id: optional source patient identifier
+    - source_system: optional source system identifier
     """
 
     point_id: str
@@ -150,6 +162,8 @@ class RerankedSearchResult:
     rrf_score: float | None = None
     score: float | None = None
     rank: int | None = None
+    patient_id: str | None = None
+    source_system: str | None = None
 
     def __post_init__(self) -> None:
         if self.score is None:
