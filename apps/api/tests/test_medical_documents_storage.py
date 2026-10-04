@@ -1,3 +1,4 @@
+from unittest.mock import patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -6,9 +7,16 @@ from src.main import app
 from src.storage.object_storage import LocalStorage, get_object_storage
 
 # Test Service Secret
-TEST_SERVICE_SECRET = settings.QUICK_CLINIC_SERVICE_SECRET or "quick-clinic-internal-service-secret-2026"
+TEST_SERVICE_SECRET = "quick-clinic-internal-service-secret-2026"
 VALID_AUTH_HEADER = {"Authorization": f"Bearer {TEST_SERVICE_SECRET}"}
 INVALID_AUTH_HEADER = {"Authorization": "Bearer completely-wrong-secret"}
+
+
+@pytest.fixture(autouse=True)
+def ensure_service_secret():
+    """Ensure settings.QUICK_CLINIC_SERVICE_SECRET is configured during tests."""
+    with patch.object(settings, "QUICK_CLINIC_SERVICE_SECRET", TEST_SERVICE_SECRET):
+        yield
 
 
 @pytest.fixture

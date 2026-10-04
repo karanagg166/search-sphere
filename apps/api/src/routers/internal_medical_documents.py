@@ -115,7 +115,13 @@ def verify_service_secret(authorization: str | None = Header(None)) -> bool:
         )
 
     token = authorization[7:].strip()
-    expected_secret = settings.QUICK_CLINIC_SERVICE_SECRET or "quick-clinic-internal-service-secret-2026"
+    expected_secret = settings.QUICK_CLINIC_SERVICE_SECRET
+    if not expected_secret:
+        logger.error("QUICK_CLINIC_SERVICE_SECRET is not configured on server")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Server configuration error: service secret is not configured.",
+        )
 
     if not hmac.compare_digest(token.encode("utf-8"), expected_secret.encode("utf-8")):
         logger.warning("Invalid internal service secret attempt for medical documents API")

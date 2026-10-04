@@ -12,9 +12,16 @@ from src.models.external_document import ExternalDocument
 from src.processing.models.search import RerankedSearchResult
 from src.services.search_service import get_retriever
 
-TEST_SERVICE_SECRET = settings.QUICK_CLINIC_SERVICE_SECRET or "quick-clinic-internal-service-secret-2026"
+TEST_SERVICE_SECRET = "quick-clinic-internal-service-secret-2026"
 VALID_AUTH_HEADER = {"Authorization": f"Bearer {TEST_SERVICE_SECRET}"}
 INVALID_AUTH_HEADER = {"Authorization": "Bearer wrong-service-secret"}
+
+
+@pytest.fixture(autouse=True)
+def ensure_service_secret():
+    """Ensure settings.QUICK_CLINIC_SERVICE_SECRET is configured during tests."""
+    with patch.object(settings, "QUICK_CLINIC_SERVICE_SECRET", TEST_SERVICE_SECRET):
+        yield
 
 
 @pytest.mark.asyncio
