@@ -562,6 +562,9 @@ class QdrantVectorStore:
                 rank=rank,
                 patient_id=payload.get("patient_id"),
                 source_system=payload.get("source_system"),
+                document_type=payload.get("document_type"),
+                report_date=payload.get("report_date"),
+                file_name=payload.get("file_name"),
             )
         except (ValueError, TypeError) as exc:
             raise QdrantVectorStoreError(
@@ -577,6 +580,7 @@ class QdrantVectorStore:
         source_system: str | None = None,
         query_filter: models.Filter | None = None,
         score_threshold: float | None = None,
+        filters: dict[str, Any] | None = None,
     ) -> list[DenseSearchResult]:
         """
         Execute approximate nearest neighbor (ANN) search on dense vectors in Qdrant.
@@ -589,6 +593,7 @@ class QdrantVectorStore:
             source_system: Optional source system to filter points server-side.
             query_filter: Optional existing Qdrant Filter.
             score_threshold: Optional similarity score threshold.
+            filters: Optional metadata filters mapping (e.g. {"patient_id": "...", "source_system": "..."}).
 
         Returns:
             Ordered list of DenseSearchResult items preserving Qdrant ranking.
@@ -622,20 +627,29 @@ class QdrantVectorStore:
                     match=models.MatchValue(value=document_id),
                 )
             )
-        if patient_id is not None:
+        resolved_patient_id = patient_id or (filters.get("patient_id") if filters else None)
+        if resolved_patient_id is not None:
             must_conditions.append(
                 models.FieldCondition(
                     key="patient_id",
-                    match=models.MatchValue(value=patient_id),
+                    match=models.MatchValue(value=resolved_patient_id),
                 )
             )
-        if source_system is not None:
+        resolved_source_system = source_system or (filters.get("source_system") if filters else None)
+        if resolved_source_system is not None:
             must_conditions.append(
                 models.FieldCondition(
                     key="source_system",
-                    match=models.MatchValue(value=source_system),
+                    match=models.MatchValue(value=resolved_source_system),
                 )
             )
+        if filters:
+            for k, v in filters.items():
+                if k not in ("patient_id", "source_system", "document_id") and v is not None:
+                    if isinstance(v, (list, tuple)):
+                        must_conditions.append(models.FieldCondition(key=k, match=models.MatchAny(any=list(v))))
+                    else:
+                        must_conditions.append(models.FieldCondition(key=k, match=models.MatchValue(value=v)))
 
         effective_filter = models.Filter(must=must_conditions) if must_conditions else (query_filter or None)
 
@@ -732,6 +746,9 @@ class QdrantVectorStore:
                 rank=rank,
                 patient_id=payload.get("patient_id"),
                 source_system=payload.get("source_system"),
+                document_type=payload.get("document_type"),
+                report_date=payload.get("report_date"),
+                file_name=payload.get("file_name"),
             )
         except (ValueError, TypeError) as exc:
             raise QdrantVectorStoreError(
@@ -747,6 +764,7 @@ class QdrantVectorStore:
         source_system: str | None = None,
         query_filter: models.Filter | None = None,
         score_threshold: float | None = None,
+        filters: dict[str, Any] | None = None,
     ) -> list[SparseSearchResult]:
         """
         Execute sparse lexical search on named BM25 vectors in Qdrant.
@@ -759,6 +777,7 @@ class QdrantVectorStore:
             source_system: Optional source system to filter points server-side.
             query_filter: Optional existing Qdrant Filter.
             score_threshold: Optional similarity score threshold.
+            filters: Optional metadata filters mapping (e.g. {"patient_id": "...", "source_system": "..."}).
 
         Returns:
             Ordered list of SparseSearchResult items preserving Qdrant ranking.
@@ -797,20 +816,29 @@ class QdrantVectorStore:
                     match=models.MatchValue(value=document_id),
                 )
             )
-        if patient_id is not None:
+        resolved_patient_id = patient_id or (filters.get("patient_id") if filters else None)
+        if resolved_patient_id is not None:
             must_conditions.append(
                 models.FieldCondition(
                     key="patient_id",
-                    match=models.MatchValue(value=patient_id),
+                    match=models.MatchValue(value=resolved_patient_id),
                 )
             )
-        if source_system is not None:
+        resolved_source_system = source_system or (filters.get("source_system") if filters else None)
+        if resolved_source_system is not None:
             must_conditions.append(
                 models.FieldCondition(
                     key="source_system",
-                    match=models.MatchValue(value=source_system),
+                    match=models.MatchValue(value=resolved_source_system),
                 )
             )
+        if filters:
+            for k, v in filters.items():
+                if k not in ("patient_id", "source_system", "document_id") and v is not None:
+                    if isinstance(v, (list, tuple)):
+                        must_conditions.append(models.FieldCondition(key=k, match=models.MatchAny(any=list(v))))
+                    else:
+                        must_conditions.append(models.FieldCondition(key=k, match=models.MatchValue(value=v)))
 
         effective_filter = models.Filter(must=must_conditions) if must_conditions else (query_filter or None)
 
@@ -910,6 +938,9 @@ class QdrantVectorStore:
                 rank=rank,
                 patient_id=payload.get("patient_id"),
                 source_system=payload.get("source_system"),
+                document_type=payload.get("document_type"),
+                report_date=payload.get("report_date"),
+                file_name=payload.get("file_name"),
             )
         except (ValueError, TypeError) as exc:
             raise QdrantVectorStoreError(
@@ -927,6 +958,7 @@ class QdrantVectorStore:
         patient_id: str | None = None,
         source_system: str | None = None,
         filter: models.Filter | None = None,
+        filters: dict[str, Any] | None = None,
     ) -> list[HybridSearchResult]:
         """
         Execute hybrid search combining dense semantic retrieval and sparse BM25
@@ -949,6 +981,7 @@ class QdrantVectorStore:
             patient_id: Optional patient ID to filter points server-side.
             source_system: Optional source system to filter points server-side.
             filter: Optional existing Qdrant Filter.
+            filters: Optional metadata filters mapping (e.g. {"patient_id": "...", "source_system": "..."}).
 
         Returns:
             Ordered list of HybridSearchResult items preserving Qdrant fused ranking.
@@ -1013,20 +1046,29 @@ class QdrantVectorStore:
                     match=models.MatchValue(value=document_id),
                 )
             )
-        if patient_id is not None:
+        resolved_patient_id = patient_id or (filters.get("patient_id") if filters else None)
+        if resolved_patient_id is not None:
             must_conditions.append(
                 models.FieldCondition(
                     key="patient_id",
-                    match=models.MatchValue(value=patient_id),
+                    match=models.MatchValue(value=resolved_patient_id),
                 )
             )
-        if source_system is not None:
+        resolved_source_system = source_system or (filters.get("source_system") if filters else None)
+        if resolved_source_system is not None:
             must_conditions.append(
                 models.FieldCondition(
                     key="source_system",
-                    match=models.MatchValue(value=source_system),
+                    match=models.MatchValue(value=resolved_source_system),
                 )
             )
+        if filters:
+            for k, v in filters.items():
+                if k not in ("patient_id", "source_system", "document_id", "document_ids") and v is not None:
+                    if isinstance(v, (list, tuple)):
+                        must_conditions.append(models.FieldCondition(key=k, match=models.MatchAny(any=list(v))))
+                    else:
+                        must_conditions.append(models.FieldCondition(key=k, match=models.MatchValue(value=v)))
 
         query_filter = models.Filter(must=must_conditions) if must_conditions else (filter or None)
 

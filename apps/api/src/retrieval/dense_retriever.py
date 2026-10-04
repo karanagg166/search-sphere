@@ -70,6 +70,7 @@ class DenseRetriever:
         top_k: int | None = None,
         document_id: str | None = None,
         score_threshold: float | None = None,
+        filters: dict[str, Any] | None = None,
     ) -> list[DenseSearchResult]:
         """
         Retrieve ordered Top-K relevant chunks for a user query.
@@ -80,6 +81,7 @@ class DenseRetriever:
                 (defaults to DENSE_SEARCH_TOP_K).
             document_id: Optional document ID to filter chunks server-side.
             score_threshold: Optional minimum similarity score threshold.
+            filters: Optional metadata filters dictionary.
 
         Returns:
             Ordered list of DenseSearchResult items preserving Qdrant ranking.
@@ -153,12 +155,15 @@ class DenseRetriever:
         # 5. Qdrant ANN search
         start_search = time.perf_counter()
         try:
-            results = await self.vector_store.search_dense(
-                query_vector=query_vector,
-                limit=resolved_top_k,
-                document_id=resolved_doc_id,
-                score_threshold=score_threshold,
-            )
+            search_kwargs: dict[str, Any] = {
+                "query_vector": query_vector,
+                "limit": resolved_top_k,
+                "document_id": resolved_doc_id,
+                "score_threshold": score_threshold,
+            }
+            if filters is not None:
+                search_kwargs["filters"] = filters
+            results = await self.vector_store.search_dense(**search_kwargs)
         except QdrantVectorStoreError as exc:
             logger.exception(
                 "Qdrant dense search failed",

@@ -82,6 +82,7 @@ class HybridRetriever:
         candidate_k: int | None = None,
         document_id: str | None = None,
         document_ids: list[str] | None = None,
+        filters: dict[str, Any] | None = None,
     ) -> list[HybridSearchResult]:
         """
         Retrieve ordered Top-K relevant chunks combining dense semantic and sparse BM25
@@ -95,6 +96,7 @@ class HybridRetriever:
                 Defaults to HYBRID_SEARCH_CANDIDATE_K.
             document_id: Optional document ID to filter chunks server-side.
             document_ids: Optional list of document IDs to filter chunks server-side.
+            filters: Optional metadata filters mapping.
 
         Returns:
             Ordered list of HybridSearchResult items preserving Qdrant RRF ranking.
@@ -241,6 +243,8 @@ class HybridRetriever:
             }
             if resolved_doc_ids is not None:
                 search_kwargs["document_ids"] = resolved_doc_ids
+            if filters is not None:
+                search_kwargs["filters"] = filters
             results = await self.vector_store.search_hybrid(**search_kwargs)
         except QdrantVectorStoreError as exc:
             logger.exception(

@@ -34,6 +34,9 @@ class DenseSearchResult:
     rank: int | None = None
     patient_id: str | None = None
     source_system: str | None = None
+    document_type: str | None = None
+    report_date: str | None = None
+    file_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -62,6 +65,9 @@ class SparseSearchResult:
     - rank: optional 1-indexed ranking position in search results
     - patient_id: optional source patient identifier
     - source_system: optional source system identifier
+    - document_type: optional source document type
+    - report_date: optional report date ISO string
+    - file_name: optional source file name
     """
 
     point_id: str
@@ -77,6 +83,9 @@ class SparseSearchResult:
     rank: int | None = None
     patient_id: str | None = None
     source_system: str | None = None
+    document_type: str | None = None
+    report_date: str | None = None
+    file_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -104,6 +113,9 @@ class HybridSearchResult:
     - rank: optional 1-indexed ranking position in fused search results
     - patient_id: optional source patient identifier
     - source_system: optional source system identifier
+    - document_type: optional source document type
+    - report_date: optional report date ISO string
+    - file_name: optional source file name
     """
 
     point_id: str
@@ -119,6 +131,9 @@ class HybridSearchResult:
     rank: int | None = None
     patient_id: str | None = None
     source_system: str | None = None
+    document_type: str | None = None
+    report_date: str | None = None
+    file_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -147,6 +162,9 @@ class RerankedSearchResult:
     - rank: optional 1-indexed ranking position after cross-encoder reranking
     - patient_id: optional source patient identifier
     - source_system: optional source system identifier
+    - document_type: optional source document type
+    - report_date: optional report date ISO string
+    - file_name: optional source file name
     """
 
     point_id: str
@@ -164,8 +182,12 @@ class RerankedSearchResult:
     rank: int | None = None
     patient_id: str | None = None
     source_system: str | None = None
+    document_type: str | None = None
+    report_date: str | None = None
+    file_name: str | None = None
 
     def __post_init__(self) -> None:
         if self.score is None:
             object.__setattr__(self, "score", float(self.rerank_score))
+
 

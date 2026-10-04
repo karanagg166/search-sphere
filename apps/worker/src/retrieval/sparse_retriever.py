@@ -67,6 +67,7 @@ class SparseRetriever:
         top_k: int | None = None,
         document_id: str | None = None,
         score_threshold: float | None = None,
+        filters: dict[str, Any] | None = None,
     ) -> list[SparseSearchResult]:
         """
         Retrieve ordered Top-K lexical BM25 relevant chunks for a user query.
@@ -77,6 +78,7 @@ class SparseRetriever:
                 (defaults to SPARSE_SEARCH_TOP_K).
             document_id: Optional document ID to filter chunks server-side.
             score_threshold: Optional minimum similarity score threshold.
+            filters: Optional metadata filters dictionary.
 
         Returns:
             Ordered list of SparseSearchResult items preserving Qdrant ranking.
@@ -151,12 +153,15 @@ class SparseRetriever:
         # 5. Sparse search in Qdrant
         start_search = time.perf_counter()
         try:
-            results = await self.vector_store.search_sparse(
-                query_vector=query_vector,
-                limit=resolved_top_k,
-                document_id=resolved_doc_id,
-                score_threshold=score_threshold,
-            )
+            search_kwargs: dict[str, Any] = {
+                "query_vector": query_vector,
+                "limit": resolved_top_k,
+                "document_id": resolved_doc_id,
+                "score_threshold": score_threshold,
+            }
+            if filters is not None:
+                search_kwargs["filters"] = filters
+            results = await self.vector_store.search_sparse(**search_kwargs)
         except QdrantVectorStoreError as exc:
             logger.exception(
                 "Qdrant sparse search failed",

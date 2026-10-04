@@ -257,6 +257,32 @@ class CrossEncoderReranker:
                 )
             )
 
+            patient_id = (
+                getattr(cand, "patient_id", None)
+                if hasattr(cand, "patient_id")
+                else (cand.get("patient_id") if isinstance(cand, dict) else None)
+            )
+            source_system = (
+                getattr(cand, "source_system", None)
+                if hasattr(cand, "source_system")
+                else (cand.get("source_system") if isinstance(cand, dict) else None)
+            )
+            document_type = (
+                getattr(cand, "document_type", None)
+                if hasattr(cand, "document_type")
+                else (cand.get("document_type") if isinstance(cand, dict) else None)
+            )
+            report_date = (
+                getattr(cand, "report_date", None)
+                if hasattr(cand, "report_date")
+                else (cand.get("report_date") if isinstance(cand, dict) else None)
+            )
+            file_name = (
+                getattr(cand, "file_name", None)
+                if hasattr(cand, "file_name")
+                else (cand.get("file_name") if isinstance(cand, dict) else None)
+            )
+
             results.append(
                 RerankedSearchResult(
                     point_id=point_id,
@@ -272,6 +298,11 @@ class CrossEncoderReranker:
                     rrf_score=rrf_score,
                     score=score,
                     rank=rank_idx,
+                    patient_id=patient_id,
+                    source_system=source_system,
+                    document_type=document_type,
+                    report_date=report_date,
+                    file_name=file_name,
                 )
             )
 
@@ -308,16 +339,16 @@ class CrossEncoderReranker:
         model = self._get_model()
 
         try:
-            if hasattr(model, "rerank"):
-                query = pairs[0][0]
-                documents = [p[1] for p in pairs]
-                raw_scores = list(model.rerank(query, documents))
-            elif hasattr(model, "predict"):
+            if hasattr(model, "predict"):
                 raw_scores = model.predict(
                     pairs,
                     batch_size=self.batch_size,
                     show_progress_bar=False,
                 )
+            elif hasattr(model, "rerank"):
+                query = pairs[0][0]
+                documents = [p[1] for p in pairs]
+                raw_scores = list(model.rerank(query, documents))
             elif callable(model):
                 raw_scores = model(pairs)
             else:
