@@ -93,10 +93,10 @@ class MockStreamingProvider(BaseAnswerProvider):
         self.tokens = tokens
         self.should_fail = should_fail
 
-    async def generate(self, query, context_chunks, conversation_context=None) -> str:
+    async def generate(self, query, context_chunks, conversation_context=None, *args, **kwargs) -> str:
         return "".join(self.tokens)
 
-    async def generate_stream(self, query, context_chunks, conversation_context=None) -> AsyncIterator[str]:
+    async def generate_stream(self, query, context_chunks, conversation_context=None, *args, **kwargs) -> AsyncIterator[str]:
         for i, token in enumerate(self.tokens):
             if self.should_fail and i == 2:
                 raise AnswerGenerationError("Simulated LLM stream disconnect")

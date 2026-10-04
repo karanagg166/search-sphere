@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import get_db
 from src.models.external_document import ExternalDocument
+from src.models.medical_observation import MedicalObservation
 from src.retrieval.reranked_retriever import RerankedHybridRetriever
 from src.routers.internal_medical_documents import (
     sanitize_identifier,
@@ -36,12 +37,245 @@ from src.services.answer_generator import (
     get_answer_generator,
     sanitize_citations,
 )
+from src.services.medical_observation_service import (
+    MedicalObservationService,
+    get_medical_observation_service,
+)
+from src.services.medical_query_router import (
+    MedicalQueryRoute,
+    MedicalQueryRouter,
+    RoutedMedicalQuery,
+    get_medical_query_router,
+)
 from src.services.query_rewriter import QueryRewriter, get_query_rewriter
 from src.services.search_service import get_retriever
 
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/internal/medical-rag", tags=["Internal Medical RAG"])
+
+MEDICAL_HYBRID_SYSTEM_PREAMBLE = """You are a dependable, strictly grounded Medical Record Retrieval Assistant for Quick Clinic healthcare providers.
+Your goal is to answer the clinician's query accurately using BOTH the exact numeric values from the Structured Clinical Observations and narrative facts from the Document Records provided below.
+
+Strict Clinical & Grounding Rules:
+1. STRICT NUMERIC GROUNDING: All exact measurements, readings, and timestamps must come directly and unedited from the Structured Observations. Do NOT round, modify, or approximate numbers.
+2. NARRATIVE GROUNDING: Clinician notes, physician remarks, medication references, and discharge details must come directly from the Document Records.
+3. MEDICAL SAFETY & SCOPE: You are a record-retrieval assistant, NOT a diagnosing physician. Do NOT independently diagnose illness, predict worsening/hypertension, or generate threshold alert warnings.
+4. SOURCE CITATIONS: Attribute every fact or reading directly using bracketed numbers like [1], [2], corresponding to [SOURCE 1], [SOURCE 2] in the provided context.
+5. CONCISE AND CLINICAL: Provide a direct, professional, objective, and concise answer without conversational filler."""
+
+
+class HybridSourceItem:
+    """Wrapper item representing either a structured observation or a document chunk for hybrid generation."""
+
+    def __init__(
+        self,
+        source_type: str,
+        observation: MedicalObservation | None = None,
+        chunk: Any = None,
+        doc_meta: ExternalDocument | None = None,
+    ):
+        self.source_type = source_type
+        self.observation = observation
+        self.chunk = chunk
+        self.doc_meta = doc_meta
+
+
+def format_hybrid_context_chunks(items: list[Any]) -> str:
+    """Formats hybrid context providing distinct sections for structured observations and narrative records."""
+    parts = []
+    for idx, item in enumerate(items, start=1):
+        if getattr(item, "source_type", None) == "OBSERVATION":
+            obs = item.observation
+            date_str = obs.observed_at.strftime("%b %d, %Y") if obs.observed_at else "unspecified date"
+            val_str = f"{obs.value_text or obs.value_numeric} {obs.unit or ''}".strip()
+            parts.append(
+                f"[SOURCE {idx}] (Structured Clinical Observation):\n"
+                f"Type: {obs.display_name}\n"
+                f"Reading / Value: {val_str}\n"
+                f"Observed Date: {date_str}\n"
+                f"Document ID: {obs.external_document_id}\n"
+            )
+        else:
+            chunk = getattr(item, "chunk", item)
+            doc_id = getattr(chunk, "document_id", "unknown")
+            page_num = getattr(chunk, "start_page", 1) or 1
+            content = getattr(chunk, "content", "")
+            parts.append(
+                f"[SOURCE {idx}] (Clinical Document Record - Document: {doc_id}, Page: {page_num}):\n"
+                f"{content}\n"
+            )
+    return "\n\n".join(parts)
+
+
+def _build_hybrid_citations(
+    clean_answer: str,
+    used_items: list[Any],
+    ready_docs: dict[str, ExternalDocument],
+) -> list[MedicalAnswerCitation]:
+    """Map hybrid sources (observations and chunks) to clean citations."""
+    cited_ids = extract_citation_numbers(clean_answer, max_source_id=len(used_items))
+    citations: list[MedicalAnswerCitation] = []
+
+    for cid in cited_ids:
+        item = used_items[cid - 1]
+        if getattr(item, "source_type", None) == "OBSERVATION":
+            obs = item.observation
+            doc_meta = ready_docs.get(obs.external_document_id)
+            val_str = f"{obs.display_name}: {obs.value_text or obs.value_numeric} {obs.unit or ''}".strip()
+            citations.append(
+                MedicalAnswerCitation(
+                    citationId=cid,
+                    documentId=obs.external_document_id,
+                    fileName=doc_meta.file_name if doc_meta else "Medical Record",
+                    documentType="OBSERVATION",
+                    reportDate=obs.reported_at.isoformat() if obs.reported_at else None,
+                    pageNumber=obs.page_number,
+                    chunkIndex=obs.chunk_index,
+                    content=val_str,
+                    score=obs.confidence,
+                    sourceType="OBSERVATION",
+                    observationId=obs.id,
+                )
+            )
+        else:
+            chunk = getattr(item, "chunk", item)
+            doc_meta = ready_docs.get(chunk.document_id)
+            report_date_str = chunk.report_date
+            if not report_date_str and doc_meta and doc_meta.report_date:
+                report_date_str = doc_meta.report_date.isoformat()
+            page_num = chunk.start_page
+            if page_num is None and chunk.page_numbers:
+                page_num = chunk.page_numbers[0]
+            file_name = chunk.file_name or (doc_meta.file_name if doc_meta else "unknown")
+            doc_type = chunk.document_type or (doc_meta.document_type if doc_meta else "UNKNOWN")
+            score_val = float(chunk.score if chunk.score is not None else getattr(chunk, "rerank_score", 0.0))
+
+            citations.append(
+                MedicalAnswerCitation(
+                    citationId=cid,
+                    documentId=chunk.document_id,
+                    fileName=file_name,
+                    documentType=doc_type,
+                    reportDate=report_date_str,
+                    pageNumber=page_num,
+                    chunkIndex=chunk.chunk_index,
+                    content=chunk.content,
+                    score=round(score_val, 4),
+                    sourceType="DOCUMENT_CHUNK",
+                    observationId=None,
+                )
+            )
+
+    return citations
+
+
+async def _handle_structured_chat(
+    session: AsyncSession,
+    patient_id: str,
+    routed_query: RoutedMedicalQuery,
+    obs_service: MedicalObservationService,
+) -> tuple[str, list[MedicalAnswerCitation]]:
+    """Handles structured clinical observation queries deterministically without LLM hallucination risk."""
+    types = routed_query.target_observation_types or None
+    time_filter = routed_query.time_filter
+
+    if time_filter.is_latest:
+        observations = await obs_service.get_latest_observations(
+            session=session,
+            patient_id=patient_id,
+            observation_types=types,
+            limit=1,
+        )
+    else:
+        observations = await obs_service.query_observations(
+            session=session,
+            patient_id=patient_id,
+            observation_types=types,
+            from_date=time_filter.from_date,
+            to_date=time_filter.to_date,
+            limit=time_filter.limit,
+            sort_order="asc",
+        )
+
+    # Missing structured observations handling (PART 54)
+    if not observations:
+        concept_label = "medical"
+        if types:
+            first_t = types[0].upper()
+            if first_t == "HBA1C":
+                concept_label = "an HbA1c"
+            elif first_t == "BLOOD_PRESSURE":
+                concept_label = "any blood pressure"
+            elif first_t == "HEART_RATE":
+                concept_label = "any heart rate"
+            elif first_t in ("FASTING_GLUCOSE", "RANDOM_GLUCOSE", "BLOOD_GLUCOSE"):
+                concept_label = "any glucose"
+            elif first_t == "OXYGEN_SATURATION":
+                concept_label = "any oxygen saturation"
+            elif first_t == "BODY_TEMPERATURE":
+                concept_label = "any temperature"
+            else:
+                concept_label = f"any {types[0].replace('_', ' ').lower()}"
+
+        if "an " in concept_label:
+            return f"I couldn't find {concept_label} result in the available structured medical records.", []
+        else:
+            return f"I couldn't find {concept_label} readings in the available structured medical records.", []
+
+    doc_ids = list({obs.external_document_id for obs in observations})
+    db_res = await session.execute(
+        select(ExternalDocument).where(
+            ExternalDocument.source_system == "quick_clinic",
+            ExternalDocument.external_patient_id == patient_id,
+            ExternalDocument.external_document_id.in_(doc_ids),
+        )
+    )
+    docs_map = {d.external_document_id: d for d in db_res.scalars().all()}
+
+    first_display = observations[0].display_name
+    if time_filter.is_latest:
+        obs = observations[0]
+        date_str = obs.observed_at.strftime("%b %d, %Y") if obs.observed_at else "recorded date"
+        val_str = f"{obs.value_text or obs.value_numeric} {obs.unit or ''}".strip()
+        answer = f"The latest recorded {first_display} reading is {val_str} (observed on {date_str}) [1]."
+    elif time_filter.is_trend:
+        lines = [f"The recorded {first_display} readings in chronological order are:"]
+        for idx, obs in enumerate(observations, start=1):
+            date_str = obs.observed_at.strftime("%b %d, %Y") if obs.observed_at else "recorded date"
+            val_str = f"{obs.value_text or obs.value_numeric} {obs.unit or ''}".strip()
+            lines.append(f"- {date_str}: {val_str} [{idx}]")
+        answer = "\n".join(lines)
+    else:
+        time_desc = f" in the {time_filter.description}" if time_filter.description and time_filter.description != "all available" else ""
+        lines = [f"The available {first_display} readings{time_desc} are:"]
+        for idx, obs in enumerate(observations, start=1):
+            date_str = obs.observed_at.strftime("%b %d, %Y") if obs.observed_at else "recorded date"
+            val_str = f"{obs.value_text or obs.value_numeric} {obs.unit or ''}".strip()
+            lines.append(f"- {date_str}: {val_str} [{idx}]")
+        answer = "\n".join(lines)
+
+    citations: list[MedicalAnswerCitation] = []
+    for idx, obs in enumerate(observations, start=1):
+        doc_meta = docs_map.get(obs.external_document_id)
+        val_str = f"{obs.display_name}: {obs.value_text or obs.value_numeric} {obs.unit or ''}".strip()
+        citations.append(
+            MedicalAnswerCitation(
+                citationId=idx,
+                documentId=obs.external_document_id,
+                fileName=doc_meta.file_name if doc_meta else "Medical Record",
+                documentType="OBSERVATION",
+                reportDate=obs.reported_at.isoformat() if obs.reported_at else None,
+                pageNumber=obs.page_number,
+                chunkIndex=obs.chunk_index,
+                content=val_str,
+                score=obs.confidence,
+                sourceType="OBSERVATION",
+                observationId=obs.id,
+            )
+        )
+
+    return answer, citations
 
 
 async def _retrieve_patient_ready_chunks(
@@ -143,6 +377,8 @@ def _build_citations(
                 chunkIndex=chunk.chunk_index,
                 content=chunk.content,
                 score=round(score_val, 4),
+                sourceType="DOCUMENT_CHUNK",
+                observationId=None,
             )
         )
 
@@ -173,31 +409,16 @@ async def generate_medical_answer(
             detail="Query cannot be empty or whitespace only.",
         )
 
-    try:
-        ready_chunks, ready_docs = await _retrieve_patient_ready_chunks(
-            patient_id=clean_patient_id,
-            query=clean_query,
-            limit=body.limit,
-            document_type=body.document_type,
-            session=session,
-            retriever=retriever,
-        )
-    except Exception as exc:
-        logger.exception("Medical retrieval failed", patient_id=clean_patient_id, error=str(exc))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Medical retrieval execution failed: {exc}",
-        ) from exc
+    ready_chunks, ready_docs = await _retrieve_patient_ready_chunks(
+        patient_id=clean_patient_id,
+        query=clean_query,
+        limit=body.limit,
+        document_type=body.document_type,
+        session=session,
+        retriever=retriever,
+    )
 
     if not ready_chunks:
-        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-        logger.info(
-            "Medical RAG completed with zero chunks found",
-            patient_id=clean_patient_id,
-            result_count=0,
-            citation_count=0,
-            duration_ms=duration_ms,
-        )
         return MedicalRagAnswerResponse(
             answer=MEDICAL_NO_RESULTS_ANSWER,
             citations=[],
@@ -215,7 +436,7 @@ async def generate_medical_answer(
     except AnswerGenerationTimeoutError as exc:
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="Medical answer generation timed out. Please try again.",
+            detail="Medical answer generation timed out.",
         ) from exc
     except (AnswerGenerationUnavailableError, AnswerGenerationConfigError) as exc:
         raise HTTPException(
@@ -230,15 +451,6 @@ async def generate_medical_answer(
 
     clean_answer = sanitize_citations(raw_answer_text, max_source_id=len(used_chunks))
     citations = _build_citations(clean_answer, used_chunks, ready_docs)
-    duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-
-    logger.info(
-        "Medical RAG answer generated successfully",
-        patient_id=clean_patient_id,
-        result_count=len(ready_chunks),
-        citation_count=len(citations),
-        duration_ms=duration_ms,
-    )
 
     return MedicalRagAnswerResponse(
         answer=clean_answer,
@@ -252,7 +464,7 @@ async def generate_medical_answer(
     response_model=MedicalChatResponse,
     response_model_by_alias=True,
     status_code=status.HTTP_200_OK,
-    summary="Multi-turn patient-isolated medical chat answer generation",
+    summary="Multi-turn patient-isolated medical chat answer generation with structured/RAG/hybrid routing",
 )
 async def generate_medical_chat(
     body: MedicalChatRequest,
@@ -261,6 +473,8 @@ async def generate_medical_chat(
     retriever: RerankedHybridRetriever = Depends(get_retriever),
     query_rewriter: QueryRewriter = Depends(get_query_rewriter),
     answer_generator: AnswerGenerator = Depends(get_answer_generator),
+    query_router: MedicalQueryRouter = Depends(get_medical_query_router),
+    obs_service: MedicalObservationService = Depends(get_medical_observation_service),
 ) -> MedicalChatResponse:
     start_time = time.perf_counter()
 
@@ -283,7 +497,7 @@ async def generate_medical_chat(
         if msg.content and msg.content.strip()
     ]
 
-    # 2. Multi-turn query reformulation (used strictly for retrieval, never for authorization)
+    # 2. Multi-turn query reformulation
     effective_query = clean_message
     rewritten = False
     if conversation_context:
@@ -295,7 +509,127 @@ async def generate_medical_chat(
             effective_query = rewrite_result.retrieval_query
             rewritten = True
 
-    # 3. Patient-isolated retrieval with mandatory patient_id constraint
+    # 3. Clinical Query Routing (STRUCTURED / RAG / HYBRID)
+    routed = query_router.route_query(
+        query=effective_query,
+        conversation_context=conversation_context,
+    )
+
+    # CASE A: STRUCTURED OBSERVATION QUERY
+    if routed.route == MedicalQueryRoute.STRUCTURED:
+        ans, citations = await _handle_structured_chat(
+            session=session,
+            patient_id=clean_patient_id,
+            routed_query=routed,
+            obs_service=obs_service,
+        )
+        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        logger.info(
+            "Medical chat structured answer generated",
+            patient_id=clean_patient_id,
+            route_mode="STRUCTURED",
+            citation_count=len(citations),
+            duration_ms=duration_ms,
+        )
+        return MedicalChatResponse(
+            answer=ans,
+            citations=citations,
+            result_count=len(citations),
+            retrieval_query=effective_query,
+            rewritten=rewritten,
+            answer_mode="STRUCTURED",
+        )
+
+    # CASE B: HYBRID QUERY (Structured Observations + RAG Chunks)
+    if routed.route == MedicalQueryRoute.HYBRID:
+        # Fetch structured observations
+        observations = await obs_service.query_observations(
+            session=session,
+            patient_id=clean_patient_id,
+            observation_types=routed.target_observation_types or None,
+            from_date=routed.time_filter.from_date,
+            to_date=routed.time_filter.to_date,
+            limit=10,
+            sort_order="asc",
+        )
+        # Fetch semantic chunks
+        ready_chunks, ready_docs = await _retrieve_patient_ready_chunks(
+            patient_id=clean_patient_id,
+            query=effective_query,
+            limit=body.limit,
+            document_type=body.document_type,
+            session=session,
+            retriever=retriever,
+        )
+
+        if not observations and not ready_chunks:
+            return MedicalChatResponse(
+                answer=MEDICAL_NO_RESULTS_ANSWER,
+                citations=[],
+                result_count=0,
+                retrieval_query=effective_query,
+                rewritten=rewritten,
+                answer_mode="HYBRID",
+            )
+
+        # Build combined hybrid sources
+        hybrid_items: list[Any] = []
+        for obs in observations:
+            doc_meta = ready_docs.get(obs.external_document_id)
+            hybrid_items.append(
+                HybridSourceItem(
+                    source_type="OBSERVATION",
+                    observation=obs,
+                    doc_meta=doc_meta,
+                )
+            )
+        for chunk in ready_chunks:
+            hybrid_items.append(
+                HybridSourceItem(
+                    source_type="DOCUMENT_CHUNK",
+                    chunk=chunk,
+                    doc_meta=ready_docs.get(chunk.document_id),
+                )
+            )
+
+        try:
+            raw_answer_text, used_items = await answer_generator.generate_answer(
+                query=effective_query,
+                chunks=hybrid_items,
+                conversation_context=conversation_context,
+                preamble=MEDICAL_HYBRID_SYSTEM_PREAMBLE,
+                context_formatter=format_hybrid_context_chunks,
+                no_results_answer=MEDICAL_NO_RESULTS_ANSWER,
+            )
+        except Exception as exc:
+            logger.exception("Medical chat hybrid answer generation failed", error=str(exc))
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Hybrid answer generation failed: {exc}",
+            ) from exc
+
+        clean_answer = sanitize_citations(raw_answer_text, max_source_id=len(used_items))
+        citations = _build_hybrid_citations(clean_answer, used_items, ready_docs)
+        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        logger.info(
+            "Medical chat hybrid answer generated",
+            patient_id=clean_patient_id,
+            route_mode="HYBRID",
+            observation_count=len(observations),
+            chunk_count=len(ready_chunks),
+            citation_count=len(citations),
+            duration_ms=duration_ms,
+        )
+        return MedicalChatResponse(
+            answer=clean_answer,
+            citations=citations,
+            result_count=len(hybrid_items),
+            retrieval_query=effective_query,
+            rewritten=rewritten,
+            answer_mode="HYBRID",
+        )
+
+    # CASE C: RAG QUERY (Default Semantic Search)
     try:
         ready_chunks, ready_docs = await _retrieve_patient_ready_chunks(
             patient_id=clean_patient_id,
@@ -313,21 +647,13 @@ async def generate_medical_chat(
         ) from exc
 
     if not ready_chunks:
-        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-        logger.info(
-            "Medical chat completed with zero chunks found",
-            patient_id=clean_patient_id,
-            history_count=len(limited_history),
-            result_count=0,
-            citation_count=0,
-            duration_ms=duration_ms,
-        )
         return MedicalChatResponse(
             answer=MEDICAL_NO_RESULTS_ANSWER,
             citations=[],
             result_count=0,
             retrieval_query=effective_query,
             rewritten=rewritten,
+            answer_mode="RAG",
         )
 
     try:
@@ -360,9 +686,9 @@ async def generate_medical_chat(
     duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
     logger.info(
-        "Medical chat answer generated successfully",
+        "Medical chat RAG answer generated",
         patient_id=clean_patient_id,
-        history_count=len(limited_history),
+        route_mode="RAG",
         result_count=len(ready_chunks),
         citation_count=len(citations),
         duration_ms=duration_ms,
@@ -374,13 +700,14 @@ async def generate_medical_chat(
         result_count=len(ready_chunks),
         retrieval_query=effective_query,
         rewritten=rewritten,
+        answer_mode="RAG",
     )
 
 
 @router.post(
     "/chat/stream",
     status_code=status.HTTP_200_OK,
-    summary="Stream multi-turn medical chat answer via SSE",
+    summary="Stream multi-turn medical chat answer via SSE with structured/RAG/hybrid routing",
 )
 async def stream_medical_chat(
     body: MedicalChatRequest,
@@ -389,6 +716,8 @@ async def stream_medical_chat(
     retriever: RerankedHybridRetriever = Depends(get_retriever),
     query_rewriter: QueryRewriter = Depends(get_query_rewriter),
     answer_generator: AnswerGenerator = Depends(get_answer_generator),
+    query_router: MedicalQueryRouter = Depends(get_medical_query_router),
+    obs_service: MedicalObservationService = Depends(get_medical_observation_service),
 ) -> StreamingResponse:
     start_time = time.perf_counter()
 
@@ -419,6 +748,122 @@ async def stream_medical_chat(
         if rewrite_result.rewritten and rewrite_result.retrieval_query:
             effective_query = rewrite_result.retrieval_query
 
+    routed = query_router.route_query(
+        query=effective_query,
+        conversation_context=conversation_context,
+    )
+
+    # 1. CASE: STRUCTURED STREAM
+    if routed.route == MedicalQueryRoute.STRUCTURED:
+        ans, citations = await _handle_structured_chat(
+            session=session,
+            patient_id=clean_patient_id,
+            routed_query=routed,
+            obs_service=obs_service,
+        )
+
+        async def structured_event_stream():
+            yield f"event: token\ndata: {json.dumps({'text': ans})}\n\n"
+            citations_payload = [c.model_dump(by_alias=True) for c in citations]
+            yield f"event: citations\ndata: {json.dumps({'citations': citations_payload})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'answer': ans, 'citations': citations_payload, 'mode': 'STRUCTURED'})}\n\n"
+
+        return StreamingResponse(
+            structured_event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    # 2. CASE: HYBRID STREAM
+    if routed.route == MedicalQueryRoute.HYBRID:
+        observations = await obs_service.query_observations(
+            session=session,
+            patient_id=clean_patient_id,
+            observation_types=routed.target_observation_types or None,
+            from_date=routed.time_filter.from_date,
+            to_date=routed.time_filter.to_date,
+            limit=10,
+            sort_order="asc",
+        )
+        ready_chunks, ready_docs = await _retrieve_patient_ready_chunks(
+            patient_id=clean_patient_id,
+            query=effective_query,
+            limit=body.limit,
+            document_type=body.document_type,
+            session=session,
+            retriever=retriever,
+        )
+
+        async def hybrid_event_stream():
+            if not observations and not ready_chunks:
+                yield f"event: token\ndata: {json.dumps({'text': MEDICAL_NO_RESULTS_ANSWER})}\n\n"
+                yield f"event: citations\ndata: {json.dumps({'citations': []})}\n\n"
+                yield f"event: done\ndata: {json.dumps({'answer': MEDICAL_NO_RESULTS_ANSWER, 'citations': [], 'mode': 'HYBRID'})}\n\n"
+                return
+
+            hybrid_items: list[Any] = []
+            for obs in observations:
+                doc_meta = ready_docs.get(obs.external_document_id)
+                hybrid_items.append(
+                    HybridSourceItem(
+                        source_type="OBSERVATION",
+                        observation=obs,
+                        doc_meta=doc_meta,
+                    )
+                )
+            for chunk in ready_chunks:
+                hybrid_items.append(
+                    HybridSourceItem(
+                        source_type="DOCUMENT_CHUNK",
+                        chunk=chunk,
+                        doc_meta=ready_docs.get(chunk.document_id),
+                    )
+                )
+
+            accumulated_tokens: list[str] = []
+            try:
+                token_iter, used_items = await answer_generator.generate_answer_stream(
+                    query=effective_query,
+                    chunks=hybrid_items,
+                    conversation_context=conversation_context,
+                    preamble=MEDICAL_HYBRID_SYSTEM_PREAMBLE,
+                    context_formatter=format_hybrid_context_chunks,
+                    no_results_answer=MEDICAL_NO_RESULTS_ANSWER,
+                )
+                async for token in token_iter:
+                    accumulated_tokens.append(token)
+                    yield f"event: token\ndata: {json.dumps({'text': token})}\n\n"
+
+                raw_answer = "".join(accumulated_tokens).strip()
+                if not raw_answer:
+                    raw_answer = MEDICAL_NO_RESULTS_ANSWER
+                    yield f"event: token\ndata: {json.dumps({'text': raw_answer})}\n\n"
+
+                clean_answer = sanitize_citations(raw_answer, max_source_id=len(used_items))
+                citations = _build_hybrid_citations(clean_answer, used_items, ready_docs)
+                citations_payload = [c.model_dump(by_alias=True) for c in citations]
+
+                yield f"event: citations\ndata: {json.dumps({'citations': citations_payload})}\n\n"
+                yield f"event: done\ndata: {json.dumps({'answer': clean_answer, 'citations': citations_payload, 'mode': 'HYBRID'})}\n\n"
+            except Exception as exc:
+                logger.exception("Medical chat hybrid streaming failed", error=str(exc))
+                yield f"event: error\ndata: {json.dumps({'message': 'Unable to generate answer'})}\n\n"
+
+        return StreamingResponse(
+            hybrid_event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    # 3. CASE: RAG STREAM
     try:
         ready_chunks, ready_docs = await _retrieve_patient_ready_chunks(
             patient_id=clean_patient_id,
@@ -439,7 +884,7 @@ async def stream_medical_chat(
         if not ready_chunks:
             yield f"event: token\ndata: {json.dumps({'text': MEDICAL_NO_RESULTS_ANSWER})}\n\n"
             yield f"event: citations\ndata: {json.dumps({'citations': []})}\n\n"
-            yield f"event: done\ndata: {json.dumps({'answer': MEDICAL_NO_RESULTS_ANSWER, 'citations': []})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'answer': MEDICAL_NO_RESULTS_ANSWER, 'citations': [], 'mode': 'RAG'})}\n\n"
             return
 
         accumulated_tokens: list[str] = []
@@ -482,12 +927,13 @@ async def stream_medical_chat(
             citations_payload = [c.model_dump(by_alias=True) for c in citations]
 
             yield f"event: citations\ndata: {json.dumps({'citations': citations_payload})}\n\n"
-            yield f"event: done\ndata: {json.dumps({'answer': clean_answer, 'citations': citations_payload})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'answer': clean_answer, 'citations': citations_payload, 'mode': 'RAG'})}\n\n"
 
             duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
             logger.info(
                 "Medical chat stream completed successfully",
                 patient_id=clean_patient_id,
+                route_mode="RAG",
                 history_count=len(limited_history),
                 result_count=len(ready_chunks),
                 citation_count=len(citations),

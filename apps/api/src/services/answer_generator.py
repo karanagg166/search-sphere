@@ -554,14 +554,21 @@ class AnswerGenerator:
             )
             return fallback, []
 
-        answer_text = await self.provider.generate(
-            query=clean_query,
-            context_chunks=usable_chunks,
-            conversation_context=conversation_context,
-            preamble=preamble,
-            context_formatter=context_formatter,
-            no_results_answer=no_results_answer,
-        )
+        try:
+            answer_text = await self.provider.generate(
+                query=clean_query,
+                context_chunks=usable_chunks,
+                conversation_context=conversation_context,
+                preamble=preamble,
+                context_formatter=context_formatter,
+                no_results_answer=no_results_answer,
+            )
+        except TypeError:
+            answer_text = await self.provider.generate(
+                query=clean_query,
+                context_chunks=usable_chunks,
+                conversation_context=conversation_context,
+            )
 
         return answer_text, usable_chunks
 
@@ -596,14 +603,21 @@ class AnswerGenerator:
 
             return empty_stream(), []
 
-        stream = self.provider.generate_stream(
-            query=clean_query,
-            context_chunks=usable_chunks,
-            conversation_context=conversation_context,
-            preamble=preamble,
-            context_formatter=context_formatter,
-            no_results_answer=no_results_answer,
-        )
+        try:
+            stream = self.provider.generate_stream(
+                query=clean_query,
+                context_chunks=usable_chunks,
+                conversation_context=conversation_context,
+                preamble=preamble,
+                context_formatter=context_formatter,
+                no_results_answer=no_results_answer,
+            )
+        except TypeError:
+            stream = self.provider.generate_stream(
+                query=clean_query,
+                context_chunks=usable_chunks,
+                conversation_context=conversation_context,
+            )
         return stream, usable_chunks
 
 

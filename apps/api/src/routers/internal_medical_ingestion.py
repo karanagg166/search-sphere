@@ -8,11 +8,12 @@ from fastapi import (
     Response,
     status,
 )
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import get_db
 from src.models.external_document import ExternalDocument
+from src.models.medical_observation import MedicalObservation
 from src.routers.internal_medical_documents import (
     ALLOWED_MIME_TYPES,
     MAX_MEDICAL_DOC_SIZE_BYTES,
@@ -225,7 +226,14 @@ async def delete_medical_document_index(
     finally:
         await vector_store.close()
 
-    # 2. Delete database ingestion metadata and cascaded content
+    # 2. Delete database ingestion metadata, observations, and cascaded content
+    await session.execute(
+        delete(MedicalObservation).where(
+            MedicalObservation.source_system == "quick_clinic",
+            MedicalObservation.external_document_id == clean_document_id,
+        )
+    )
+
     result = await session.execute(
         select(ExternalDocument).where(
             ExternalDocument.source_system == "quick_clinic",
@@ -237,9 +245,11 @@ async def delete_medical_document_index(
         await session.delete(record)
         await session.commit()
         logger.info(
-            "External document record and extracted text deleted",
+            "External document record, observations, and extracted text deleted",
             document_id=clean_document_id,
         )
+    else:
+        await session.commit()
 
     return MedicalDocumentDeleteIndexResponse(
         success=True,

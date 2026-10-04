@@ -792,6 +792,7 @@ def test_cross_encoder_score_threshold_and_deduplication() -> None:
 
     mock_model = MagicMock()
     # Mock scores: cand 0 -> 2.0, cand 1 -> 1.5, cand 2 -> 1.4, cand 3 -> -12.0
+    mock_model.predict.return_value = [2.0, 1.5, 1.4, -12.0]
     mock_model.rerank.return_value = [2.0, 1.5, 1.4, -12.0]
 
     reranker = CrossEncoderReranker(model=mock_model)

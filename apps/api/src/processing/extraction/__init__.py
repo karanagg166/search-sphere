@@ -6,6 +6,10 @@ from src.processing.extraction.image_captioner import (
     ImageCaptioner,
     ImageCaptioningError,
 )
+from src.processing.extraction.medical_observation_extractor import (
+    ExtractedObservationData,
+    MedicalObservationExtractor,
+)
 from src.processing.extraction.ocr_processor import (
     OcrProcessingError,
     OcrProcessor,
@@ -18,4 +22,7 @@ __all__ = [
     "OcrProcessingError",
     "ImageCaptioner",
     "ImageCaptioningError",
+    "MedicalObservationExtractor",
+    "ExtractedObservationData",
 ]
+

@@ -5,11 +5,12 @@ from typing import Any
 
 import dramatiq
 import structlog
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from src.db import AsyncSessionLocal
 from src.models.external_document import ExternalDocument
 from src.models.external_document_content import ExternalDocumentContent
+from src.models.medical_observation import MedicalObservation
 from src.processing.chunking import DocumentChunker
 from src.processing.cleaning import TextCleaner
 from src.processing.embedding import (
@@ -19,6 +20,7 @@ from src.processing.embedding import (
 from src.processing.extraction import (
     DocumentExtractionError,
     DocumentExtractor,
+    MedicalObservationExtractor,
 )
 from src.processing.models.document import (
     ChunkedDocument,
@@ -336,7 +338,14 @@ async def _process_medical_document(
             patient_id=patient_id,
         )
 
-        # Store extracted text in external_document_contents
+        # Structured medical observation extraction (PART 6, 18, 20)
+        observation_extractor = MedicalObservationExtractor()
+        extracted_observations = observation_extractor.extract_from_extracted_document(
+            extracted_doc=extracted_doc,
+            report_date=external_doc.report_date,
+        )
+
+        # Store extracted text and structured observations in database
         async with get_session() as session:
             raw_text = extracted_doc.combined_text()
             char_count = len(raw_text)
@@ -358,6 +367,35 @@ async def _process_medical_document(
                 )
                 session.add(content_row)
 
+            # Reconcile / deduplicate prior observations for this document (PART 3 & PART 20)
+            await session.execute(
+                delete(MedicalObservation).where(
+                    MedicalObservation.source_system == "quick_clinic",
+                    MedicalObservation.external_document_id == document_id,
+                )
+            )
+
+            for obs in extracted_observations:
+                obs_row = MedicalObservation(
+                    source_system="quick_clinic",
+                    external_patient_id=patient_id,
+                    external_document_id=document_id,
+                    observation_type=obs.observation_type,
+                    display_name=obs.display_name,
+                    value_numeric=obs.value_numeric,
+                    value_text=obs.value_text,
+                    value_secondary_numeric=obs.value_secondary_numeric,
+                    unit=obs.unit,
+                    observed_at=obs.observed_at,
+                    reported_at=obs.reported_at,
+                    is_date_inferred=obs.is_date_inferred,
+                    page_number=obs.page_number,
+                    chunk_index=obs.chunk_index,
+                    confidence=obs.confidence,
+                    extraction_method=obs.extraction_method,
+                )
+                session.add(obs_row)
+
             res_doc = await session.execute(
                 select(ExternalDocument).where(ExternalDocument.id == db_doc_id)
             )
@@ -368,6 +406,7 @@ async def _process_medical_document(
             await session.commit()
 
         duration = round(time.time() - start_time, 2)
+        # PHI-safe logging: log only observation count and IDs (PART 18)
         logger.info(
             "Medical document processing succeeded",
             document_id=document_id,
@@ -375,6 +414,7 @@ async def _process_medical_document(
             pages=len(extracted_doc.pages),
             characters=len(raw_text),
             chunk_count=len(chunked_doc.chunks),
+            observation_count=len(extracted_observations),
             processing_status="READY",
             duration=duration,
         )

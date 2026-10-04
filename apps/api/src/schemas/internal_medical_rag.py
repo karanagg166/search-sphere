@@ -29,6 +29,12 @@ class MedicalAnswerCitation(BaseModel):
     chunk_index: int | None = Field(default=None, alias="chunkIndex", serialization_alias="chunkIndex")
     content: str | None = Field(default=None, alias="content", serialization_alias="content")
     score: float | None = Field(default=None, alias="score", serialization_alias="score")
+    source_type: str = Field(
+        default="DOCUMENT_CHUNK", alias="sourceType", serialization_alias="sourceType"
+    )
+    observation_id: str | None = Field(
+        default=None, alias="observationId", serialization_alias="observationId"
+    )
 
 
 class MedicalRagAnswerResponse(BaseModel):
@@ -76,3 +82,7 @@ class MedicalChatResponse(BaseModel):
         default=None, alias="retrievalQuery", serialization_alias="retrievalQuery"
     )
     rewritten: bool = False
+    answer_mode: str | None = Field(
+        default=None, alias="answerMode", serialization_alias="answerMode"
+    )
+
