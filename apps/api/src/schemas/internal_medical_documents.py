@@ -34,3 +34,18 @@ class MedicalDocumentStatusResponse(BaseModel):
 class MedicalDocumentDeleteIndexResponse(BaseModel):
     success: bool
     message: str
+
+
+class MedicalDocumentStaleRecoveryResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    stale_count: int = Field(..., alias="staleCount", serialization_alias="staleCount")
+    recovered_document_ids: list[str] = Field(
+        default_factory=list,
+        alias="recoveredDocumentIds",
+        serialization_alias="recoveredDocumentIds",
+    )
+    action: str
+    threshold_minutes: int = Field(
+        ..., alias="thresholdMinutes", serialization_alias="thresholdMinutes"
+    )

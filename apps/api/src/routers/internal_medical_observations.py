@@ -3,10 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import get_db
-from src.routers.internal_medical_documents import (
-    sanitize_identifier,
-    verify_service_secret,
-)
+from src.routers.internal_medical_documents import sanitize_identifier
+from src.security.service_auth import verify_service_secret
 from src.schemas.internal_medical_observations import (
     MedicalObservationQueryRequest,
     MedicalObservationQueryResponse,
@@ -39,6 +37,14 @@ async def query_patient_observations(
 ) -> MedicalObservationQueryResponse:
     clean_patient_id = sanitize_identifier(body.patient_id, "patient_id")
 
+    total_count = await obs_service.count_observations(
+        session=session,
+        patient_id=clean_patient_id,
+        observation_types=body.observation_types,
+        from_date=body.from_date,
+        to_date=body.to_date,
+    )
+
     observations = await obs_service.query_observations(
         session=session,
         patient_id=clean_patient_id,
@@ -46,21 +52,30 @@ async def query_patient_observations(
         from_date=body.from_date,
         to_date=body.to_date,
         limit=body.limit,
+        offset=body.offset,
         sort_order=body.sort,
     )
 
     items = [obs_service.model_to_item(obs) for obs in observations]
+    has_more = (body.offset + len(items)) < total_count
 
     logger.info(
         "Medical observations queried",
         patient_id=clean_patient_id,
         count=len(items),
+        total_count=total_count,
+        has_more=has_more,
+        offset=body.offset,
+        limit=body.limit,
         sort=body.sort,
     )
 
     return MedicalObservationQueryResponse(
         observations=items,
-        total_count=len(items),
+        total_count=total_count,
+        has_more=has_more,
+        offset=body.offset,
+        limit=body.limit,
     )
 
 
@@ -74,8 +89,9 @@ async def query_patient_observations(
 async def get_patient_observations(
     patient_id: str = Query(..., alias="patientId", min_length=1, max_length=128),
     observation_type: str | None = Query(None, alias="observationType"),
-    limit: int = Query(100, ge=1, le=500),
-    sort: str = Query("asc", pattern="^(asc|desc)$"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    sort: str = Query("desc", pattern="^(asc|desc)$"),
     _auth: bool = Depends(verify_service_secret),
     session: AsyncSession = Depends(get_db),
     obs_service: MedicalObservationService = Depends(get_medical_observation_service),
@@ -83,16 +99,28 @@ async def get_patient_observations(
     clean_patient_id = sanitize_identifier(patient_id, "patient_id")
     types = [observation_type] if observation_type else None
 
+    total_count = await obs_service.count_observations(
+        session=session,
+        patient_id=clean_patient_id,
+        observation_types=types,
+    )
+
     observations = await obs_service.query_observations(
         session=session,
         patient_id=clean_patient_id,
         observation_types=types,
         limit=limit,
+        offset=offset,
         sort_order=sort,
     )
 
     items = [obs_service.model_to_item(obs) for obs in observations]
+    has_more = (offset + len(items)) < total_count
+
     return MedicalObservationQueryResponse(
         observations=items,
-        total_count=len(items),
+        total_count=total_count,
+        has_more=has_more,
+        offset=offset,
+        limit=limit,
     )

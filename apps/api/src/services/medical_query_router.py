@@ -50,22 +50,25 @@ STRUCTURED_CONCEPT_PATTERNS: list[tuple[str, list[str]]] = [
 
 # Explicit temporal or numeric aggregation intent for structured queries
 STRUCTURED_TEMPORAL_AGG_PATTERN = re.compile(
-    r"\b(?:latest|most\s*recent|last\s*(?:\d+\s*)?days?|past\s*(?:\d+\s*)?days?|"
-    r"in\s*the\s*last\s*(?:\d+\s*)?days?|in\s*the\s*past\s*(?:\d+\s*)?days?|"
+    r"\b(?:latest|(?:most\s*)?recent|last\s*(?:\d+\s*)?(?:days?|weeks?|months?)|"
+    r"past\s*(?:\d+\s*)?(?:days?|weeks?|months?)|"
+    r"in\s*the\s*last\s*(?:\d+\s*)?(?:days?|weeks?|months?)|"
+    r"in\s*the\s*past\s*(?:\d+\s*)?(?:days?|weeks?|months?)|"
     r"today|yesterday|this\s*week|last\s*week|past\s*week|"
     r"trend|trends|pattern|progression|"
-    r"readings|values|measurements|recorded|history\s*of|list\s+.*readings)\b",
+    r"readings|values|measurements|recorded|history|list\s+.*readings)\b",
     re.IGNORECASE,
 )
 
 # Narrative / clinical document indicators
 NARRATIVE_INTENT_PATTERN = re.compile(
-    r"\b(?:discharge\s*(?:report|summary|note)|radiology\s*(?:report|note)|"
-    r"prescription|medications?|medicines?|drugs?|"
-    r"doctor\s*(?:note|notes|say|said|noted|opined|stated)|"
-    r"physician\s*(?:note|notes|say|said|noted)|"
-    r"clinical\s*(?:note|notes)|summarize|summary|overview|opinion|recommendations?|"
-    r"treatment\s*plan|diagnosis|plan\s*of\s*care|findings?|impression|"
+    r"\b(?:discharge\s*(?:report|summary|note|instructions?)|radiology\s*(?:report|note)|"
+    r"prescription|prescribed?|medications?|medicines?|drugs?|antibiotics?|"
+    r"doctor\s*(?:note|notes|say|said|noted|opined|stated|plan|orders?)|"
+    r"physician\s*(?:note|notes|say|said|noted|plan|orders?)|"
+    r"clinical\s*(?:note|notes)|chart|summarize|summary|overview|opinion|recommendations?|recommends?|recommended|"
+    r"advised?|instructions?|treatment\s*plan|plan\s*of\s*care|(?:care\s*)?plan|diagnosis|findings?|impression|"
+    r"physical\s*exam(?:\s*notes?)?|consultation|"
     r"what\s*did\s*the\s*doctor\s*say|what\s*does\s*the\s*.*say|"
     r"in\s*patient\s*medical\s*reports|in\s*the\s*report|in\s*the\s*records?)\b",
     re.IGNORECASE,
@@ -80,12 +83,41 @@ ELLIPTICAL_FOLLOWUP_PATTERN = re.compile(
 )
 
 
-def parse_relative_time_range(query: str, now: datetime | None = None) -> TimeRangeFilter:
+import zoneinfo
+
+
+def parse_relative_time_range(
+    query: str,
+    now: datetime | None = None,
+    tz_name: str | None = "UTC",
+) -> TimeRangeFilter:
     """
-    Parses relative temporal expressions from query using UTC server time.
-    Supports: today, yesterday, last N days, last week, this week, latest, recent.
+    Parses relative temporal expressions from query with exact calendar semantics and timezone support.
+
+    Semantics:
+    - today: start of current calendar day (00:00:00) -> now
+    - yesterday: previous calendar day start (00:00:00) -> previous calendar day end (23:59:59.999999)
+    - this week: start of current calendar week (Monday 00:00:00) -> now
+    - last week: previous complete Monday-Sunday interval (Monday 00:00:00 -> Sunday 23:59:59.999999)
+    - last N days: rolling time window (now - N days -> now)
+    - latest / most recent: is_latest=True, limit=1
+    - recent: last 10 readings
+    - trend: is_trend=True
+
+    Timezone strategy:
+    Calculates calendar day boundaries in the user's local timezone (or tz_name), then normalizes
+    from_date and to_date to UTC for querying UTC timestamps in PostgreSQL.
     """
-    current_time = now or datetime.now(timezone.utc)
+    try:
+        local_tz = zoneinfo.ZoneInfo(tz_name) if tz_name else timezone.utc
+    except Exception:
+        local_tz = timezone.utc
+
+    if now is not None:
+        local_now = now.astimezone(local_tz) if now.tzinfo else now.replace(tzinfo=local_tz)
+    else:
+        local_now = datetime.now(local_tz)
+
     query_lower = query.lower()
 
     # 1. Latest / Most Recent
@@ -96,51 +128,60 @@ def parse_relative_time_range(query: str, now: datetime | None = None) -> TimeRa
             description="latest",
         )
 
-    # 2. Today
+    # 2. Today: start of current calendar day -> now
     if re.search(r"\btoday\b", query_lower):
-        start_of_today = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_of_today_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
         return TimeRangeFilter(
-            from_date=start_of_today,
-            to_date=current_time,
+            from_date=start_of_today_local.astimezone(timezone.utc),
+            to_date=local_now.astimezone(timezone.utc),
             description="today",
         )
 
-    # 3. Yesterday
+    # 3. Yesterday: previous calendar day start -> previous calendar day end
     if re.search(r"\byesterday\b", query_lower):
-        start_of_today = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
-        start_of_yesterday = start_of_today - timedelta(days=1)
+        start_of_today_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_of_yesterday_local = start_of_today_local - timedelta(days=1)
+        end_of_yesterday_local = start_of_today_local - timedelta(microseconds=1)
         return TimeRangeFilter(
-            from_date=start_of_yesterday,
-            to_date=start_of_today,
+            from_date=start_of_yesterday_local.astimezone(timezone.utc),
+            to_date=end_of_yesterday_local.astimezone(timezone.utc),
             description="yesterday",
         )
 
-    # 4. Last / Past N Days (e.g. "last 3 days", "in the last 7 days", "past 14 days")
+    # 4. Last / Past N Days: rolling time window
     m_days = re.search(r"\b(?:last|past|in\s*the\s*last|in\s*the\s*past)\s*(\d+)\s*days?\b", query_lower)
     if m_days:
         num_days = int(m_days.group(1))
-        from_dt = current_time - timedelta(days=num_days)
+        from_dt = local_now - timedelta(days=num_days)
         return TimeRangeFilter(
-            from_date=from_dt,
-            to_date=current_time,
+            from_date=from_dt.astimezone(timezone.utc),
+            to_date=local_now.astimezone(timezone.utc),
             description=f"last {num_days} days",
         )
 
-    # 5. This week
+    # 5. This week: start of current calendar week (Monday) -> now
     if re.search(r"\bthis\s*week\b", query_lower):
-        from_dt = current_time - timedelta(days=7)
+        days_since_monday = local_now.weekday()  # Monday is 0, Sunday is 6
+        start_of_week_local = (local_now - timedelta(days=days_since_monday)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
         return TimeRangeFilter(
-            from_date=from_dt,
-            to_date=current_time,
+            from_date=start_of_week_local.astimezone(timezone.utc),
+            to_date=local_now.astimezone(timezone.utc),
             description="this week",
         )
 
-    # 6. Last week / past week
+    # 6. Last week / past week: previous complete Monday-Sunday interval
     if re.search(r"\b(?:last|past)\s*week\b", query_lower):
-        from_dt = current_time - timedelta(days=7)
+        days_since_monday = local_now.weekday()
+        this_monday_local = (local_now - timedelta(days=days_since_monday)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        last_monday_local = this_monday_local - timedelta(days=7)
+        last_sunday_end_local = this_monday_local - timedelta(microseconds=1)
         return TimeRangeFilter(
-            from_date=from_dt,
-            to_date=current_time,
+            from_date=last_monday_local.astimezone(timezone.utc),
+            to_date=last_sunday_end_local.astimezone(timezone.utc),
             description="last week",
         )
 

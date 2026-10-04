@@ -149,6 +149,13 @@ class MedicalObservation(Base):
             "observed_at",
         ),
         Index(
+            "ix_med_obs_src_pat_type_date",
+            "source_system",
+            "external_patient_id",
+            "observation_type",
+            "observed_at",
+        ),
+        Index(
             "ix_med_obs_src_doc",
             "source_system",
             "external_document_id",

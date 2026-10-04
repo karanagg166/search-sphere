@@ -54,9 +54,11 @@ def process_document_task(document_id: str) -> None:
     actor_name="process_medical_document_task",
     max_retries=3,
 )
-def process_medical_document_task(document_id: str) -> None:
+def process_medical_document_task(document_id: str, request_id: str | None = None) -> None:
     """Background job responsible for processing a Quick Clinic medical document."""
-    asyncio.run(_process_medical_document(document_id))
+    if request_id:
+        structlog.contextvars.bind_contextvars(request_id=request_id)
+    asyncio.run(_process_medical_document(document_id, request_id=request_id))
 
 
 async def _process_pipeline(
@@ -258,6 +260,7 @@ async def _process_document(
 
 async def _process_medical_document(
     document_id: str,
+    request_id: str | None = None,
     storage: ObjectStorage | None = None,
     extractor: DocumentExtractor | None = None,
     cleaner: TextCleaner | None = None,
@@ -269,6 +272,8 @@ async def _process_medical_document(
 ) -> EmbeddedDocument | None:
     """Processes external medical documents from Quick Clinic with strict isolation & PHI logging."""
     start_time = time.time()
+    if request_id:
+        structlog.contextvars.bind_contextvars(request_id=request_id)
     get_session = session_factory or AsyncSessionLocal
 
     async with get_session() as session:
@@ -338,11 +343,15 @@ async def _process_medical_document(
             patient_id=patient_id,
         )
 
-        # Structured medical observation extraction (PART 6, 18, 20)
+        # Structured medical observation extraction (PART 6, 18, 20-24)
+        is_ocr = mime_type.lower() in ("image/jpeg", "image/png", "image/webp", "image/jpg")
+        default_method = "OCR" if is_ocr else "REGEX"
+
         observation_extractor = MedicalObservationExtractor()
         extracted_observations = observation_extractor.extract_from_extracted_document(
             extracted_doc=extracted_doc,
             report_date=external_doc.report_date,
+            default_extraction_method=default_method,
         )
 
         # Store extracted text and structured observations in database

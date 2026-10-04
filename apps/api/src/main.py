@@ -53,11 +53,26 @@ async def lifespan(app: FastAPI):
         logger.error("Error disposing database connection pool", error=str(e))
 
 
+import re
+
+SAFE_REQUEST_ID_REGEX = re.compile(r"^[a-zA-Z0-9_\-\.:]{8,128}$")
+
+
 class RequestCorrelationMiddleware(BaseHTTPMiddleware):
     """Assigns or propagates X-Request-ID and binds it to structured logging context."""
 
     async def dispatch(self, request: Request, call_next):
-        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        raw_req_id = request.headers.get("X-Request-ID", "").strip()
+        if (
+            raw_req_id
+            and SAFE_REQUEST_ID_REGEX.match(raw_req_id)
+            and "@" not in raw_req_id
+            and not raw_req_id.startswith(("pat_", "pat-", "doc_", "doc-"))
+        ):
+            request_id = raw_req_id
+        else:
+            request_id = str(uuid.uuid4())
+
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(request_id=request_id)
         try:

@@ -12,7 +12,7 @@ from src.models.external_document import ExternalDocument
 from src.processing.models.search import RerankedSearchResult
 from src.services.search_service import get_retriever
 
-TEST_SERVICE_SECRET = "quick-clinic-internal-service-secret-2026"
+TEST_SERVICE_SECRET = "test-service-secret"
 VALID_AUTH_HEADER = {"Authorization": f"Bearer {TEST_SERVICE_SECRET}"}
 INVALID_AUTH_HEADER = {"Authorization": "Bearer wrong-service-secret"}
 

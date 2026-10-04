@@ -11,8 +11,9 @@ class MedicalObservationQueryRequest(BaseModel):
     observation_types: list[str] | None = Field(default=None, alias="observationTypes")
     from_date: datetime | str | None = Field(default=None, alias="fromDate")
     to_date: datetime | str | None = Field(default=None, alias="toDate")
-    limit: int = Field(default=100, ge=1, le=500)
-    sort: str = Field(default="asc", pattern="^(asc|desc)$")
+    limit: int = Field(default=50, ge=1, le=200)
+    offset: int = Field(default=0, ge=0)
+    sort: str = Field(default="desc", pattern="^(asc|desc)$")
 
 
 class MedicalObservationItem(BaseModel):
@@ -47,3 +48,6 @@ class MedicalObservationQueryResponse(BaseModel):
 
     observations: list[MedicalObservationItem] = Field(default_factory=list)
     total_count: int = Field(default=0, alias="totalCount", serialization_alias="totalCount")
+    has_more: bool = Field(default=False, alias="hasMore", serialization_alias="hasMore")
+    offset: int = 0
+    limit: int = 50

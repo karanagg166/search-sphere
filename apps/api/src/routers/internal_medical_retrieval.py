@@ -9,10 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db import get_db
 from src.models.external_document import ExternalDocument
 from src.retrieval.reranked_retriever import RerankedHybridRetriever
-from src.routers.internal_medical_documents import (
-    sanitize_identifier,
-    verify_service_secret,
-)
+from src.routers.internal_medical_documents import sanitize_identifier
+from src.security.service_auth import verify_service_secret
 from src.schemas.internal_medical_retrieval import (
     MedicalRetrievalChunkResult,
     MedicalRetrievalSearchRequest,

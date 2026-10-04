@@ -1,10 +1,12 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import structlog
 from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Query,
+    Request,
     Response,
     status,
 )
@@ -19,12 +21,13 @@ from src.routers.internal_medical_documents import (
     MAX_MEDICAL_DOC_SIZE_BYTES,
     sanitize_filename,
     sanitize_identifier,
-    verify_service_secret,
 )
+from src.security.service_auth import verify_service_secret
 from src.schemas.internal_medical_documents import (
     MedicalDocumentDeleteIndexResponse,
     MedicalDocumentIngestRequest,
     MedicalDocumentIngestResponse,
+    MedicalDocumentStaleRecoveryResponse,
     MedicalDocumentStatusResponse,
 )
 from src.tasks.document_tasks import enqueue_medical_document
@@ -50,6 +53,58 @@ def parse_report_date(date_val: datetime | str | None) -> datetime | None:
 
 
 @router.post(
+    "/stale/recover",
+    response_model=MedicalDocumentStaleRecoveryResponse,
+    response_model_by_alias=True,
+    status_code=status.HTTP_200_OK,
+    summary="Identify and recover or fail stale ingestion jobs stuck in PROCESSING",
+)
+async def recover_stale_documents(
+    request: Request,
+    threshold_minutes: int = Query(15, ge=1, le=1440, alias="thresholdMinutes"),
+    action: str = Query("fail", pattern="^(fail|requeue)$"),
+    _auth: bool = Depends(verify_service_secret),
+    session: AsyncSession = Depends(get_db),
+) -> MedicalDocumentStaleRecoveryResponse:
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
+    stmt = select(ExternalDocument).where(
+        ExternalDocument.source_system == "quick_clinic",
+        ExternalDocument.status == "PROCESSING",
+        ExternalDocument.updated_at < cutoff,
+    )
+    result = await session.execute(stmt)
+    stale_docs = list(result.scalars().all())
+    recovered_ids: list[str] = []
+
+    req_id = request.headers.get("X-Request-ID")
+    for doc in stale_docs:
+        recovered_ids.append(doc.external_document_id)
+        if action == "fail":
+            doc.status = "FAILED"
+            doc.processing_error = f"Processing timed out after {threshold_minutes} minutes without completion"
+        elif action == "requeue":
+            doc.status = "QUEUED"
+            doc.processing_error = None
+            enqueue_medical_document(doc.external_document_id, request_id=req_id)
+
+    await session.commit()
+
+    logger.info(
+        "Stale medical processing recovery executed",
+        stale_count=len(recovered_ids),
+        action=action,
+        threshold_minutes=threshold_minutes,
+    )
+
+    return MedicalDocumentStaleRecoveryResponse(
+        stale_count=len(recovered_ids),
+        recovered_document_ids=recovered_ids,
+        action=action,
+        threshold_minutes=threshold_minutes,
+    )
+
+
+@router.post(
     "/{document_id}/ingest",
     response_model=MedicalDocumentIngestResponse,
     response_model_by_alias=True,
@@ -61,6 +116,7 @@ async def ingest_medical_document(
     document_id: str,
     body: MedicalDocumentIngestRequest,
     response: Response,
+    request: Request,
     _auth: bool = Depends(verify_service_secret),
     session: AsyncSession = Depends(get_db),
 ) -> MedicalDocumentIngestResponse:
@@ -150,7 +206,8 @@ async def ingest_medical_document(
     await session.commit()
 
     # Enqueue background processing task via RabbitMQ/Dramatiq
-    enqueued = enqueue_medical_document(clean_document_id)
+    request_id = request.headers.get("X-Request-ID")
+    enqueued = enqueue_medical_document(clean_document_id, request_id=request_id)
     if not enqueued:
         logger.warning(
             "Medical document queued in database but worker queue unavailable",

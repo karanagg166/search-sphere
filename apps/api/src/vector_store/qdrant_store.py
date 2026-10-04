@@ -293,9 +293,9 @@ class QdrantVectorStore:
             )
 
     async def _ensure_payload_indexes(self, info: Any = None) -> None:
-        """Ensure keyword payload index exists for document_id, source_system, and patient_id fields."""
+        """Ensure keyword payload index exists for document_id, source_system, patient_id, and document_type fields."""
         payload_schema = getattr(info, "payload_schema", None) if info else None
-        fields_to_index = ["document_id", "source_system", "patient_id"]
+        fields_to_index = ["document_id", "source_system", "patient_id", "document_type"]
         for field in fields_to_index:
             if isinstance(payload_schema, dict) and field in payload_schema:
                 continue

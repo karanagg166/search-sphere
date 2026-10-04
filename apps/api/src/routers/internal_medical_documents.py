@@ -98,40 +98,7 @@ def sanitize_identifier(identifier: str, field_name: str) -> str:
     return cleaned
 
 
-def verify_service_secret(authorization: str | None = Header(None)) -> bool:
-    """Validates the server-to-server Authorization: Bearer <secret>."""
-    if not authorization:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization header is required.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authorization scheme. Bearer token required.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    token = authorization[7:].strip()
-    expected_secret = settings.QUICK_CLINIC_SERVICE_SECRET
-    if not expected_secret:
-        logger.error("QUICK_CLINIC_SERVICE_SECRET is not configured on server")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Server configuration error: service secret is not configured.",
-        )
-
-    if not hmac.compare_digest(token.encode("utf-8"), expected_secret.encode("utf-8")):
-        logger.warning("Invalid internal service secret attempt for medical documents API")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid service secret.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    return True
+from src.security.service_auth import verify_service_secret  # noqa: F401
 
 
 # Response Schemas

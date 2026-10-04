@@ -20,9 +20,9 @@ try:
         logger.info("process_document_task dispatched", document_id=document_id)
 
     @dramatiq.actor(queue_name="default", actor_name="process_medical_document_task")
-    def process_medical_document_task(document_id: str) -> None:
+    def process_medical_document_task(document_id: str, request_id: str | None = None) -> None:
         """Dispatches external medical document ingestion tasks to the background worker."""
-        logger.info("process_medical_document_task dispatched", document_id=document_id)
+        logger.info("process_medical_document_task dispatched", document_id=document_id, request_id=request_id)
 
 except Exception as e:
     logger.warning("Could not initialize RabbitMQ broker for Dramatiq", error=str(e))
@@ -47,13 +47,16 @@ def enqueue_document(document_id: str) -> bool:
         return False
 
 
-def enqueue_medical_document(document_id: str) -> bool:
+def enqueue_medical_document(document_id: str, request_id: str | None = None) -> bool:
     """Pushes external medical document_id to the worker queue for background processing."""
     if process_medical_document_task is None:
         return False
     try:
-        process_medical_document_task.send(document_id)
-        logger.info("Pushed medical document to worker queue", document_id=document_id)
+        if request_id:
+            process_medical_document_task.send(document_id, request_id=request_id)
+        else:
+            process_medical_document_task.send(document_id)
+        logger.info("Pushed medical document to worker queue", document_id=document_id, request_id=request_id)
         return True
     except Exception as exc:
         logger.warning(

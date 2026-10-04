@@ -28,7 +28,7 @@ from src.services.medical_query_router import (
 from src.services.query_rewriter import get_query_rewriter
 from src.services.search_service import get_retriever
 
-TEST_SERVICE_SECRET = settings.QUICK_CLINIC_SERVICE_SECRET or "quick-clinic-internal-service-secret-2026"
+TEST_SERVICE_SECRET = "test-service-secret"
 VALID_AUTH_HEADER = {"Authorization": f"Bearer {TEST_SERVICE_SECRET}"}
 INVALID_AUTH_HEADER = {"Authorization": "Bearer wrong-service-secret"}
 
@@ -761,3 +761,140 @@ async def test_chat_hybrid_query_response(seed_observations_data):
             assert "OBSERVATION" in source_types
     finally:
         app.dependency_overrides.clear()
+
+
+def test_extractor_multi_measurement_times():
+    extractor = MedicalObservationExtractor()
+    text = (
+        "Date: 2026-10-04\n"
+        "Morning BP: 130/85 mmHg\n"
+        "Evening BP: 122/80 mmHg\n"
+    )
+    obs = extractor.extract_from_text(text)
+    bp_obs = [o for o in obs if o.observation_type == "BLOOD_PRESSURE"]
+    assert len(bp_obs) == 2
+    assert bp_obs[0].value_numeric == 130.0
+    assert bp_obs[0].value_secondary_numeric == 85.0
+    assert bp_obs[0].observed_at.hour == 8
+
+    assert bp_obs[1].value_numeric == 122.0
+    assert bp_obs[1].value_secondary_numeric == 80.0
+    assert bp_obs[1].observed_at.hour == 18
+
+
+def test_extractor_multi_date_pages():
+    extractor = MedicalObservationExtractor()
+
+    class MockPage:
+        def __init__(self, page_number: int, text: str):
+            self.page_number = page_number
+            self.text = text
+
+    class MockDoc:
+        def __init__(self, pages):
+            self.pages = pages
+
+    pages = [
+        MockPage(1, "Visit date: 2026-09-15\nBlood Pressure: 140/90 mmHg"),
+        MockPage(2, "Follow-up session notes.\nPulse: 72 bpm"),
+        MockPage(3, "Follow-up date: 2026-10-01\nBP: 124/82 mmHg"),
+    ]
+    doc = MockDoc(pages)
+    obs = extractor.extract_from_extracted_document(doc)
+
+    assert len(obs) == 3
+    # Page 1
+    assert obs[0].page_number == 1
+    assert obs[0].observed_at.strftime("%Y-%m-%d") == "2026-09-15"
+    assert obs[0].is_date_inferred is False
+
+    # Page 2 (inherited)
+    assert obs[1].page_number == 2
+    assert obs[1].observed_at.strftime("%Y-%m-%d") == "2026-09-15"
+
+    # Page 3
+    assert obs[2].page_number == 3
+    assert obs[2].observed_at.strftime("%Y-%m-%d") == "2026-10-01"
+    assert obs[2].is_date_inferred is False
+
+
+def test_extractor_ocr_confidence_and_method():
+    extractor = MedicalObservationExtractor()
+    text = "BP: 118/76 mmHg\nPulse: 70 bpm"
+    obs = extractor.extract_from_text(text, default_extraction_method="OCR")
+    assert len(obs) == 2
+    for o in obs:
+        assert o.extraction_method == "OCR"
+        assert 0.80 <= o.confidence <= 0.90
+
+
+@pytest.mark.asyncio
+async def test_observation_query_pagination_and_deterministic_order():
+    patient_id = f"pat-pag-{uuid.uuid4().hex[:8]}"
+    doc_id = f"doc-{uuid.uuid4().hex[:8]}"
+
+    base_date = datetime(2026, 10, 1, 10, 0, 0, tzinfo=timezone.utc)
+    async with AsyncSessionLocal() as session:
+        for i in range(5):
+            obs = MedicalObservation(
+                id=f"obs-pag-{uuid.uuid4().hex[:8]}-{i:03d}",
+                source_system="quick_clinic",
+                external_patient_id=patient_id,
+                external_document_id=doc_id,
+                observation_type="BLOOD_PRESSURE",
+                display_name="Blood Pressure",
+                value_numeric=120.0 + i,
+                value_secondary_numeric=80.0,
+                unit="mmHg",
+                observed_at=base_date + timedelta(days=i),
+                confidence=0.98,
+                extraction_method="REGEX",
+            )
+            session.add(obs)
+        await session.commit()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Page 1: limit=2, offset=0
+        resp1 = await client.post(
+            "/internal/medical-observations/query",
+            headers=VALID_AUTH_HEADER,
+            json={"patientId": patient_id, "limit": 2, "offset": 0, "sort": "desc"},
+        )
+        assert resp1.status_code == 200
+        data1 = resp1.json()
+        assert data1["totalCount"] == 5
+        assert len(data1["observations"]) == 2
+        assert data1["hasMore"] is True
+        assert data1["offset"] == 0
+        assert data1["limit"] == 2
+        assert data1["observations"][0]["value"] == 124.0
+        assert data1["observations"][1]["value"] == 123.0
+
+        # Page 2: limit=2, offset=2
+        resp2 = await client.post(
+            "/internal/medical-observations/query",
+            headers=VALID_AUTH_HEADER,
+            json={"patientId": patient_id, "limit": 2, "offset": 2, "sort": "desc"},
+        )
+        assert resp2.status_code == 200
+        data2 = resp2.json()
+        assert data2["totalCount"] == 5
+        assert len(data2["observations"]) == 2
+        assert data2["hasMore"] is True
+        assert data2["observations"][0]["value"] == 122.0
+        assert data2["observations"][1]["value"] == 121.0
+
+        # Page 3: limit=2, offset=4
+        resp3 = await client.post(
+            "/internal/medical-observations/query",
+            headers=VALID_AUTH_HEADER,
+            json={"patientId": patient_id, "limit": 2, "offset": 4, "sort": "desc"},
+        )
+        assert resp3.status_code == 200
+        data3 = resp3.json()
+        assert data3["totalCount"] == 5
+        assert len(data3["observations"]) == 1
+        assert data3["hasMore"] is False
+        assert data3["observations"][0]["value"] == 120.0
+

@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Sequence
 
 import structlog
-from sqlalchemy import Select, asc, desc, select
+from sqlalchemy import Select, asc, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.medical_observation import MedicalObservation
@@ -49,20 +49,13 @@ class MedicalObservationService:
             confidence=obs.confidence,
         )
 
-    async def query_observations(
+    def _build_query_stmt(
         self,
-        session: AsyncSession,
         patient_id: str,
         observation_types: list[str] | None = None,
         from_date: datetime | str | None = None,
         to_date: datetime | str | None = None,
-        limit: int = 100,
-        sort_order: str = "asc",
-    ) -> list[MedicalObservation]:
-        """
-        Queries observations with strict server-side patient isolation.
-        Supports filtering by observation type, date window, sorting, and limit.
-        """
+    ) -> Select:
         stmt: Select = select(MedicalObservation).where(
             MedicalObservation.source_system == "quick_clinic",
             MedicalObservation.external_patient_id == patient_id,
@@ -81,13 +74,54 @@ class MedicalObservationService:
         if parsed_to:
             stmt = stmt.where(MedicalObservation.observed_at <= parsed_to)
 
-        if sort_order.lower() == "desc":
-            stmt = stmt.order_by(desc(MedicalObservation.observed_at), desc(MedicalObservation.created_at))
-        else:
-            stmt = stmt.order_by(asc(MedicalObservation.observed_at), asc(MedicalObservation.created_at))
+        return stmt
 
-        resolved_limit = max(1, min(limit, 500))
-        stmt = stmt.limit(resolved_limit)
+    async def count_observations(
+        self,
+        session: AsyncSession,
+        patient_id: str,
+        observation_types: list[str] | None = None,
+        from_date: datetime | str | None = None,
+        to_date: datetime | str | None = None,
+    ) -> int:
+        """Counts matching observations for pagination total."""
+        base_stmt = self._build_query_stmt(patient_id, observation_types, from_date, to_date)
+        count_stmt = select(func.count()).select_from(base_stmt.subquery())
+        res = await session.execute(count_stmt)
+        return int(res.scalar_one() or 0)
+
+    async def query_observations(
+        self,
+        session: AsyncSession,
+        patient_id: str,
+        observation_types: list[str] | None = None,
+        from_date: datetime | str | None = None,
+        to_date: datetime | str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        sort_order: str = "desc",
+    ) -> list[MedicalObservation]:
+        """
+        Queries observations with strict server-side patient isolation.
+        Supports filtering by observation type, date window, sorting, limit, and offset.
+        Orders deterministically by observed_at and id.
+        """
+        stmt = self._build_query_stmt(patient_id, observation_types, from_date, to_date)
+
+        if sort_order.lower() == "desc":
+            stmt = stmt.order_by(
+                desc(MedicalObservation.observed_at).nulls_last(),
+                asc(MedicalObservation.id),
+            )
+        else:
+            stmt = stmt.order_by(
+                asc(MedicalObservation.observed_at).nulls_last(),
+                asc(MedicalObservation.id),
+            )
+
+        resolved_limit = max(1, min(limit, 200))
+        resolved_offset = max(0, offset)
+        stmt = stmt.offset(resolved_offset).limit(resolved_limit)
 
         result = await session.execute(stmt)
         return list(result.scalars().all())

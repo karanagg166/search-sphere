@@ -21,3 +21,18 @@ async def cleanup_db_connections():
     """Ensure database connection pool is disposed between async tests with separate event loops."""
     yield
     await engine.dispose()
+
+
+from unittest.mock import patch
+from src.config import settings
+
+TEST_SERVICE_SECRET = "test-service-secret"
+VALID_AUTH_HEADER = {"Authorization": f"Bearer {TEST_SERVICE_SECRET}"}
+INVALID_AUTH_HEADER = {"Authorization": "Bearer wrong-service-secret"}
+
+
+@pytest.fixture(autouse=True)
+def ensure_test_service_secret():
+    """Ensure settings.QUICK_CLINIC_SERVICE_SECRET is configured to a non-production test-only secret."""
+    with patch.object(settings, "QUICK_CLINIC_SERVICE_SECRET", TEST_SERVICE_SECRET):
+        yield

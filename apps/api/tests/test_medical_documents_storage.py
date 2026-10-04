@@ -6,8 +6,8 @@ from src.config import settings
 from src.main import app
 from src.storage.object_storage import LocalStorage, get_object_storage
 
-# Test Service Secret
-TEST_SERVICE_SECRET = "quick-clinic-internal-service-secret-2026"
+# Test Service Secret (test fixture only, no production fallback)
+TEST_SERVICE_SECRET = "test-service-secret"
 VALID_AUTH_HEADER = {"Authorization": f"Bearer {TEST_SERVICE_SECRET}"}
 INVALID_AUTH_HEADER = {"Authorization": "Bearer completely-wrong-secret"}
 

@@ -231,12 +231,48 @@ class MedicalObservationExtractor:
         re.IGNORECASE,
     )
 
+    def _extract_time_of_day(self, text: str) -> tuple[int, int] | None:
+        """Extracts explicit time (e.g. 09:30 AM, 16:00) or qualitative time-of-day."""
+        # 1. Explicit time: 10:30 AM, 16:45, 9:00am, 9:00
+        m_time = re.search(r"\b(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?\b", text, re.IGNORECASE)
+        if m_time:
+            hr = int(m_time.group(1))
+            mn = int(m_time.group(2))
+            meridiem = m_time.group(4)
+            if meridiem:
+                if meridiem.lower() == "pm" and hr < 12:
+                    hr += 12
+                elif meridiem.lower() == "am" and hr == 12:
+                    hr = 0
+            if 0 <= hr <= 23 and 0 <= mn <= 59:
+                return (hr, mn)
+
+        # 2. Word-based time markers
+        text_lower = text.lower()
+        if re.search(r"\b(?:morning|am\b|fasting|breakfast)\b", text_lower):
+            return (8, 0)
+        if re.search(r"\b(?:afternoon|lunch|post-?prandial|post-?lunch)\b", text_lower):
+            return (13, 0)
+        if re.search(r"\b(?:evening|pm\b|dinner|post-?dinner)\b", text_lower):
+            return (18, 0)
+        if re.search(r"\b(?:night|bedtime)\b", text_lower):
+            return (21, 0)
+
+        return None
+
+    def _conf_and_method(self, base_conf: float, default_method: str = "REGEX") -> tuple[float, str]:
+        if default_method.upper() == "OCR":
+            return (round(base_conf * 0.90, 2), "OCR")
+        return (base_conf, "REGEX")
+
     def extract_from_text(
         self,
         text: str,
         document_report_date: datetime | None = None,
         page_number: int = 1,
         chunk_index: int = 0,
+        default_extraction_method: str = "REGEX",
+        inherited_date_context: datetime | None = None,
     ) -> list[ExtractedObservationData]:
         """
         Extracts validated medical observations from a text snippet or document page.
@@ -247,8 +283,12 @@ class MedicalObservationExtractor:
             return observations
 
         lines = text.split("\n")
-        current_date_context = document_report_date
+        current_date_context = inherited_date_context
         default_year = document_report_date.year if document_report_date else 2026
+        date_keyword_pattern = re.compile(
+            r"\b(?:date|visit|collected|reported|follow-?up|exam(?:ination)?|admission|session|day)\b",
+            re.IGNORECASE,
+        )
 
         for line in lines:
             line_str = line.strip()
@@ -257,18 +297,26 @@ class MedicalObservationExtractor:
 
             # Check if this line defines a date header (e.g. "Date: 2026-10-02" or "Oct 2, 2026")
             parsed_line_date = parse_date_string(line_str, default_year=default_year)
-            if parsed_line_date and len(line_str) <= 30:
-                # Likely a standalone date header line
-                current_date_context = parsed_line_date
+            if parsed_line_date:
+                if len(line_str) <= 40 or date_keyword_pattern.search(line_str):
+                    current_date_context = parsed_line_date
 
-            # Inline date on the same line if present (e.g. "Oct 2 - BP 118/78")
-            inline_date = parsed_line_date if (parsed_line_date and len(line_str) > 30) else None
+            inline_date = (
+                parsed_line_date
+                if (parsed_line_date and len(line_str) > 40 and not date_keyword_pattern.search(line_str))
+                else None
+            )
 
             # Determine observed date and whether it was inferred
             resolved_date = inline_date or current_date_context or document_report_date
             is_date_inferred = True
-            if inline_date is not None or (current_date_context is not None and current_date_context != document_report_date):
+            if inline_date is not None or current_date_context is not None:
                 is_date_inferred = False
+
+            # Extract time of day if present
+            time_val = self._extract_time_of_day(line_str)
+            if time_val and resolved_date:
+                resolved_date = resolved_date.replace(hour=time_val[0], minute=time_val[1], second=0)
 
             # 1. Blood Pressure
             for m in self.RE_BP.finditer(line_str):
@@ -290,8 +338,8 @@ class MedicalObservationExtractor:
                                 is_date_inferred=is_date_inferred,
                                 page_number=page_number,
                                 chunk_index=chunk_index,
-                                confidence=0.98 if m.group("unit") else 0.95,
-                                extraction_method="REGEX",
+                                confidence=self._conf_and_method(0.98 if m.group("unit") else 0.95, default_extraction_method)[0],
+                                extraction_method=self._conf_and_method(0.98 if m.group("unit") else 0.95, default_extraction_method)[1],
                             )
                         )
                 except (ValueError, TypeError):
@@ -316,8 +364,8 @@ class MedicalObservationExtractor:
                                 is_date_inferred=is_date_inferred,
                                 page_number=page_number,
                                 chunk_index=chunk_index,
-                                confidence=0.98 if m.group("unit") else 0.92,
-                                extraction_method="REGEX",
+                                confidence=self._conf_and_method(0.98 if m.group("unit") else 0.92, default_extraction_method)[0],
+                                extraction_method=self._conf_and_method(0.98 if m.group("unit") else 0.92, default_extraction_method)[1],
                             )
                         )
                 except (ValueError, TypeError):
@@ -341,8 +389,8 @@ class MedicalObservationExtractor:
                                 is_date_inferred=is_date_inferred,
                                 page_number=page_number,
                                 chunk_index=chunk_index,
-                                confidence=0.95,
-                                extraction_method="REGEX",
+                                confidence=self._conf_and_method(0.95, default_extraction_method)[0],
+                                extraction_method=self._conf_and_method(0.95, default_extraction_method)[1],
                             )
                         )
                 except (ValueError, TypeError):
@@ -366,8 +414,8 @@ class MedicalObservationExtractor:
                                 is_date_inferred=is_date_inferred,
                                 page_number=page_number,
                                 chunk_index=chunk_index,
-                                confidence=0.98 if m.group("unit") else 0.94,
-                                extraction_method="REGEX",
+                                confidence=self._conf_and_method(0.98 if m.group("unit") else 0.94, default_extraction_method)[0],
+                                extraction_method=self._conf_and_method(0.98 if m.group("unit") else 0.94, default_extraction_method)[1],
                             )
                         )
                 except (ValueError, TypeError):
@@ -398,8 +446,8 @@ class MedicalObservationExtractor:
                                 is_date_inferred=is_date_inferred,
                                 page_number=page_number,
                                 chunk_index=chunk_index,
-                                confidence=0.98,
-                                extraction_method="REGEX",
+                                confidence=self._conf_and_method(0.98, default_extraction_method)[0],
+                                extraction_method=self._conf_and_method(0.98, default_extraction_method)[1],
                             )
                         )
                 except (ValueError, TypeError):
@@ -428,8 +476,8 @@ class MedicalObservationExtractor:
                                 is_date_inferred=is_date_inferred,
                                 page_number=page_number,
                                 chunk_index=chunk_index,
-                                confidence=0.98,
-                                extraction_method="REGEX",
+                                confidence=self._conf_and_method(0.98, default_extraction_method)[0],
+                                extraction_method=self._conf_and_method(0.98, default_extraction_method)[1],
                             )
                         )
                 except (ValueError, TypeError):
@@ -455,8 +503,8 @@ class MedicalObservationExtractor:
                                     is_date_inferred=is_date_inferred,
                                     page_number=page_number,
                                     chunk_index=chunk_index,
-                                    confidence=0.98,
-                                    extraction_method="REGEX",
+                                    confidence=self._conf_and_method(0.98, default_extraction_method)[0],
+                                    extraction_method=self._conf_and_method(0.98, default_extraction_method)[1],
                                 )
                             )
                 except (ValueError, TypeError):
@@ -483,8 +531,8 @@ class MedicalObservationExtractor:
                                 is_date_inferred=is_date_inferred,
                                 page_number=page_number,
                                 chunk_index=chunk_index,
-                                confidence=0.98 if m.group("unit") else 0.92,
-                                extraction_method="REGEX",
+                                confidence=self._conf_and_method(0.98 if m.group("unit") else 0.92, default_extraction_method)[0],
+                                extraction_method=self._conf_and_method(0.98 if m.group("unit") else 0.92, default_extraction_method)[1],
                             )
                         )
                         glucose_matched = True
@@ -510,8 +558,8 @@ class MedicalObservationExtractor:
                                     is_date_inferred=is_date_inferred,
                                     page_number=page_number,
                                     chunk_index=chunk_index,
-                                    confidence=0.98 if m.group("unit") else 0.92,
-                                    extraction_method="REGEX",
+                                    confidence=self._conf_and_method(0.98 if m.group("unit") else 0.92, default_extraction_method)[0],
+                                    extraction_method=self._conf_and_method(0.98 if m.group("unit") else 0.92, default_extraction_method)[1],
                                 )
                             )
                             glucose_matched = True
@@ -537,8 +585,8 @@ class MedicalObservationExtractor:
                                     is_date_inferred=is_date_inferred,
                                     page_number=page_number,
                                     chunk_index=chunk_index,
-                                    confidence=0.95 if m.group("unit") else 0.88,
-                                    extraction_method="REGEX",
+                                    confidence=self._conf_and_method(0.95 if m.group("unit") else 0.88, default_extraction_method)[0],
+                                    extraction_method=self._conf_and_method(0.95 if m.group("unit") else 0.88, default_extraction_method)[1],
                                 )
                             )
                     except (ValueError, TypeError):
@@ -562,8 +610,8 @@ class MedicalObservationExtractor:
                                 is_date_inferred=is_date_inferred,
                                 page_number=page_number,
                                 chunk_index=chunk_index,
-                                confidence=0.98 if m.group("unit") else 0.92,
-                                extraction_method="REGEX",
+                                confidence=self._conf_and_method(0.98 if m.group("unit") else 0.92, default_extraction_method)[0],
+                                extraction_method=self._conf_and_method(0.98 if m.group("unit") else 0.92, default_extraction_method)[1],
                             )
                         )
                 except (ValueError, TypeError):
@@ -590,8 +638,8 @@ class MedicalObservationExtractor:
                                     is_date_inferred=is_date_inferred,
                                     page_number=page_number,
                                     chunk_index=chunk_index,
-                                    confidence=0.98 if m.group("unit") else 0.90,
-                                    extraction_method="REGEX",
+                                    confidence=self._conf_and_method(0.98 if m.group("unit") else 0.90, default_extraction_method)[0],
+                                    extraction_method=self._conf_and_method(0.98 if m.group("unit") else 0.90, default_extraction_method)[1],
                                 )
                             )
                     except (ValueError, TypeError):
@@ -603,20 +651,33 @@ class MedicalObservationExtractor:
         self,
         extracted_doc: Any,
         report_date: datetime | None = None,
+        default_extraction_method: str = "REGEX",
     ) -> list[ExtractedObservationData]:
-        """Extracts observations from an ExtractedDocument across all pages."""
+        """Extracts observations from an ExtractedDocument across all pages with multi-date and OCR awareness."""
         all_obs: list[ExtractedObservationData] = []
         if not extracted_doc or not hasattr(extracted_doc, "pages"):
             return all_obs
 
+        active_date_context: datetime | None = None
+
         for page in extracted_doc.pages:
             page_num = getattr(page, "page_number", 1)
             page_text = getattr(page, "text", "") or ""
+            if not page_text and hasattr(page, "combined_text"):
+                page_text = page.combined_text()
+
             page_obs = self.extract_from_text(
                 text=page_text,
                 document_report_date=report_date,
                 page_number=page_num,
+                default_extraction_method=default_extraction_method,
+                inherited_date_context=active_date_context,
             )
+
+            for obs in page_obs:
+                if not obs.is_date_inferred and obs.observed_at:
+                    active_date_context = obs.observed_at
+
             all_obs.extend(page_obs)
 
         return all_obs
