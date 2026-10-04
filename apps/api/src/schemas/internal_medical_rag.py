@@ -39,3 +39,40 @@ class MedicalRagAnswerResponse(BaseModel):
     answer: str
     citations: list[MedicalAnswerCitation] = Field(default_factory=list)
     result_count: int = Field(default=0, alias="resultCount", serialization_alias="resultCount")
+
+
+class MedicalChatMessage(BaseModel):
+    """Individual message in doctor medical chat history."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    role: str = Field(..., description="Message role: 'user' or 'assistant'")
+    content: str = Field(..., min_length=1, description="Message text content")
+
+
+class MedicalChatRequest(BaseModel):
+    """Request schema for internal medical multi-turn chat generation."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    patient_id: str = Field(..., alias="patientId", min_length=1, max_length=128)
+    message: str = Field(..., min_length=1, max_length=2000)
+    history: list[MedicalChatMessage] = Field(default_factory=list)
+    limit: int = Field(default=8, ge=1, le=20)
+    document_type: str | None = Field(default=None, alias="documentType")
+    from_date: str | datetime | None = Field(default=None, alias="fromDate")
+    to_date: str | datetime | None = Field(default=None, alias="toDate")
+
+
+class MedicalChatResponse(BaseModel):
+    """Response schema for non-streaming medical chat answer."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    answer: str
+    citations: list[MedicalAnswerCitation] = Field(default_factory=list)
+    result_count: int = Field(default=0, alias="resultCount", serialization_alias="resultCount")
+    retrieval_query: str | None = Field(
+        default=None, alias="retrievalQuery", serialization_alias="retrievalQuery"
+    )
+    rewritten: bool = False
