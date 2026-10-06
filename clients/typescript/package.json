@@ -1,0 +1,26 @@
+{
+  "name": "@search-sphere/client",
+  "version": "0.1.0",
+  "description": "TypeScript/JavaScript Client SDK for Search-Sphere Multi-Tenant RAG Microservice",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "search-sphere",
+    "rag",
+    "semantic-search",
+    "vector-search",
+    "cohere",
+    "qdrant"
+  ],
+  "author": "Search-Sphere Team",
+  "license": "MIT",
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0"
+  }
+}
