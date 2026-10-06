@@ -25,6 +25,7 @@ from src.vector_store import QdrantVectorStore, QdrantVectorStoreError
 async def test_process_document_success_sequence(
     mock_semantic_embedder: MagicMock,
     mock_dense_embedder: MagicMock,
+    mock_sparse_embedder: MagicMock,
     mock_vector_store: MagicMock,
 ) -> None:
     doc_id = "doc-test-123"
@@ -80,6 +81,7 @@ async def test_process_document_success_sequence(
         cleaner=cleaner,
         chunker=chunker,
         embedder=mock_dense_embedder,
+        sparse_embedder=mock_sparse_embedder,
         vector_store=mock_vector_store,
     )
 
@@ -120,6 +122,7 @@ async def test_process_document_success_sequence(
 async def test_process_document_handles_empty_and_noisy_blocks(
     mock_semantic_embedder: MagicMock,
     mock_dense_embedder: MagicMock,
+    mock_sparse_embedder: MagicMock,
     mock_vector_store: MagicMock,
 ) -> None:
     doc_id = "doc-noisy-456"
@@ -165,6 +168,7 @@ async def test_process_document_handles_empty_and_noisy_blocks(
         cleaner=cleaner,
         chunker=chunker,
         embedder=mock_dense_embedder,
+        sparse_embedder=mock_sparse_embedder,
         vector_store=mock_vector_store,
     )
 
@@ -331,6 +335,7 @@ async def test_process_document_fetch_error_propagates(
 @pytest.mark.asyncio
 async def test_process_document_vector_store_error_propagates(
     mock_dense_embedder: MagicMock,
+    mock_sparse_embedder: MagicMock,
 ) -> None:
     """
     If vector store indexing fails, worker must raise and not complete successfully.
@@ -368,6 +373,7 @@ async def test_process_document_vector_store_error_propagates(
             cleaner=mock_cleaner,
             chunker=mock_chunker,
             embedder=mock_dense_embedder,
+        sparse_embedder=mock_sparse_embedder,
             vector_store=mock_vector_store,
         )
 
@@ -381,6 +387,7 @@ async def test_process_document_end_to_end_pipeline(
     mock_image_captioner: MagicMock,
     mock_semantic_embedder: MagicMock,
     mock_dense_embedder: MagicMock,
+    mock_sparse_embedder: MagicMock,
     mock_vector_store: MagicMock,
 ) -> None:
     """
@@ -417,6 +424,7 @@ async def test_process_document_end_to_end_pipeline(
         cleaner=cleaner,
         chunker=chunker,
         embedder=mock_dense_embedder,
+        sparse_embedder=mock_sparse_embedder,
         vector_store=mock_vector_store,
     )
 

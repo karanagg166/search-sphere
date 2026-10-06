@@ -312,3 +312,12 @@ def test_inference_error_wrapped() -> None:
     mock_model.query_embed.side_effect = RuntimeError("Query inference crash")
     with pytest.raises(SparseEmbeddingError, match="inference failed"):
         embedder.embed_query("valid query")
+
+
+@pytest.fixture(autouse=True)
+def isolate_sparse_model_cache():
+    BM25Embedder._cached_model = None
+    BM25Embedder._cached_model_name = None
+    yield
+    BM25Embedder._cached_model = None
+    BM25Embedder._cached_model_name = None

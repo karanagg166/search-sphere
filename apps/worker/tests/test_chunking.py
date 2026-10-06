@@ -613,7 +613,7 @@ def test_no_external_model_download_during_unit_tests() -> None:
     """
     Guarantees that SentenceTransformer is never called or downloaded during unit tests.
     """
-    mock_model = MagicMock()
+    mock_model = MagicMock(spec=["encode"])
     mock_model.encode.return_value = [[1.0, 0.0], [0.0, 1.0]]
 
     # Pass mock_model into SemanticEmbedder

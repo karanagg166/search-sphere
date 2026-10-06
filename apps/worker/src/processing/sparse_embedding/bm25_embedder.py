@@ -78,7 +78,7 @@ class BM25Embedder:
             )
             from fastembed import SparseTextEmbedding
 
-            loaded_model = SparseTextEmbedding(model_name=self.model_name)
+            loaded_model = SparseTextEmbedding(model_name=self.model_name, cache_dir=settings.FASTEMBED_CACHE_PATH)
             BM25Embedder._cached_model = loaded_model
             BM25Embedder._cached_model_name = self.model_name
             return loaded_model

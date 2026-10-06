@@ -24,7 +24,7 @@ async def test_request_id_generated_when_missing():
 @pytest.mark.asyncio
 async def test_request_id_preserved_when_provided():
     """Verify that an incoming X-Request-ID header is preserved and echoed back."""
-    custom_req_id = f"req-{uuid.uuid4()}"
+    custom_req_id = str(uuid.uuid4())
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:

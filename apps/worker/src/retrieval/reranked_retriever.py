@@ -76,6 +76,9 @@ class RerankedHybridRetriever:
         candidate_k: int | None = None,
         document_id: str | None = None,
         document_ids: list[str] | None = None,
+        score_threshold: float | None = None,
+        deduplicate: bool | None = None,
+        filters: dict[str, Any] | None = None,
     ) -> list[RerankedSearchResult]:
         """
         Execute two-stage hybrid retrieval followed by cross-encoder reranking.
@@ -88,6 +91,9 @@ class RerankedHybridRetriever:
                 Defaults to HYBRID_SEARCH_CANDIDATE_K.
             document_id: Optional document ID to filter chunks server-side.
             document_ids: Optional list of document IDs to filter chunks server-side.
+            score_threshold: Optional minimum cross-encoder relevance score threshold.
+            deduplicate: Optional boolean to enable/disable chunk deduplication.
+            filters: Optional metadata filters mapping.
 
         Returns:
             Ordered list of RerankedSearchResult items sorted by rerank_score
@@ -178,6 +184,8 @@ class RerankedHybridRetriever:
             }
             if resolved_doc_ids is not None:
                 search_kwargs["document_ids"] = resolved_doc_ids
+            if filters is not None:
+                search_kwargs["filters"] = filters
             candidates = await self.hybrid_retriever.search(**search_kwargs)
         except (HybridRetrievalError, HybridQueryValidationError) as exc:
             logger.exception(
@@ -214,11 +222,16 @@ class RerankedHybridRetriever:
         # 6. Cross-Encoder reranking stage
         start_rerank = time.perf_counter()
         try:
-            results = await self.reranker.arerank(
-                query=clean_query,
-                candidates=candidates,
-                top_k=resolved_top_k,
-            )
+            rerank_kwargs: dict[str, Any] = {
+                "query": clean_query,
+                "candidates": candidates,
+                "top_k": resolved_top_k,
+            }
+            if score_threshold is not None:
+                rerank_kwargs["score_threshold"] = score_threshold
+            if deduplicate is not None:
+                rerank_kwargs["deduplicate"] = deduplicate
+            results = await self.reranker.arerank(**rerank_kwargs)
         except (RerankingError, RerankingValidationError) as exc:
             logger.exception(
                 "Cross-encoder reranking failed during two-stage search",

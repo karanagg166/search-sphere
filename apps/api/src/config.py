@@ -34,9 +34,12 @@ class Settings(BaseSettings):
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: str = ""
     SUPABASE_STORAGE_BUCKET: str = "documents"
     SUPABASE_SERVICE_ROLE_KEY: str | None = None
-    STORAGE_BACKEND: str = "supabase"
+    STORAGE_BACKEND: str = "local"
     LOCAL_STORAGE_DIR: str = "./data/storage"
     MAX_UPLOAD_SIZE_BYTES: int = 20 * 1024 * 1024  # 20 MB max upload
+
+    # Quick Clinic Service Integration
+    QUICK_CLINIC_SERVICE_SECRET: str | None = None
 
     # Caching
     REDIS_URL: str = "redis://redis:6379/0"

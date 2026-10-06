@@ -1,5 +1,7 @@
 from collections.abc import Iterator
 from unittest.mock import MagicMock, patch
+import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -39,9 +41,13 @@ def _create_sample_chunk(
 
 
 @pytest.fixture(autouse=True)
-def clean_embedder_cache() -> Iterator[None]:
+def clean_embedder_cache(monkeypatch) -> Iterator[None]:
     DenseEmbedder._clear_cache()
-    yield
+    # These tests exercise the encode adapter/fallback. Never let its primary
+    # loader download a real model before the patched fallback is reached.
+    monkeypatch.setattr("fastembed.TextEmbedding", MagicMock(side_effect=ImportError("unit test fallback")))
+    with patch.dict(sys.modules, {"sentence_transformers": SimpleNamespace(SentenceTransformer=MagicMock())}):
+        yield
     DenseEmbedder._clear_cache()
 
 
@@ -53,7 +59,7 @@ def test_exception_hierarchy() -> None:
 
 def test_embed_empty_document() -> None:
     """Empty document must return an empty EmbeddedDocument without loading model."""
-    mock_model = MagicMock()
+    mock_model = MagicMock(spec=["encode"])
     embedder = DenseEmbedder(model=mock_model)
 
     chunked_doc = ChunkedDocument(chunks=[])
@@ -82,7 +88,7 @@ def test_embed_empty_document_lazy_loading() -> None:
 
 def test_embed_one_chunk() -> None:
     """Mock model returns one known vector, correctly attached to chunk."""
-    mock_model = MagicMock()
+    mock_model = MagicMock(spec=["encode"])
     known_vector = [0.123] * DEFAULT_EMBEDDING_DIMENSION
     mock_model.encode.return_value = [known_vector]
 
@@ -118,7 +124,7 @@ def test_embed_one_chunk() -> None:
 
 def test_embed_multiple_chunks_batching() -> None:
     """Multiple chunks are sent in a single batched encode call and preserve order."""
-    mock_model = MagicMock()
+    mock_model = MagicMock(spec=["encode"])
     vec1 = [0.1] * DEFAULT_EMBEDDING_DIMENSION
     vec2 = [0.2] * DEFAULT_EMBEDDING_DIMENSION
     vec3 = [0.3] * DEFAULT_EMBEDDING_DIMENSION
@@ -153,7 +159,7 @@ def test_embed_multiple_chunks_batching() -> None:
 
 def test_batch_size_configuration() -> None:
     """Configured batch size is passed to model.encode."""
-    mock_model = MagicMock()
+    mock_model = MagicMock(spec=["encode"])
     mock_model.encode.return_value = [[0.05] * DEFAULT_EMBEDDING_DIMENSION]
 
     custom_batch_size = 16
@@ -169,7 +175,7 @@ def test_batch_size_configuration() -> None:
 
 def test_normalization_flag_passed() -> None:
     """model.encode is called with normalize_embeddings=True."""
-    mock_model = MagicMock()
+    mock_model = MagicMock(spec=["encode"])
     mock_model.encode.return_value = [[0.05] * DEFAULT_EMBEDDING_DIMENSION]
 
     embedder = DenseEmbedder(model=mock_model)
@@ -185,7 +191,7 @@ def test_normalization_flag_passed() -> None:
 def test_lazy_loading() -> None:
     """Model is not instantiated until embedding is requested."""
     with patch("sentence_transformers.SentenceTransformer") as mock_st_cls:
-        mock_instance = MagicMock()
+        mock_instance = MagicMock(spec=["encode"])
         mock_instance.encode.return_value = [[0.1] * DEFAULT_EMBEDDING_DIMENSION]
         mock_st_cls.return_value = mock_instance
 
@@ -205,7 +211,7 @@ def test_lazy_loading() -> None:
 def test_model_reuse_across_invocations() -> None:
     """Calling embed_document multiple times reuses the same loaded model instance."""
     with patch("sentence_transformers.SentenceTransformer") as mock_st_cls:
-        mock_instance = MagicMock()
+        mock_instance = MagicMock(spec=["encode"])
         mock_instance.encode.return_value = [[0.1] * DEFAULT_EMBEDDING_DIMENSION]
         mock_st_cls.return_value = mock_instance
 
@@ -225,7 +231,7 @@ def test_model_reuse_across_invocations() -> None:
 def test_mismatched_embedding_count_raises_error() -> None:
     """If model returns wrong vector count, raise DenseEmbeddingError."""
 
-    mock_model = MagicMock()
+    mock_model = MagicMock(spec=["encode"])
     # 3 chunks but only 2 vectors returned
     mock_model.encode.return_value = [
         [0.1] * DEFAULT_EMBEDDING_DIMENSION,
@@ -245,7 +251,7 @@ def test_mismatched_embedding_count_raises_error() -> None:
 
 def test_dimension_mismatch_raises_error() -> None:
     """Vectors of inconsistent dimension must fail validation."""
-    mock_model = MagicMock()
+    mock_model = MagicMock(spec=["encode"])
     mock_model.encode.return_value = [
         [0.1] * DEFAULT_EMBEDDING_DIMENSION,
         [0.2] * DEFAULT_EMBEDDING_DIMENSION,
@@ -265,7 +271,7 @@ def test_dimension_mismatch_raises_error() -> None:
 
 def test_unexpected_dimension_raises_error() -> None:
     """When expected dimension is 384, all vectors having dimension 256 must fail."""
-    mock_model = MagicMock()
+    mock_model = MagicMock(spec=["encode"])
     mock_model.encode.return_value = [
         [0.1] * 256,
         [0.2] * 256,
@@ -280,7 +286,7 @@ def test_unexpected_dimension_raises_error() -> None:
 
 def test_empty_vector_raises_error() -> None:
     """An empty vector in model output must fail validation."""
-    mock_model = MagicMock()
+    mock_model = MagicMock(spec=["encode"])
     mock_model.encode.return_value = [[]]
 
     embedder = DenseEmbedder(model=mock_model)
@@ -292,7 +298,7 @@ def test_empty_vector_raises_error() -> None:
 
 def test_nan_vector_raises_error() -> None:
     """Vector containing NaN must fail validation."""
-    mock_model = MagicMock()
+    mock_model = MagicMock(spec=["encode"])
     nan_vector = [0.1] * DEFAULT_EMBEDDING_DIMENSION
     nan_vector[10] = float("nan")
     mock_model.encode.return_value = [nan_vector]
@@ -306,7 +312,7 @@ def test_nan_vector_raises_error() -> None:
 
 def test_infinity_vector_raises_error() -> None:
     """Vector containing positive or negative Infinity must fail validation."""
-    mock_model = MagicMock()
+    mock_model = MagicMock(spec=["encode"])
     inf_vector = [0.1] * DEFAULT_EMBEDDING_DIMENSION
     inf_vector[5] = float("inf")
     mock_model.encode.return_value = [inf_vector]
@@ -328,7 +334,7 @@ def test_infinity_vector_raises_error() -> None:
 
 def test_non_numeric_vector_raises_error() -> None:
     """Non-numeric values (like bool or string) must fail validation."""
-    mock_model = MagicMock()
+    mock_model = MagicMock(spec=["encode"])
     bool_vector = [0.1] * DEFAULT_EMBEDDING_DIMENSION
     bool_vector[2] = True  # bool
     mock_model.encode.return_value = [bool_vector]
@@ -357,7 +363,7 @@ def test_model_loading_failure_raises_error() -> None:
 
 def test_model_encode_failure_raises_error() -> None:
     """Inference failures must raise DenseEmbeddingError."""
-    mock_model = MagicMock()
+    mock_model = MagicMock(spec=["encode"])
     mock_model.encode.side_effect = RuntimeError("GPU out of memory")
 
     embedder = DenseEmbedder(model=mock_model)
@@ -371,7 +377,7 @@ def test_model_encode_failure_raises_error() -> None:
 
 def test_metadata_preservation() -> None:
     """All metadata fields of DocumentChunk are strictly preserved in EmbeddedChunk."""
-    mock_model = MagicMock()
+    mock_model = MagicMock(spec=["encode"])
     vector = [0.05] * DEFAULT_EMBEDDING_DIMENSION
     mock_model.encode.return_value = [vector]
 
@@ -402,7 +408,7 @@ def test_metadata_preservation() -> None:
 
 def test_embed_texts_lower_level_api() -> None:
     """Lower-level embed_texts method encodes and validates raw strings."""
-    mock_model = MagicMock()
+    mock_model = MagicMock(spec=["encode"])
     mock_model.encode.return_value = [
         [0.1] * DEFAULT_EMBEDDING_DIMENSION,
         [0.2] * DEFAULT_EMBEDDING_DIMENSION,

@@ -1,3 +1,4 @@
+import os
 import math
 import re
 from typing import Any
@@ -204,7 +205,7 @@ class SemanticEmbedder:
                 "Loading FastEmbed model for semantic chunking",
                 model_name=fastembed_model_name,
             )
-            loaded_model = TextEmbedding(model_name=fastembed_model_name)
+            loaded_model = TextEmbedding(model_name=fastembed_model_name, cache_dir=getattr(settings, "FASTEMBED_CACHE_PATH", None) or os.getenv("FASTEMBED_CACHE_PATH"))
             SemanticEmbedder._cached_model = loaded_model
             SemanticEmbedder._cached_model_name = self.model_name
             self._model = loaded_model

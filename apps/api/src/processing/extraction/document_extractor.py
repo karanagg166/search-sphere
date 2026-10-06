@@ -55,35 +55,49 @@ class DocumentExtractor:
         self.ocr_processor = ocr_processor or OcrProcessor()
         self.image_captioner = image_captioner or ImageCaptioner()
 
-    def extract(self, pdf_bytes: bytes) -> ExtractedDocument:
+    def extract_image(self, image_bytes: bytes) -> ExtractedDocument:
         """
-        Extract ordered content from PDF bytes.
+        Extract text from an image document (JPEG, PNG, WebP) using OCR.
 
-        Example:
-
-        Paragraph 1
-            ↓
-        Image
-            ↓
-        Paragraph 2
-
-        becomes:
-
-        Paragraph 1
-
-        [Image text: ...]
-
-        [Image description: ...]
-
-        Paragraph 2
+        Per medical document processing guidelines, OCR is the primary mechanism
+        for report images and prescriptions. We intentionally do not use BLIP image
+        captioning here to avoid generating invented or hallucinatory medical diagnoses.
         """
+        if not image_bytes:
+            raise DocumentExtractionError("Cannot extract content from empty image data.")
 
-        if not pdf_bytes:
-            raise DocumentExtractionError("Cannot extract content from an empty PDF.")
+        try:
+            text = self.ocr_processor.extract_text(image_bytes)
+            clean_text = text.strip() if text else ""
+            blocks = (
+                [ExtractedBlock(block_type="text", content=clean_text)]
+                if clean_text
+                else []
+            )
+            return ExtractedDocument(
+                pages=[ExtractedPage(page_number=1, blocks=blocks)]
+            )
+        except Exception as exc:
+            logger.exception("Image OCR extraction failed", error=str(exc))
+            raise DocumentExtractionError(f"Image extraction failed: {exc}") from exc
+
+    def extract(
+        self,
+        content_bytes: bytes,
+        mime_type: str = "application/pdf",
+    ) -> ExtractedDocument:
+        """
+        Extract ordered content from document bytes (PDF or Image).
+        """
+        if not content_bytes:
+            raise DocumentExtractionError("Cannot extract content from an empty document.")
+
+        if mime_type.lower() in ("image/jpeg", "image/png", "image/webp", "image/jpg"):
+            return self.extract_image(content_bytes)
 
         try:
             document = fitz.open(
-                stream=pdf_bytes,
+                stream=content_bytes,
                 filetype="pdf",
             )
         except Exception as exc:

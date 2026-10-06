@@ -1,3 +1,5 @@
+import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -342,7 +344,7 @@ def test_model_predict_exception_wrapped_in_reranking_error() -> None:
     candidates = [_create_sample_hybrid_result()]
 
     with pytest.raises(RerankingError, match="Failed to score candidates"):
-        reranker.rerank(query="query", candidates=candidates)
+        reranker._score_pairs([("query", candidate.content) for candidate in candidates])
 
 
 def test_score_count_mismatch_raises_reranking_error() -> None:
@@ -357,7 +359,7 @@ def test_score_count_mismatch_raises_reranking_error() -> None:
     reranker = CrossEncoderReranker(model=mock_model)
 
     with pytest.raises(RerankingError, match="Score count mismatch"):
-        reranker.rerank(query="query", candidates=candidates)
+        reranker._score_pairs([("query", candidate.content) for candidate in candidates])
 
 
 def test_nan_score_raises_reranking_error() -> None:
@@ -368,7 +370,7 @@ def test_nan_score_raises_reranking_error() -> None:
     reranker = CrossEncoderReranker(model=mock_model)
 
     with pytest.raises(RerankingError, match="NaN detected"):
-        reranker.rerank(query="query", candidates=candidates)
+        reranker._score_pairs([("query", candidate.content) for candidate in candidates])
 
 
 def test_infinity_score_raises_reranking_error() -> None:
@@ -379,7 +381,7 @@ def test_infinity_score_raises_reranking_error() -> None:
     reranker = CrossEncoderReranker(model=mock_model)
 
     with pytest.raises(RerankingError, match="Infinity detected"):
-        reranker.rerank(query="query", candidates=candidates)
+        reranker._score_pairs([("query", candidate.content) for candidate in candidates])
 
 
 def test_non_numeric_score_raises_reranking_error() -> None:
@@ -390,7 +392,7 @@ def test_non_numeric_score_raises_reranking_error() -> None:
     reranker = CrossEncoderReranker(model=mock_model)
 
     with pytest.raises(RerankingError, match="Non-numeric rerank score"):
-        reranker.rerank(query="query", candidates=candidates)
+        reranker._score_pairs([("query", candidate.content) for candidate in candidates])
 
 
 def test_callable_model_fallback() -> None:
@@ -482,10 +484,9 @@ def test_model_loading_failure_raises_reranking_error() -> None:
         side_effect=Exception("Model not found"),
     ):
         reranker = CrossEncoderReranker(model_name="nonexistent/model")
-        candidates = [_create_sample_hybrid_result()]
 
         with pytest.raises(RerankingError, match="Failed to load cross-encoder model"):
-            reranker.rerank("query", candidates)
+            reranker._get_model()
 
     CrossEncoderReranker._clear_cache()
 
@@ -514,3 +515,38 @@ def test_exception_aliases() -> None:
     assert issubclass(RerankingError, Exception)
     assert issubclass(RerankingValidationError, RerankingError)
     assert issubclass(RerankerValidationError, RerankerError)
+
+
+@pytest.fixture(autouse=True)
+def isolate_loader_dependencies(monkeypatch):
+    # Loader tests patch this constructor; all scoring tests inject their model.
+    # Importing PyTorch here would not test any additional scoring behavior.
+    CrossEncoderReranker._clear_cache()
+    monkeypatch.setattr("fastembed.rerank.cross_encoder.TextCrossEncoder", MagicMock(side_effect=ImportError("unit test fallback")))
+    with patch.dict(sys.modules, {"sentence_transformers": SimpleNamespace(CrossEncoder=MagicMock())}):
+        yield
+    CrossEncoderReranker._clear_cache()
+
+
+@pytest.mark.parametrize("scores", [[float("nan")], [float("inf")], ["invalid"], []])
+def test_rerank_invalid_model_scores_preserve_rrf_order(scores):
+    candidates = [
+        _create_sample_hybrid_result(point_id="low", score=0.1),
+        _create_sample_hybrid_result(point_id="high", score=0.9),
+    ]
+    model = MagicMock(spec=["predict"])
+    model.predict.return_value = scores
+    results = CrossEncoderReranker(model=model).rerank("query", candidates, top_k=1)
+    assert len(results) == 1
+    assert results[0].point_id == "high"
+    assert results[0].rerank_score == 0.9
+    assert results[0].rrf_score == 0.9
+
+
+def test_rerank_inference_failure_preserves_rrf_order():
+    candidates = [_create_sample_hybrid_result(point_id="p1", score=0.7)]
+    model = MagicMock(spec=["predict"])
+    model.predict.side_effect = RuntimeError("inference failed")
+    result = CrossEncoderReranker(model=model).rerank("query", candidates)
+    assert result[0].point_id == "p1"
+    assert result[0].rerank_score == 0.7

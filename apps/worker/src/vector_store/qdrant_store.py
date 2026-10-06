@@ -1,3 +1,4 @@
+import json
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -293,46 +294,59 @@ class QdrantVectorStore:
             )
 
     async def _ensure_payload_indexes(self, info: Any = None) -> None:
-        """Ensure keyword payload index exists for document_id field."""
-        payload_schema = getattr(info, "payload_schema", None) if info else None
-        if isinstance(payload_schema, dict) and "document_id" in payload_schema:
-            return
+        """Ensure keyword payload index exists for document_id, source_system, patient_id, and document_type fields."""
+        # CollectionInfo.payload_schema is a mapping of field names to index info.
+        # Newly created collections and older client responses may omit it.
+        payload_schema = getattr(info, "payload_schema", None) or {}
+        fields_to_index = [
+            "document_id",
+            "client_id",
+            "tenant_id",
+            "collection_id",
+            "owner_subject_id",
+            "source_system",
+            "patient_id",
+            "document_type",
+        ]
+        for field in fields_to_index:
+            if isinstance(payload_schema, dict) and field in payload_schema:
+                continue
 
-        try:
-            await self.client.create_payload_index(
-                collection_name=self.collection_name,
-                field_name="document_id",
-                field_schema=models.PayloadSchemaType.KEYWORD,
-            )
-            logger.info(
-                "Ensured payload index on document_id",
-                collection=self.collection_name,
-                field="document_id",
-            )
-        except Exception as exc:
-            err_msg = str(exc).lower()
-            if "already exists" in err_msg:
-                return
-            logger.exception(
-                "Failed to create payload index for document_id",
-                collection=self.collection_name,
-                error=str(exc),
-            )
-            raise QdrantVectorStoreError(
-                f"Failed to create payload index for 'document_id' in "
-                f"collection '{self.collection_name}': {exc}"
-            ) from exc
-
-    async def delete_document_points(self, document_id: str) -> None:
-        """Delete all points belonging to a specific document_id."""
-        delete_filter = models.Filter(
-            must=[
-                models.FieldCondition(
-                    key="document_id",
-                    match=models.MatchValue(value=document_id),
+            try:
+                await self.client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name=field,
+                    field_schema=models.PayloadSchemaType.KEYWORD,
                 )
-            ]
-        )
+                logger.info(
+                    f"Ensured payload index on {field}",
+                    collection=self.collection_name,
+                    field=field,
+                )
+            except Exception as exc:
+                err_msg = str(exc).lower()
+                if "already exists" in err_msg:
+                    continue
+                logger.warning(
+                    f"Failed to create payload index for {field}",
+                    collection=self.collection_name,
+                    error=str(exc),
+                )
+
+    async def delete_document_points(self, document_id: str, filters: dict[str, Any] | None = None) -> None:
+        """Delete all points belonging to a specific document_id."""
+        scope = dict(filters or {})
+        scope["document_id"] = document_id
+        delete_filter = models.Filter(must=[
+            models.FieldCondition(key=key, match=models.MatchValue(value=value))
+            for key, value in scope.items() if value is not None
+        ])
+        if not filters:
+            # Native documents have no external client/source payload.
+            delete_filter.must.extend([
+                models.IsEmptyCondition(is_empty=models.PayloadField(key="client_id")),
+                models.IsEmptyCondition(is_empty=models.PayloadField(key="source_system")),
+            ])
         try:
             await self.client.delete(
                 collection_name=self.collection_name,
@@ -361,11 +375,13 @@ class QdrantVectorStore:
         document_id: str,
         document: EmbeddedDocument,
         sparse_vectors: list[SparseVector] | None = None,
+        extra_payload: dict[str, Any] | None = None,
     ) -> list[models.PointStruct]:
         """
         Convert all EmbeddedChunk objects to Qdrant PointStruct instances.
         Supports both dense-only points (for backward compatibility) and hybrid
         points containing both unnamed dense and named sparse BM25 vectors.
+        Merges optional extra_payload for external patient metadata.
         """
         if sparse_vectors is not None and len(sparse_vectors) != len(document.chunks):
             raise QdrantVectorStoreError(
@@ -375,8 +391,12 @@ class QdrantVectorStore:
 
         points: list[models.PointStruct] = []
         for idx, chunk in enumerate(document.chunks):
-            point_id = generate_point_id(document_id, chunk.chunk_index)
-            payload = {
+            # External IDs are only unique within the authenticated client/tenant.
+            identity = document_id
+            if extra_payload and extra_payload.get("client_id"):
+                identity = json.dumps([extra_payload["client_id"], extra_payload.get("tenant_id"), document_id], separators=(",", ":"))
+            point_id = generate_point_id(identity, chunk.chunk_index)
+            payload: dict[str, Any] = {
                 "document_id": document_id,
                 "chunk_index": chunk.chunk_index,
                 "content": chunk.content,
@@ -386,6 +406,8 @@ class QdrantVectorStore:
                 "page_numbers": list(chunk.page_numbers),
                 "block_types": list(chunk.block_types),
             }
+            if extra_payload:
+                payload.update(extra_payload)
 
             if sparse_vectors is not None:
                 sv = sparse_vectors[idx]
@@ -436,6 +458,7 @@ class QdrantVectorStore:
         document_id: str,
         document: EmbeddedDocument,
         sparse_vectors: list[SparseVector] | None = None,
+        extra_payload: dict[str, Any] | None = None,
     ) -> int:
         """
         Synchronize Qdrant vector index with an EmbeddedDocument.
@@ -445,12 +468,17 @@ class QdrantVectorStore:
         2. Delete any existing points for document_id (stale chunks cleanup).
         3. If document.chunks is empty, return 0.
         4. Resolve sparse vectors (parameter or self.sparse_embedder if set).
-        5. Convert chunks to deterministic PointStructs.
+        5. Convert chunks to deterministic PointStructs with extra_payload if provided.
         6. Batch upsert points according to batch_size.
         7. Return total points written.
         """
         await self.ensure_collection()
-        await self.delete_document_points(document_id)
+        if extra_payload and extra_payload.get("client_id"):
+            await self.delete_document_points(document_id, filters={
+                key: extra_payload[key] for key in ("client_id", "tenant_id")
+            })
+        else:
+            await self.delete_document_points(document_id)
 
         if not document.chunks:
             logger.info(
@@ -481,6 +509,7 @@ class QdrantVectorStore:
             document_id,
             document,
             sparse_vectors=resolved_sparse,
+            extra_payload=extra_payload,
         )
         total_points = len(points)
 
@@ -556,6 +585,15 @@ class QdrantVectorStore:
                 page_numbers=list(payload["page_numbers"]),
                 block_types=list(payload["block_types"]),
                 rank=rank,
+                client_id=payload.get("client_id") or payload.get("source_system"),
+                tenant_id=payload.get("tenant_id"),
+                collection_id=payload.get("collection_id"),
+                owner_subject_id=payload.get("owner_subject_id") or payload.get("patient_id"),
+                patient_id=payload.get("patient_id"),
+                source_system=payload.get("source_system"),
+                document_type=payload.get("document_type"),
+                report_date=payload.get("report_date"),
+                file_name=payload.get("file_name"),
             )
         except (ValueError, TypeError) as exc:
             raise QdrantVectorStoreError(
@@ -567,7 +605,11 @@ class QdrantVectorStore:
         query_vector: list[float],
         limit: int,
         document_id: str | None = None,
+        patient_id: str | None = None,
+        source_system: str | None = None,
+        query_filter: models.Filter | None = None,
         score_threshold: float | None = None,
+        filters: dict[str, Any] | None = None,
     ) -> list[DenseSearchResult]:
         """
         Execute approximate nearest neighbor (ANN) search on dense vectors in Qdrant.
@@ -576,7 +618,11 @@ class QdrantVectorStore:
             query_vector: Dense vector representing the search query.
             limit: Maximum number of Top-K results to return (must be > 0).
             document_id: Optional document ID to filter points server-side.
+            patient_id: Optional patient ID to filter points server-side.
+            source_system: Optional source system to filter points server-side.
+            query_filter: Optional existing Qdrant Filter.
             score_threshold: Optional similarity score threshold.
+            filters: Optional metadata filters mapping (e.g. {"patient_id": "...", "source_system": "..."}).
 
         Returns:
             Ordered list of DenseSearchResult items preserving Qdrant ranking.
@@ -600,23 +646,48 @@ class QdrantVectorStore:
         if limit <= 0:
             raise QdrantVectorStoreError(f"limit must be positive, got {limit}.")
 
-        query_filter: models.Filter | None = None
+        must_conditions: list[Any] = []
+        if query_filter and hasattr(query_filter, "must") and query_filter.must:
+            must_conditions.extend(query_filter.must)
         if document_id is not None:
-            query_filter = models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="document_id",
-                        match=models.MatchValue(value=document_id),
-                    )
-                ]
+            must_conditions.append(
+                models.FieldCondition(
+                    key="document_id",
+                    match=models.MatchValue(value=document_id),
+                )
             )
+        resolved_patient_id = patient_id or (filters.get("patient_id") if filters else None)
+        if resolved_patient_id is not None:
+            must_conditions.append(
+                models.FieldCondition(
+                    key="patient_id",
+                    match=models.MatchValue(value=resolved_patient_id),
+                )
+            )
+        resolved_source_system = source_system or (filters.get("source_system") if filters else None)
+        if resolved_source_system is not None:
+            must_conditions.append(
+                models.FieldCondition(
+                    key="source_system",
+                    match=models.MatchValue(value=resolved_source_system),
+                )
+            )
+        if filters:
+            for k, v in filters.items():
+                if k not in ("patient_id", "source_system", "document_id") and v is not None:
+                    if isinstance(v, (list, tuple)):
+                        must_conditions.append(models.FieldCondition(key=k, match=models.MatchAny(any=list(v))))
+                    else:
+                        must_conditions.append(models.FieldCondition(key=k, match=models.MatchValue(value=v)))
+
+        effective_filter = models.Filter(must=must_conditions) if must_conditions else (query_filter or None)
 
         try:
             response = await self.client.query_points(
                 collection_name=self.collection_name,
                 query=query_vector,
                 limit=limit,
-                query_filter=query_filter,
+                query_filter=effective_filter,
                 score_threshold=score_threshold,
                 with_payload=True,
                 with_vectors=False,
@@ -702,6 +773,15 @@ class QdrantVectorStore:
                 page_numbers=list(payload["page_numbers"]),
                 block_types=list(payload["block_types"]),
                 rank=rank,
+                client_id=payload.get("client_id") or payload.get("source_system"),
+                tenant_id=payload.get("tenant_id"),
+                collection_id=payload.get("collection_id"),
+                owner_subject_id=payload.get("owner_subject_id") or payload.get("patient_id"),
+                patient_id=payload.get("patient_id"),
+                source_system=payload.get("source_system"),
+                document_type=payload.get("document_type"),
+                report_date=payload.get("report_date"),
+                file_name=payload.get("file_name"),
             )
         except (ValueError, TypeError) as exc:
             raise QdrantVectorStoreError(
@@ -713,7 +793,11 @@ class QdrantVectorStore:
         query_vector: SparseVector | models.SparseVector,
         limit: int,
         document_id: str | None = None,
+        patient_id: str | None = None,
+        source_system: str | None = None,
+        query_filter: models.Filter | None = None,
         score_threshold: float | None = None,
+        filters: dict[str, Any] | None = None,
     ) -> list[SparseSearchResult]:
         """
         Execute sparse lexical search on named BM25 vectors in Qdrant.
@@ -722,7 +806,11 @@ class QdrantVectorStore:
             query_vector: SparseVector or Qdrant models.SparseVector for query.
             limit: Maximum number of Top-K results to return (must be > 0).
             document_id: Optional document ID to filter points server-side.
+            patient_id: Optional patient ID to filter points server-side.
+            source_system: Optional source system to filter points server-side.
+            query_filter: Optional existing Qdrant Filter.
             score_threshold: Optional similarity score threshold.
+            filters: Optional metadata filters mapping (e.g. {"patient_id": "...", "source_system": "..."}).
 
         Returns:
             Ordered list of SparseSearchResult items preserving Qdrant ranking.
@@ -751,16 +839,41 @@ class QdrantVectorStore:
         if limit <= 0:
             raise QdrantVectorStoreError(f"limit must be positive, got {limit}.")
 
-        query_filter: models.Filter | None = None
+        must_conditions: list[Any] = []
+        if query_filter and hasattr(query_filter, "must") and query_filter.must:
+            must_conditions.extend(query_filter.must)
         if document_id is not None:
-            query_filter = models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="document_id",
-                        match=models.MatchValue(value=document_id),
-                    )
-                ]
+            must_conditions.append(
+                models.FieldCondition(
+                    key="document_id",
+                    match=models.MatchValue(value=document_id),
+                )
             )
+        resolved_patient_id = patient_id or (filters.get("patient_id") if filters else None)
+        if resolved_patient_id is not None:
+            must_conditions.append(
+                models.FieldCondition(
+                    key="patient_id",
+                    match=models.MatchValue(value=resolved_patient_id),
+                )
+            )
+        resolved_source_system = source_system or (filters.get("source_system") if filters else None)
+        if resolved_source_system is not None:
+            must_conditions.append(
+                models.FieldCondition(
+                    key="source_system",
+                    match=models.MatchValue(value=resolved_source_system),
+                )
+            )
+        if filters:
+            for k, v in filters.items():
+                if k not in ("patient_id", "source_system", "document_id") and v is not None:
+                    if isinstance(v, (list, tuple)):
+                        must_conditions.append(models.FieldCondition(key=k, match=models.MatchAny(any=list(v))))
+                    else:
+                        must_conditions.append(models.FieldCondition(key=k, match=models.MatchValue(value=v)))
+
+        effective_filter = models.Filter(must=must_conditions) if must_conditions else (query_filter or None)
 
         try:
             response = await self.client.query_points(
@@ -768,7 +881,7 @@ class QdrantVectorStore:
                 query=qdrant_query,
                 using=self.sparse_vector_name,
                 limit=limit,
-                query_filter=query_filter,
+                query_filter=effective_filter,
                 score_threshold=score_threshold,
                 with_payload=True,
                 with_vectors=False,
@@ -856,6 +969,15 @@ class QdrantVectorStore:
                 page_numbers=list(payload["page_numbers"]),
                 block_types=list(payload["block_types"]),
                 rank=rank,
+                client_id=payload.get("client_id") or payload.get("source_system"),
+                tenant_id=payload.get("tenant_id"),
+                collection_id=payload.get("collection_id"),
+                owner_subject_id=payload.get("owner_subject_id") or payload.get("patient_id"),
+                patient_id=payload.get("patient_id"),
+                source_system=payload.get("source_system"),
+                document_type=payload.get("document_type"),
+                report_date=payload.get("report_date"),
+                file_name=payload.get("file_name"),
             )
         except (ValueError, TypeError) as exc:
             raise QdrantVectorStoreError(
@@ -870,6 +992,10 @@ class QdrantVectorStore:
         candidate_limit: int,
         document_id: str | None = None,
         document_ids: list[str] | None = None,
+        patient_id: str | None = None,
+        source_system: str | None = None,
+        filter: models.Filter | None = None,
+        filters: dict[str, Any] | None = None,
     ) -> list[HybridSearchResult]:
         """
         Execute hybrid search combining dense semantic retrieval and sparse BM25
@@ -889,6 +1015,10 @@ class QdrantVectorStore:
             candidate_limit: Candidate prefetch limit per branch (must be >= limit).
             document_id: Optional document ID to filter points server-side.
             document_ids: Optional list of document IDs to filter points server-side.
+            patient_id: Optional patient ID to filter points server-side.
+            source_system: Optional source system to filter points server-side.
+            filter: Optional existing Qdrant Filter.
+            filters: Optional metadata filters mapping (e.g. {"patient_id": "...", "source_system": "..."}).
 
         Returns:
             Ordered list of HybridSearchResult items preserving Qdrant fused ranking.
@@ -936,25 +1066,48 @@ class QdrantVectorStore:
                 f"limit ({limit})."
             )
 
-        query_filter: models.Filter | None = None
+        must_conditions: list[Any] = []
+        if filter and hasattr(filter, "must") and filter.must:
+            must_conditions.extend(filter.must)
         if document_ids is not None:
-            query_filter = models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="document_id",
-                        match=models.MatchAny(any=document_ids),
-                    )
-                ]
+            must_conditions.append(
+                models.FieldCondition(
+                    key="document_id",
+                    match=models.MatchAny(any=document_ids),
+                )
             )
         elif document_id is not None:
-            query_filter = models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="document_id",
-                        match=models.MatchValue(value=document_id),
-                    )
-                ]
+            must_conditions.append(
+                models.FieldCondition(
+                    key="document_id",
+                    match=models.MatchValue(value=document_id),
+                )
             )
+        resolved_patient_id = patient_id or (filters.get("patient_id") if filters else None)
+        if resolved_patient_id is not None:
+            must_conditions.append(
+                models.FieldCondition(
+                    key="patient_id",
+                    match=models.MatchValue(value=resolved_patient_id),
+                )
+            )
+        resolved_source_system = source_system or (filters.get("source_system") if filters else None)
+        if resolved_source_system is not None:
+            must_conditions.append(
+                models.FieldCondition(
+                    key="source_system",
+                    match=models.MatchValue(value=resolved_source_system),
+                )
+            )
+        if filters:
+            for k, v in filters.items():
+                if k not in ("patient_id", "source_system", "document_id", "document_ids") and v is not None:
+                    if isinstance(v, (list, tuple)):
+                        must_conditions.append(models.FieldCondition(key=k, match=models.MatchAny(any=list(v))))
+                    else:
+                        must_conditions.append(models.FieldCondition(key=k, match=models.MatchValue(value=v)))
+
+        query_filter = models.Filter(must=must_conditions) if must_conditions else (filter or None)
 
         dense_prefetch = models.Prefetch(
             query=dense_query_vector,
