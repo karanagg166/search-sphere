@@ -153,9 +153,10 @@ class GenericRagService:
 
         results: list[SearchChunkResult] = []
         for idx, (chunk, doc) in enumerate(verified_pairs, start=1):
+            chunk_id = getattr(chunk, "point_id", getattr(chunk, "id", f"chunk_{idx}"))
             results.append(
                 SearchChunkResult(
-                    chunk_id=chunk.id,
+                    chunk_id=chunk_id,
                     document_id=doc.external_document_id,
                     text=chunk.content,
                     score=round(float(chunk.score), 4),
@@ -221,7 +222,7 @@ class GenericRagService:
 
         verified_pairs = await self._verify_and_enrich_chunks(context, raw_chunks)
         verified_chunks = [pair[0] for pair in verified_pairs]
-        doc_lookup = {pair[0].id: pair[1] for pair in verified_pairs}
+        doc_lookup = {getattr(pair[0], "point_id", getattr(pair[0], "id", None)): pair[1] for pair in verified_pairs}
 
         if not verified_chunks:
             duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
@@ -261,11 +262,12 @@ class GenericRagService:
         citations: list[AnswerCitation] = []
         for num in cited_numbers:
             chunk = verified_chunks[num - 1]
-            doc = doc_lookup.get(chunk.id)
+            chunk_pid = getattr(chunk, "point_id", getattr(chunk, "id", None))
+            doc = doc_lookup.get(chunk_pid)
             citations.append(
                 AnswerCitation(
                     citation_number=num,
-                    chunk_id=chunk.id,
+                    chunk_id=chunk_pid or str(num),
                     document_id=doc.external_document_id if doc else chunk.document_id,
                     file_name=doc.file_name if doc else None,
                     page_number=chunk.start_page,
@@ -315,7 +317,7 @@ class GenericRagService:
 
         verified_pairs = await self._verify_and_enrich_chunks(context, raw_chunks)
         verified_chunks = [pair[0] for pair in verified_pairs]
-        doc_lookup = {pair[0].id: pair[1] for pair in verified_pairs}
+        doc_lookup = {getattr(pair[0], "point_id", getattr(pair[0], "id", None)): pair[1] for pair in verified_pairs}
 
         if not verified_chunks:
             yield f"data: {json.dumps({'event': 'token', 'text': NO_RESULTS_ANSWER})}\n\n"
@@ -333,13 +335,14 @@ class GenericRagService:
         preamble = request.system_prompt or ANSWER_SYSTEM_PREAMBLE
 
         accumulated_text = []
-        async for token in self.answer_generator.generate_answer_stream(
+        token_stream, _ = await self.answer_generator.generate_answer_stream(
             query=clean_query,
             context_chunks=verified_chunks,
             conversation_context=conversation_context,
             preamble=preamble,
             no_results_answer=NO_RESULTS_ANSWER,
-        ):
+        )
+        async for token in token_stream:
             accumulated_text.append(token)
             yield f"data: {json.dumps({'event': 'token', 'text': token})}\n\n"
 
@@ -348,11 +351,12 @@ class GenericRagService:
         citations: list[dict[str, Any]] = []
         for num in cited_numbers:
             chunk = verified_chunks[num - 1]
-            doc = doc_lookup.get(chunk.id)
+            chunk_pid = getattr(chunk, "point_id", getattr(chunk, "id", None))
+            doc = doc_lookup.get(chunk_pid)
             citations.append(
                 {
                     "citation_number": num,
-                    "chunk_id": chunk.id,
+                    "chunk_id": chunk_pid or str(num),
                     "document_id": doc.external_document_id if doc else chunk.document_id,
                     "file_name": doc.file_name if doc else None,
                     "page_number": chunk.start_page,

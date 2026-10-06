@@ -55,15 +55,91 @@ flowchart TD
 
 ## ✨ Key Engineering Highlights
 
+- **Multi-Tenant RAG Microservice Platform**: Serves Search-Sphere's standalone web application alongside multiple independent external client systems (such as Quick-Clinic healthcare or ExamArena ed-tech) with authoritative client authentication, tenant isolation, and collections.
+- **Official Client SDKs**: Lightweight Python (`clients/python`) and TypeScript (`clients/typescript`) SDKs for seamless microservice integration without importing internal Python backend dependencies.
 - **Hybrid Dense + Sparse Retrieval**: Combines semantic embeddings (`all-MiniLM-L6-v2`) for conceptual similarity with BM25 sparse representations for exact keyword/part-number matching.
 - **Reciprocal Rank Fusion (RRF)**: Merges disparate rank lists using reciprocal rank scores ($k=60$), ensuring balanced candidate selection prior to reranking.
 - **Cross-Encoder Reranking**: Re-evaluates top-K retrieval candidates using `cross-encoder/ms-marco-MiniLM-L-6-v2`, performing full cross-attention between the query and each chunk to maximize precision.
 - **Conversational Query Rewriting**: Resolves ambiguous pronouns, coreferences, and missing context from chat history before querying the vector store.
 - **Strict Groundedness & Verifiable Citations**: Enforces structured prompt constraints ensuring the model refuses when evidence is insufficient and attributes statements to specific chunk and page references (`[1]`, `[2]`).
-- **Defense-in-Depth Multi-Tenant Isolation**: Guarantees zero data leakage across tenants by enforcing authorization checks at PostgreSQL query boundaries and vector payload filter predicates (`tenant_id`/`user_id`).
+- **Defense-in-Depth Multi-Tenant Isolation**: Guarantees zero data leakage across tenants by enforcing authorization checks at PostgreSQL query boundaries and vector payload filter predicates (`client_id`, `tenant_id`, `collection_id`).
 - **Real-Time SSE Streaming**: Emits live token-by-token responses over Server-Sent Events alongside preliminary metadata, source citations, and completion telemetry.
 - **Persistent Conversation Threads & Feedback**: Persists multi-turn conversations and message-level feedback (upvotes/downvotes) for reinforcement analysis.
 - **Automated RAG Evaluation Suite**: Custom benchmark framework measuring retrieval accuracy and generation quality against synthetic and domain-specific test sets.
+
+---
+
+## 🌐 Multi-Tenant Microservice & Client SDKs
+
+Search Sphere functions as both a standalone web application and a central headless RAG platform. External services authenticate with scoped API keys and access versioned REST endpoints:
+
+- **Architecture Overview**: Detailed security model and domain adapter patterns are documented in [`docs/MICROSERVICE_ARCHITECTURE.md`](docs/MICROSERVICE_ARCHITECTURE.md).
+- **ExamArena Integration Guide**: Walkthrough of a non-medical client integration is in [`docs/EXAMARENA_INTEGRATION.md`](docs/EXAMARENA_INTEGRATION.md).
+- **Architecture Audit**: Analysis of generic vs domain-specific medical concerns in [`ARCHITECTURE_AUDIT.md`](ARCHITECTURE_AUDIT.md).
+
+### Versioned API (`/api/v1/`)
+
+| Method | Endpoint | Description | Required Scope |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/clients` | Register a new client application and issue API key | Admin |
+| `GET` | `/api/v1/clients/me` | Inspect authenticated client identity and tenant grants | None |
+| `POST` | `/api/v1/collections` | Create a document collection for a tenant | `collections:manage` |
+| `GET` | `/api/v1/collections` | List authorized collections for the tenant | `documents:read` |
+| `DELETE` | `/api/v1/collections/{id}` | Delete collection and its indexed vectors | `collections:manage` |
+| `POST` | `/api/v1/documents/upload` | Multipart file upload and asynchronous ingestion | `documents:write` |
+| `POST` | `/api/v1/documents` | Register pre-uploaded object storage document | `documents:write` |
+| `GET` | `/api/v1/documents/{id}/status` | Check asynchronous processing and vector index status | `documents:read` |
+| `GET` | `/api/v1/documents` | List documents scoped to tenant and collection | `documents:read` |
+| `DELETE` | `/api/v1/documents/{id}` | Delete document from PostgreSQL, Qdrant, and storage | `documents:delete` |
+| `POST` | `/api/v1/search` | Scoped hybrid dense-sparse semantic retrieval | `search:execute` |
+| `POST` | `/api/v1/answers` | Generate grounded, citation-backed RAG answers | `answers:generate` |
+| `POST` | `/api/v1/answers/stream` | Stream grounded RAG answer tokens via SSE | `answers:generate` |
+
+### Python Client SDK Usage
+
+```python
+from search_sphere import SearchSphereClient
+
+client = SearchSphereClient(
+    base_url="http://localhost:8000",
+    api_key="ss_live_...",
+    tenant_id="school_cbse_10",
+)
+
+# Semantic search within a collection
+results = client.search(
+    query="Newton's laws of motion",
+    collection_id="physics_class_10",
+    limit=5,
+)
+for r in results.results:
+    print(f"[{r.score:.2f}] {r.file_name}: {r.text[:80]}...")
+
+# Grounded answer generation
+answer = client.generate_answer(
+    query="Explain inertia with formula",
+    collection_id="physics_class_10",
+)
+print(answer.answer)
+```
+
+### TypeScript Client SDK Usage
+
+```typescript
+import { SearchSphereClient } from "@search-sphere/client";
+
+const client = new SearchSphereClient({
+  baseUrl: "http://localhost:8000",
+  apiKey: "ss_live_...",
+  tenantId: "school_cbse_10",
+});
+
+const answer = await client.generateAnswer({
+  query: "Explain inertia with formula",
+  collectionId: "physics_class_10",
+});
+console.log(answer.answer);
+```
 
 ---
 

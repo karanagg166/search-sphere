@@ -50,8 +50,9 @@ class ExternalDocument(Base):
     __table_args__ = (
         UniqueConstraint(
             "source_system",
+            "tenant_id",
             "external_document_id",
-            name="uq_external_documents_source_doc_id",
+            name="uq_external_documents_tenant_doc_id",
         ),
     )
 

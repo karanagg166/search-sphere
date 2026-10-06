@@ -38,7 +38,11 @@ class ServiceContext:
                 detail=f"Forbidden: caller lacks required scope '{scope}'.",
             )
 
-    def to_qdrant_filter(self) -> dict[str, Any]:
+    def to_qdrant_filter(
+        self,
+        collection_id: str | None = None,
+        owner_subject_id: str | None = None,
+    ) -> dict[str, Any]:
         """
         Generates server-side mandatory Qdrant match filters for vector isolation.
         Caller-supplied query metadata filters can never loosen these mandatory keys.
@@ -47,6 +51,10 @@ class ServiceContext:
             "client_id": self.client_id,
             "tenant_id": self.tenant_id,
         }
-        if self.collection_id:
-            filters["collection_id"] = self.collection_id
+        eff_collection = collection_id or self.collection_id
+        if eff_collection:
+            filters["collection_id"] = eff_collection
+        eff_subject = owner_subject_id or self.subject_id
+        if eff_subject:
+            filters["owner_subject_id"] = eff_subject
         return filters

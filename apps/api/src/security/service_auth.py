@@ -229,9 +229,12 @@ async def verify_service_secret(
         return True
 
     # If neither legacy secret nor database client matches
-    if not legacy_secret and not client:
-        # If legacy secret not configured and no client found in db, log error
-        logger.warning("Service authorization failed: no valid credential matched")
+    if not legacy_secret:
+        logger.error("Internal service secret is not configured on server (failing closed)")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Server configuration error: service secret is not configured.",
+        )
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
