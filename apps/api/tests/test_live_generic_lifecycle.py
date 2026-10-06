@@ -103,9 +103,27 @@ async def test_live_clients_colliding_identifiers_reindex_and_delete():
                 row.status = "active"
                 await db.commit()
         finally:
-            for index in range(2):
-                await http.delete(f"/api/v1/documents/{document}", headers=headers(index))
-                await http.delete(f"/api/v1/collections/{collection}", headers=headers(index))
+            # Restore only our clients so revocation assertions cannot prevent
+            # their own cleanup. Attempt every resource even if one request fails.
             async with AsyncSessionLocal() as db:
-                await db.execute(delete(ServiceClient).where(ServiceClient.client_id.in_(clients)))
+                for client in clients:
+                    row = await ServiceClientService(db).get_client_by_id(client)
+                    if row is not None:
+                        row.status = "active"
                 await db.commit()
+            errors = []
+            try:
+                for index in range(2):
+                    for path in (f"/api/v1/documents/{document}", f"/api/v1/collections/{collection}"):
+                        try:
+                            response = await http.delete(path, headers=headers(index))
+                            if response.status_code != 404:
+                                response.raise_for_status()
+                        except Exception as error:
+                            errors.append(error)
+            finally:
+                async with AsyncSessionLocal() as db:
+                    await db.execute(delete(ServiceClient).where(ServiceClient.client_id.in_(clients)))
+                    await db.commit()
+            if errors:
+                raise ExceptionGroup("Synthetic resource cleanup failed", errors)

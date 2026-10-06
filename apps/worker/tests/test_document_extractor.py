@@ -45,7 +45,7 @@ def test_extract_empty_pdf_raises_error() -> None:
     extractor = DocumentExtractor()
     with pytest.raises(
         DocumentExtractionError,
-        match="Cannot extract content from an empty PDF",
+        match="Cannot extract content from an empty document",
     ):
         extractor.extract(b"")
 

@@ -1,5 +1,7 @@
 from collections.abc import Generator
 from unittest.mock import MagicMock, patch
+import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,7 +15,14 @@ from src.processing.extraction.image_captioner import (
 def clear_captioner_cache() -> Generator[None, None, None]:
     """Ensure cached pipeline state does not leak between unit tests."""
     ImageCaptioner._clear_cache()
-    yield
+    # Exercise the lazy import with lightweight dependency modules. Real retrieval
+    # model coverage remains in the integration tests; these tests check caption
+    # validation, loader arguments, cache reuse and error handling.
+    with patch.dict(sys.modules, {
+        "torch": SimpleNamespace(cuda=SimpleNamespace(is_available=MagicMock(return_value=False))),
+        "transformers": SimpleNamespace(pipeline=MagicMock()),
+    }):
+        yield
     ImageCaptioner._clear_cache()
 
 
@@ -65,7 +74,7 @@ def test_describe_lazy_loading_and_pipeline_reuse(
     ]
 
     with patch(
-        "src.processing.extraction.image_captioner.pipeline",
+        "transformers.pipeline",
         return_value=mock_pipeline,
     ) as mock_factory:
         captioner1 = ImageCaptioner(model_name="mock/blip-captioner")
@@ -86,7 +95,7 @@ def test_describe_lazy_loading_and_pipeline_reuse(
 
 def test_describe_pipeline_load_failure(sample_image_bytes: bytes) -> None:
     with patch(
-        "src.processing.extraction.image_captioner.pipeline",
+        "transformers.pipeline",
         side_effect=RuntimeError("Weights failed to download"),
     ):
         captioner = ImageCaptioner(model_name="failing/model")
@@ -125,11 +134,11 @@ def test_describe_device_cuda_fallback(sample_image_bytes: bytes) -> None:
 
     with (
         patch(
-            "src.processing.extraction.image_captioner.torch.cuda.is_available",
+            "torch.cuda.is_available",
             return_value=True,
         ),
         patch(
-            "src.processing.extraction.image_captioner.pipeline",
+            "transformers.pipeline",
             return_value=mock_pipeline,
         ) as mock_factory,
     ):

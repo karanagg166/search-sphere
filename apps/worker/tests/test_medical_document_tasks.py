@@ -1,3 +1,4 @@
+import hashlib
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import ANY, AsyncMock, MagicMock
@@ -25,10 +26,21 @@ def mock_storage() -> MagicMock:
 
 
 @pytest.fixture(autouse=True)
-async def cleanup_db_connections():
-    from src.db import engine
-    yield
-    await engine.dispose()
+async def isolated_medical_database(tmp_path, monkeypatch):
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    from src.db import Base
+    from src.tasks import document_tasks
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'medical.db'}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr(document_tasks, "AsyncSessionLocal", sessions)
+    monkeypatch.setitem(globals(), "AsyncSessionLocal", sessions)
+    try:
+        yield
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -38,6 +50,7 @@ async def test_process_medical_document_pdf_success(
     mock_image_captioner: MagicMock,
     mock_semantic_embedder: MagicMock,
     mock_dense_embedder: MagicMock,
+    mock_sparse_embedder: MagicMock,
     mock_vector_store: MagicMock,
     mock_storage: MagicMock,
 ):
@@ -49,6 +62,9 @@ async def test_process_medical_document_pdf_success(
     async with AsyncSessionLocal() as session:
         doc = ExternalDocument(
             source_system="quick_clinic",
+            tenant_id="quick_clinic_default",
+            owner_subject_id=patient_id,
+            collection_id=f"patient_{hashlib.sha256(patient_id.encode()).hexdigest()[:32]}_records",
             external_document_id=doc_id,
             external_patient_id=patient_id,
             storage_path=storage_path,
@@ -80,6 +96,7 @@ async def test_process_medical_document_pdf_success(
         cleaner=cleaner,
         chunker=chunker,
         embedder=mock_dense_embedder,
+        sparse_embedder=mock_sparse_embedder,
         vector_store=mock_vector_store,
     )
 
@@ -94,6 +111,10 @@ async def test_process_medical_document_pdf_success(
     call_args, call_kwargs = mock_vector_store.index_document.call_args
     assert call_args[0] == doc_id
     extra_payload = call_kwargs["extra_payload"]
+    assert extra_payload["client_id"] == "quick_clinic"
+    assert extra_payload["tenant_id"] == "quick_clinic_default"
+    assert extra_payload["owner_subject_id"] == patient_id
+    assert extra_payload["collection_id"] == f"patient_{hashlib.sha256(patient_id.encode()).hexdigest()[:32]}_records"
     assert extra_payload["source_system"] == "quick_clinic"
     assert extra_payload["patient_id"] == patient_id
     assert extra_payload["document_id"] == doc_id
@@ -127,6 +148,7 @@ async def test_process_medical_document_image_ocr(
     mock_ocr_processor: MagicMock,
     mock_semantic_embedder: MagicMock,
     mock_dense_embedder: MagicMock,
+    mock_sparse_embedder: MagicMock,
     mock_vector_store: MagicMock,
     mock_storage: MagicMock,
 ):
@@ -138,6 +160,9 @@ async def test_process_medical_document_image_ocr(
     async with AsyncSessionLocal() as session:
         doc = ExternalDocument(
             source_system="quick_clinic",
+            tenant_id="quick_clinic_default",
+            owner_subject_id=patient_id,
+            collection_id=f"patient_{hashlib.sha256(patient_id.encode()).hexdigest()[:32]}_records",
             external_document_id=doc_id,
             external_patient_id=patient_id,
             storage_path=storage_path,
@@ -170,6 +195,7 @@ async def test_process_medical_document_image_ocr(
         cleaner=cleaner,
         chunker=chunker,
         embedder=mock_dense_embedder,
+        sparse_embedder=mock_sparse_embedder,
         vector_store=mock_vector_store,
     )
 
@@ -202,6 +228,9 @@ async def test_process_medical_document_storage_error_marks_failed(
     async with AsyncSessionLocal() as session:
         doc = ExternalDocument(
             source_system="quick_clinic",
+            tenant_id="quick_clinic_default",
+            owner_subject_id=patient_id,
+            collection_id=f"patient_{hashlib.sha256(patient_id.encode()).hexdigest()[:32]}_records",
             external_document_id=doc_id,
             external_patient_id=patient_id,
             storage_path=f"medical-documents/{patient_id}/{doc_id}/missing.pdf",

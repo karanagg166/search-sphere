@@ -145,7 +145,7 @@ console.log(answer.answer);
 
 ## 📊 RAG Evaluation Benchmark Results
 
-The system includes a dedicated offline benchmark framework (`apps/api/src/evaluation/run_eval.py`) evaluated against 30 representative test cases across 7 critical retrieval and synthesis scenarios:
+The offline evaluator (`apps/api/src/evaluation/run_eval.py`) checks metrics against preset outputs for 30 synthetic cases across 7 categories. These scores verify evaluator behavior; they do not measure live retrieval or Cohere answer quality:
 
 | Metric | Target | Benchmark Score | Status |
 | :--- | :--- | :--- | :--- |
@@ -157,7 +157,7 @@ The system includes a dedicated offline benchmark framework (`apps/api/src/evalu
 | **No-Evidence Refusal Accuracy** | $\ge 90\%$ | **100.0%** | PASS |
 | **Keyword Coverage** | $\ge 80\%$ | **93.5%** | PASS |
 
-*Full report available at [`evaluation/reports/latest.md`](evaluation/reports/latest.md).*
+Run `make eval` to regenerate a temporary local report. Remove generated reports after reviewing them.
 
 ---
 

@@ -86,8 +86,10 @@ Security Rules Enforced:
      `{"client_id": ctx.client_id, "tenant_id": ctx.tenant_id, "collection_id": ...}`
    - Sparse lexical search (BM25) with the exact same server-side filter.
    - Reciprocal Rank Fusion (RRF) combines candidate chunks.
+   - Dense, sparse and hybrid result mapping preserve `client_id`, `tenant_id`, `collection_id` and `owner_subject_id`, along with legacy medical aliases. Reranking must retain these fields so the subsequent scope checks can authorize results. Legacy and generic search use one vector set.
 2. **Stage 2 (Cross-Encoder Reranking)**:
    - Candidates are reranked using `cross-encoder/ms-marco-MiniLM-L-6-v2`.
+   - Worker scoring rejects malformed, mismatched or non-finite model outputs. If model loading or scoring fails, its public reranker logs the failure and returns candidates in RRF order; input validation errors still propagate.
 3. **Post-Retrieval Verification**:
    - Chunks are verified against PostgreSQL to ensure the parent document is in `READY` status and belongs to the authorized client/tenant before exposure.
 4. **Grounded Generation & Citations**:

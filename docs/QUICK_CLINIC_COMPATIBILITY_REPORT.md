@@ -1,8 +1,10 @@
 # Quick-Clinic integration audit — 2026-10-06
 
-## 1. Compatibility result: PARTIAL
+## 1. Compatibility result: synthetic backend verified; deployment pending
 
-The compatibility contract and security regressions have been repaired and covered by deterministic tests. A real synthetic PDF reached READY through PostgreSQL, RabbitMQ, the worker, dense/sparse embedding and Qdrant. The complete live retrieval → Cohere → chat/stream → UI lifecycle has **not passed**. Docker's 4 GB VM became unresponsive during concurrent model loading; subsequent live attempts failed with timeouts. Do not interpret the unit results as production readiness.
+The 2026-10-06 follow-up verified synthetic PDF ingestion through PostgreSQL, RabbitMQ, extraction, chunking, real dense/BM25 models and Qdrant, followed by both retrieval contracts, observations, real Cohere answers/citations, chat/SSE and deletion. A live retrieval regression was reproduced: hybrid result mapping dropped generic scope fields, so security correctly discarded otherwise permitted chunks. Both Qdrant copies now preserve those fields, with a real local-Qdrant regression test. Browser E2E and deployed migration remain pending; this active migration report is temporary and must be removed when the deployed migration is finished and its useful conclusions are in permanent docs.
+
+Heads verified before this follow-up's changes: Search-Sphere `df257762970a743a05329734965f26620effb85d`; Quick-Clinic `224e047ded04f08b57096e4250dc226f5e4483d2` on the follow-up branches below. Earlier source-head checks are historical.
 
 Verified remote source heads before changes and again before publication:
 
@@ -46,8 +48,9 @@ Paths below are relative to Search-Sphere unless prefixed Quick-Clinic.
 | v1 deletion + extensions/medical_cleanup.py | Generic deletion called nonexistent vector method; extension observations survived deletion | Scoped vector deletion and transactional optional domain cleanup; preserve metadata on vector failure | v1 document lifecycle and medical deletion tests |
 | processing/file_validation.py; upload adapters | Signature-only validation admitted malformed PDFs/images and MIME mismatch | Parse PDF and verify actual JPEG/PNG/WebP content; reject empty, malformed and mismatched input | nine binary validation cases plus storage/upload suites |
 | models/medical_observation.py; observation service | Structured observation rows lacked tenant scope | Tenant column, scoped query/replacement/delete and migration | observation suite and migration test |
-| worker/db.py | Pool reused asyncpg connections across fresh asyncio.run job loops | NullPool; request context cleared around each actor | Observed protocol/event-loop errors in real run; fix compiled, sustained live rerun remains pending |
-| Quick-Clinic search-sphere-client.ts and routes | Global secret only; upstream details could leak; SSE timeout ended at headers; delete failure swallowed | API key first, common scope headers, safe errors, bounded retries, stream lifetime timeout/cancel and metadata-preserving failure | 143 focused Quick-Clinic tests; build and type-check |
+| worker/db.py | Pool reused asyncpg connections across fresh asyncio.run job loops | NullPool; request context cleared around each actor | Repeated real synthetic medical and generic ingestion/reindex jobs completed in the follow-up |
+| Quick-Clinic search-sphere-client.ts and routes | Global secret only; upstream details could leak; SSE timeout ended at headers; delete failure swallowed | API key first, common scope headers, safe errors, bounded retries, stream lifetime timeout/cancel and metadata-preserving failure | Full suite preserves the previously passing focused coverage; real retrieval and Cohere/chat/SSE lifecycle passed |
+| API + worker hybrid Qdrant result mapping | Correctly scoped points lost generic identity in HybridSearchResult, causing post-retrieval rejection | Preserve all four generic fields and legacy aliases through mapping/reranking | Regression failed before fix, passed afterward; both full suites and both live retrieval contracts passed |
 | repositories/conversation_repository.py | Server timestamp precision allowed random UUID tie ordering to invert native conversation turns | Assign UTC microsecond timestamps when messages are inserted | Native conversation regression passed; original baseline reproduced failure |
 
 No embeddings, vector database or RAG implementation was added to Quick-Clinic. The API/worker Qdrant copies remain identical; sharing code across their separate build contexts is deferred, with a parity regression test preventing drift.
@@ -70,7 +73,7 @@ The output is exclusively created with mode 0600. Manually configure the backend
 
 ## 5. Vector payload
 
-Expected sanitized payload from the implemented worker mapping (not an inspected production point):
+Sanitized shape of an inspected synthetic server-Qdrant point (UUID suffixes omitted):
 
 ```json
 {
@@ -85,7 +88,7 @@ Expected sanitized payload from the implemented worker mapping (not an inspected
 }
 ```
 
-Actual generic fields on a resulting server Qdrant point remain to be inspected. No real patient records were used.
+All six generic/legacy scope fields were inspected and asserted against a real indexed synthetic point. Its collection matched the patient hash, with one matching point holding the unnamed dense vector and `bm25` sparse vector. No duplicate legacy/generic vector set or real patient data was used.
 
 ## 6. Integration evidence
 
@@ -93,14 +96,14 @@ Actual generic fields on a resulting server Qdrant point remain to be inspected.
 |---|---|---|
 | Upload / validation | PDF/JPEG/PNG/WebP, empty/malformed/MIME mismatch, auth, compensation | Real synthetic PDF storage and extraction succeeded; image OCR lifecycle pending |
 | Index | Scope metadata mapping, index creation, deterministic IDs | Synthetic PDF reached READY and one chunk indexed |
-| Search / hybrid / reranker | Mandatory filters, RRF/rerank interfaces, foreign chunk rejection | Complete legacy+generic live retrieval assertions not reached |
-| Grounded answer / no evidence / citations | Provider contract and citation invariants | Real Cohere smoke not completed |
-| Chat / structured+narrative | Routing, numeric observations, context isolation | Live follow-ups and hybrid medical answer pending |
-| SSE | Incremental mocked chunks, content type, cancellation, completion | Real streaming/provider-error test pending |
-| Observations | Numeric types, dates and scope covered in suites | Live query assertions not reached |
-| Delete / retry / reindex | Scoped deletion and changed/repeated vectors in Qdrant local engine | Full server deletion assertions not reached; failed attempts cleaned up best-effort |
+| Search / hybrid / reranker | Mandatory filters, RRF/rerank interfaces, foreign chunk rejection | Legacy and generic contracts retrieved the same permitted synthetic document |
+| Grounded answer / no evidence / citations | Provider contract and citation invariants | Real Cohere answer, valid page/chunk citations and missing-MRI refusal passed |
+| Chat / structured+narrative | Routing, numeric observations, context isolation | Structured HbA1c, date follow-up and hybrid numeric/narrative checks passed |
+| SSE | Incremental mocked chunks, content type, cancellation, completion | Real provider stream returned citations and completion; provider-error/cancellation remain mock-tested |
+| Observations | Numeric types, dates and scope covered in suites | Real HbA1c 7.4 lookup and deletion cleanup passed |
+| Delete / retry / reindex | Scoped deletion and changed/repeated vectors in Qdrant local engine | Real scoped deletion, changed-content reindex and repeated-index idempotency passed |
 | Patient / doctor isolation | Quick-Clinic access guards and Search-Sphere pre-retrieval scope defenses | Full logged-in browser security matrix pending |
-| Client isolation | Auth matrix, colliding IDs in Qdrant local engine | Added real two-client lifecycle, not run successfully |
+| Client isolation | Auth matrix, colliding IDs in Qdrant local engine | Real two-client colliding-ID lifecycle, foreign-owner rejection and revoked-token 401 passed |
 
 Optional integration entry points:
 
@@ -110,22 +113,23 @@ Optional integration entry points:
 
 ## 7. Search-Sphere results
 
-- Complete Docker API pytest run: **208 passed**, 8 warnings. Alembic upgrade through 007 succeeded against isolated PostgreSQL.
+- Complete Docker API pytest follow-up: **209 passed / 0 failed / 1 skipped / 1 warning, 27.87s**. The skip is the opt-in live lifecycle, separately passed. Alembic upgrade through 007 and migration tests passed. Previous Docker result was 208 passed; one hybrid-scope regression was added.
 - Latest host run excluding unavailable Dramatiq test module: **204 passed, 2 skipped** (Alembic package missing on host; optional live test disabled).
-- Focused worker Qdrant index/parity/local lifecycle: **9 passed**.
-- Complete worker suite: attempted, emitted failures, then stalled under Docker memory pressure. **No successful full-worker result.**
-- Exact make test initially failed because the old image lacked PYTHONPATH; equivalent full pytest succeeded with PYTHONPATH and SQLite test database. New integration image declares these. make test-worker/make eval initially could not access Docker under the earlier restricted environment; full worker later remained incomplete.
+- Complete Docker worker follow-up: **355 passed / 0 failed / 0 skipped / 1 warning, 41.95s**. Subsystem runs passed before the full run. Unit loader/task tests now isolate caches, use bounded mocks for non-model assertions, and own SQLite state. Real BM25/local-Qdrant retrieval remains tested; real dense/BM25/cross-encoder inference was exercised by the live lifecycle. Both Qdrant copies and payload-index edge cases passed.
+- The original full-worker attempt was incomplete. The follow-up uses the integration image's PYTHONPATH, explicit SQLite test databases and one model-heavy run at a time. Running pytest inside the model-loaded live API twice caused confirmed OOM kills (exit 137) on the 4 GB Docker VM. Separate API test containers passed; the generic live driver passed on the host against real Docker services after waiting for API health.
 - Web: **19 passed**; lint **0 errors / 4 warnings**. Default pnpm build failed with Turbopack OS permission error; `next build --webpack` passed.
 - Baseline API run before fixes (excluding unavailable Dramatiq module): **181 passed / 1 failed**, reproducing native conversation ordering. Baseline worker had dependency/model and known payload-index failures; no clean full-worker baseline.
 
 ## 8. Quick-Clinic results
 
 - Latest focused backend integration/auth/client suites: **143 passed in 12 files**.
-- Full suite using separate local PostgreSQL: **933 passed / 12 failed / 6 skipped**, 174 files. Failures involve seeded login/profile/signup/doctor-search fixtures and one unchanged medical-search UI reset test; no claim that the entire suite is green.
+- Previous full suite: **933 passed / 12 failed / 6 skipped**. Initial follow-up reproduced **932 passed / 18 failed / 1 skipped** because fixed-seed assumptions changed with shared database state. Final full suite against a fresh isolated PostgreSQL database: **951 passed / 0 failed / 1 skipped**, 174 files, 134.55s. One profile authorization test was added. The sole skip is the separately passed opt-in live test; the previous five Redis-suite setup skips were fixed with unique owned dataset IDs.
+- Fixture fixes cover seeded login/profile/signup/doctors, OTP, notifications and logger tests. The stale Priya search assertion now queries its own Bhavna fixture with mixed case. Doctor-profile cleanup cannot issue unbounded deletes after failed setup. An intermediate run had transient infrastructure timeouts; all affected files and the final suite passed unchanged timeout assertions. The prior medical-search reset failure timed out awaiting initial results before reset; it did not reproduce in the final suite or 20 targeted runs, and component behavior was unchanged.
 - pnpm type-check passed.
-- pnpm lint: **0 errors / 1094 warnings**.
+- pnpm lint: **0 errors / 1093 warnings**.
 - pnpm build passed after the earlier interrupted attempt was restarted.
-- Playwright was not run: a healthy complete integration stack and browser/auth test setup were not established.
+- Both opt-in Quick-Clinic live runs passed: retrieval-only (51.50s including startup/model warmup) and real Cohere answer/chat/SSE (14.41s). The generic Search-Sphere live lifecycle passed separately (initially 19.87s; final cleanup-safe rerun 9.50s, five host dependency warnings). One host attempt raced API startup and another saw a transient HTTP disconnect; the latter still cleaned up its clients after the fixture fix. Final rerun passed without changing retrieval or isolation assertions.
+- Playwright was not run; logged-in browser/auth E2E remains unverified.
 
 ## 9. Evaluation
 
@@ -145,7 +149,7 @@ python -m src.maintenance.backfill_vector_scope --client-id quick_clinic --tenan
 
 Ambiguous/foreign/incomplete ownership is refused. The tool never deletes vectors or changes point IDs. Reindexing uses new scoped UUIDs and removes stale scoped chunks. Back up existing data and inspect payloads before the retrieval cutover; no deployed documents/vectors were migrated or silently deleted during this work.
 
-Other remaining risks: legacy secret still accepted; deployed client not provisioned; complete real Qdrant/Cohere/chat/SSE/browser matrix pending; actual payload inspection pending; full worker suite incomplete; full Quick-Clinic suite has failures; optional live tests themselves require a successful first run and may reveal further issues. The old compatibility storage path lacks a tenant segment, so medical adapters deliberately permit only quick_clinic_default. Future clinic tenants use generic storage/API, not this legacy path.
+Remaining deployment work: legacy secret still accepted; deployed client not provisioned; production legacy data/vector migration and browser E2E not performed. Live image OCR, provider-error/cancellation under real networking, and a live quality benchmark remain unverified. The old compatibility storage path lacks a tenant segment, so medical adapters deliberately permit only quick_clinic_default. Future clinic tenants use generic storage/API, not this legacy path. Synthetic backend verification is complete; deployed migration is not.
 
 ## 11. Migration recommendation
 

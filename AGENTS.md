@@ -1557,3 +1557,7 @@ DO NOT PUSH WITHOUT EXPLICIT PERMISSION
 
 AFTER COMPLETING THE CURRENT FEATURE, STOP
 ```
+
+## Repository hygiene
+
+Temporary audit/test/verification reports and generated investigation artifacts must be removed once they are no longer actively needed; do not keep them permanently in the repository.

@@ -45,3 +45,34 @@ def test_api_and_worker_vector_store_copies_match():
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
     assert (root / "api/src/vector_store/qdrant_store.py").read_bytes() == (root / "worker/src/vector_store/qdrant_store.py").read_bytes()
+
+
+@pytest.mark.asyncio
+async def test_hybrid_result_preserves_scope_through_reranking():
+    from unittest.mock import MagicMock
+    from src.processing.models.sparse_vector import SparseVector
+    from src.retrieval.reranker import CrossEncoderReranker
+
+    client = AsyncQdrantClient(":memory:")
+    store = QdrantVectorStore(client=client, collection_name="hybrid_scope", vector_dimension=3)
+    scope = {
+        "client_id": "quick_clinic", "tenant_id": "quick_clinic_default",
+        "collection_id": "synthetic_patient_records", "owner_subject_id": "synthetic-patient-a",
+        "source_system": "quick_clinic", "patient_id": "synthetic-patient-a",
+    }
+    try:
+        await store.index_document("synthetic-document-a", document(["synthetic record"]), extra_payload=scope)
+        results = await store.search_hybrid(
+            dense_query_vector=[1.0, 0.0, 0.0],
+            sparse_query_vector=SparseVector(indices=[], values=[]),
+            limit=5, candidate_limit=10, filters=scope,
+        )
+        assert len(results) == 1
+        assert {key: getattr(results[0], key) for key in scope} == scope
+        model = MagicMock(spec=["predict"])
+        model.predict.return_value = [0.9]
+        reranked = CrossEncoderReranker(model=model).rerank("synthetic query", results)
+        assert {key: getattr(reranked[0], key) for key in scope} == scope
+        assert reranked[0].document_id == "synthetic-document-a"
+    finally:
+        await client.close()
