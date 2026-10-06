@@ -1,3 +1,4 @@
+from src.security.medical_context import patient_collection_id
 from datetime import datetime, timedelta, timezone
 import uuid
 from unittest.mock import ANY, AsyncMock, patch
@@ -97,7 +98,7 @@ async def test_ingest_validation_errors():
             },
         )
         assert resp_path.status_code == 400
-        assert "Must begin with 'medical-documents/'" in resp_path.json()["detail"]
+        assert "Invalid medical storage path" in resp_path.json()["detail"]
 
         # 3. Path traversal in storage path
         resp_trav = await client.post(
@@ -175,7 +176,9 @@ async def test_ingest_success_and_idempotency():
             data1 = resp1.json()
             assert data1["documentId"] == doc_id
             assert data1["status"] == "QUEUED"
-            mock_enqueue.assert_called_with(doc_id, request_id=ANY)
+            mock_enqueue.assert_called_once()
+            queued_record_id = mock_enqueue.call_args.args[0]
+            assert queued_record_id != doc_id
 
             # Check DB record
             async with AsyncSessionLocal() as session:
@@ -187,6 +190,7 @@ async def test_ingest_success_and_idempotency():
                 )
                 record = result.scalar_one_or_none()
                 assert record is not None
+                assert record.id == queued_record_id
                 assert record.external_patient_id == patient_id
                 assert record.status == "QUEUED"
                 assert record.document_type == "LAB_REPORT"
@@ -246,6 +250,9 @@ async def test_get_status_lifecycle():
             record = ExternalDocument(
                 source_system="quick_clinic",
                 external_document_id=doc_id,
+                tenant_id="quick_clinic_default",
+                owner_subject_id=patient_id,
+                collection_id=patient_collection_id(patient_id),
                 external_patient_id=patient_id,
                 storage_path=f"medical-documents/{patient_id}/{doc_id}/report.png",
                 file_name="report.png",
@@ -279,6 +286,9 @@ async def test_delete_medical_document_index():
         record = ExternalDocument(
             source_system="quick_clinic",
             external_document_id=doc_id,
+            tenant_id="quick_clinic_default",
+            owner_subject_id=patient_id,
+            collection_id=patient_collection_id(patient_id),
             external_patient_id=patient_id,
             storage_path=f"medical-documents/{patient_id}/{doc_id}/report.pdf",
             file_name="report.pdf",
@@ -306,7 +316,7 @@ async def test_delete_medical_document_index():
             assert resp.json()["success"] is True
 
             # Verify Qdrant delete was called
-            mock_instance.delete_document_points.assert_awaited_once_with(doc_id)
+            mock_instance.delete_document_points.assert_awaited_once_with(doc_id, filters={"client_id": "quick_clinic", "tenant_id": "quick_clinic_default", "collection_id": patient_collection_id(patient_id), "owner_subject_id": patient_id})
 
     # Verify record was deleted from database
     async with AsyncSessionLocal() as session:
@@ -330,6 +340,9 @@ async def test_stale_documents_recovery():
         doc1 = ExternalDocument(
             source_system="quick_clinic",
             external_document_id=doc_id1,
+            tenant_id="quick_clinic_default",
+            owner_subject_id=patient_id,
+            collection_id=patient_collection_id(patient_id),
             external_patient_id=patient_id,
             storage_path="path1",
             file_name="f1.pdf",
@@ -342,6 +355,9 @@ async def test_stale_documents_recovery():
         doc2 = ExternalDocument(
             source_system="quick_clinic",
             external_document_id=doc_id2,
+            tenant_id="quick_clinic_default",
+            owner_subject_id=patient_id,
+            collection_id=patient_collection_id(patient_id),
             external_patient_id=patient_id,
             storage_path="path2",
             file_name="f2.pdf",
@@ -396,7 +412,8 @@ async def test_stale_documents_recovery():
             data2 = resp2.json()
             assert doc_id2 in data2["recoveredDocumentIds"]
             assert data2["action"] == "requeue"
-            mock_enqueue.assert_called_with(doc_id2, request_id=ANY)
+            mock_enqueue.assert_called_once()
+            assert mock_enqueue.call_args.args[0] != doc_id2
 
             async with AsyncSessionLocal() as session:
                 res2 = await session.execute(

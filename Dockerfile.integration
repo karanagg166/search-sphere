@@ -1,0 +1,3 @@
+FROM search-sphere-api:latest
+RUN pip install --no-cache-dir fastembed aiosqlite
+ENV PYTHONPATH=/app

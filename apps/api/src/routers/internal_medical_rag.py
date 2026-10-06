@@ -1,3 +1,5 @@
+from src.security.medical_context import get_medical_context, bind_patient, validate_storage_scope, patient_collection_id
+from src.security.service_context import ServiceContext
 import json
 import time
 from typing import Any
@@ -283,6 +285,7 @@ async def _retrieve_patient_ready_chunks(
     document_type: str | None,
     session: AsyncSession,
     retriever: RerankedHybridRetriever,
+    context: ServiceContext | None = None,
 ) -> tuple[list[Any], dict[str, ExternalDocument]]:
     """
     Executes patient-isolated hybrid retrieval and filters for READY PostgreSQL records.
@@ -291,7 +294,9 @@ async def _retrieve_patient_ready_chunks(
     candidate_k = max(resolved_limit * 2, 20)
 
     # Strict server-side patient filtering in vector database
+    context = context or bind_patient(ServiceContext(client_id="quick_clinic", tenant_id="quick_clinic_default"), patient_id)
     qdrant_filters: dict[str, Any] = {
+        **context.to_qdrant_filter(),
         "source_system": "quick_clinic",
         "patient_id": patient_id,
     }
@@ -316,6 +321,9 @@ async def _retrieve_patient_ready_chunks(
         select(ExternalDocument).where(
             ExternalDocument.source_system == "quick_clinic",
             ExternalDocument.external_patient_id == patient_id,
+            ExternalDocument.tenant_id == context.tenant_id,
+            ExternalDocument.owner_subject_id == context.subject_id,
+            ExternalDocument.collection_id == context.collection_id,
             ExternalDocument.external_document_id.in_(chunk_doc_ids),
             ExternalDocument.status == "READY",
         )
@@ -324,6 +332,8 @@ async def _retrieve_patient_ready_chunks(
 
     ready_chunks: list[Any] = []
     for chunk in reranked_chunks:
+        if any(getattr(chunk, key, None) != value for key, value in context.to_qdrant_filter().items()):
+            continue
         if chunk.document_id not in ready_docs:
             continue
         if chunk.patient_id and chunk.patient_id != patient_id:
@@ -392,7 +402,7 @@ def _build_citations(
 )
 async def generate_medical_answer(
     body: MedicalRagAnswerRequest,
-    _auth: bool = Depends(verify_service_secret),
+    _auth: ServiceContext = Depends(get_medical_context),
     session: AsyncSession = Depends(get_db),
     retriever: RerankedHybridRetriever = Depends(get_retriever),
     answer_generator: AnswerGenerator = Depends(get_answer_generator),
@@ -400,6 +410,7 @@ async def generate_medical_answer(
     start_time = time.perf_counter()
 
     clean_patient_id = sanitize_identifier(body.patient_id, "patient_id")
+    _auth = bind_patient(_auth, clean_patient_id)
     clean_query = body.query.strip()
     if not clean_query:
         raise HTTPException(
@@ -414,6 +425,7 @@ async def generate_medical_answer(
         document_type=body.document_type,
         session=session,
         retriever=retriever,
+        context=_auth,
     )
 
     if not ready_chunks:
@@ -466,7 +478,7 @@ async def generate_medical_answer(
 )
 async def generate_medical_chat(
     body: MedicalChatRequest,
-    _auth: bool = Depends(verify_service_secret),
+    _auth: ServiceContext = Depends(get_medical_context),
     session: AsyncSession = Depends(get_db),
     retriever: RerankedHybridRetriever = Depends(get_retriever),
     query_rewriter: QueryRewriter = Depends(get_query_rewriter),
@@ -477,6 +489,7 @@ async def generate_medical_chat(
     start_time = time.perf_counter()
 
     clean_patient_id = sanitize_identifier(body.patient_id, "patient_id")
+    _auth = bind_patient(_auth, clean_patient_id)
     clean_message = body.message.strip()
     if not clean_message:
         raise HTTPException(
@@ -558,6 +571,7 @@ async def generate_medical_chat(
             document_type=body.document_type,
             session=session,
             retriever=retriever,
+            context=_auth,
         )
 
         if not observations and not ready_chunks:
@@ -603,7 +617,7 @@ async def generate_medical_chat(
             logger.exception("Medical chat hybrid answer generation failed", error=str(exc))
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Hybrid answer generation failed: {exc}",
+                detail="Medical AI is temporarily unavailable.",
             ) from exc
 
         clean_answer = sanitize_citations(raw_answer_text, max_source_id=len(used_items))
@@ -636,12 +650,13 @@ async def generate_medical_chat(
             document_type=body.document_type,
             session=session,
             retriever=retriever,
+            context=_auth,
         )
     except Exception as exc:
         logger.exception("Medical chat retrieval failed", patient_id=clean_patient_id, error=str(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Medical retrieval execution failed: {exc}",
+            detail="Medical AI is temporarily unavailable.",
         ) from exc
 
     if not ready_chunks:
@@ -709,7 +724,7 @@ async def generate_medical_chat(
 )
 async def stream_medical_chat(
     body: MedicalChatRequest,
-    _auth: bool = Depends(verify_service_secret),
+    _auth: ServiceContext = Depends(get_medical_context),
     session: AsyncSession = Depends(get_db),
     retriever: RerankedHybridRetriever = Depends(get_retriever),
     query_rewriter: QueryRewriter = Depends(get_query_rewriter),
@@ -720,6 +735,7 @@ async def stream_medical_chat(
     start_time = time.perf_counter()
 
     clean_patient_id = sanitize_identifier(body.patient_id, "patient_id")
+    _auth = bind_patient(_auth, clean_patient_id)
     clean_message = body.message.strip()
     if not clean_message:
         raise HTTPException(
@@ -794,6 +810,7 @@ async def stream_medical_chat(
             document_type=body.document_type,
             session=session,
             retriever=retriever,
+            context=_auth,
         )
 
         async def hybrid_event_stream():
@@ -870,12 +887,13 @@ async def stream_medical_chat(
             document_type=body.document_type,
             session=session,
             retriever=retriever,
+            context=_auth,
         )
     except Exception as exc:
         logger.exception("Medical chat stream retrieval failed", patient_id=clean_patient_id, error=str(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Medical retrieval execution failed: {exc}",
+            detail="Medical AI is temporarily unavailable.",
         ) from exc
 
     async def chat_event_stream():

@@ -1,3 +1,5 @@
+from src.security.medical_context import get_medical_context, bind_patient, validate_storage_scope, patient_collection_id
+from src.security.service_context import ServiceContext
 from datetime import datetime, timedelta, timezone
 
 import structlog
@@ -63,12 +65,13 @@ async def recover_stale_documents(
     request: Request,
     threshold_minutes: int = Query(15, ge=1, le=1440, alias="thresholdMinutes"),
     action: str = Query("fail", pattern="^(fail|requeue)$"),
-    _auth: bool = Depends(verify_service_secret),
+    _auth: ServiceContext = Depends(get_medical_context),
     session: AsyncSession = Depends(get_db),
 ) -> MedicalDocumentStaleRecoveryResponse:
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
     stmt = select(ExternalDocument).where(
         ExternalDocument.source_system == "quick_clinic",
+            ExternalDocument.tenant_id == _auth.tenant_id,
         ExternalDocument.status == "PROCESSING",
         ExternalDocument.updated_at < cutoff,
     )
@@ -76,7 +79,7 @@ async def recover_stale_documents(
     stale_docs = list(result.scalars().all())
     recovered_ids: list[str] = []
 
-    req_id = request.headers.get("X-Request-ID")
+    req_id = getattr(request.state, "request_id", None)
     for doc in stale_docs:
         recovered_ids.append(doc.external_document_id)
         if action == "fail":
@@ -85,7 +88,7 @@ async def recover_stale_documents(
         elif action == "requeue":
             doc.status = "QUEUED"
             doc.processing_error = None
-            enqueue_medical_document(doc.external_document_id, request_id=req_id)
+            enqueue_medical_document(doc.id, request_id=req_id)
 
     await session.commit()
 
@@ -117,13 +120,17 @@ async def ingest_medical_document(
     body: MedicalDocumentIngestRequest,
     response: Response,
     request: Request,
-    _auth: bool = Depends(verify_service_secret),
+    _auth: ServiceContext = Depends(get_medical_context),
     session: AsyncSession = Depends(get_db),
 ) -> MedicalDocumentIngestResponse:
     clean_document_id = sanitize_identifier(document_id, "document_id")
     clean_patient_id = sanitize_identifier(body.patient_id, "patient_id")
+    _auth = bind_patient(_auth, clean_patient_id)
 
     storage_path = body.storage_path.strip()
+    validate_storage_scope(_auth, storage_path)
+    if storage_path.split("/")[2] != clean_document_id:
+        raise HTTPException(status_code=403, detail="Storage document identity mismatch.")
     if not storage_path.startswith("medical-documents/"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -163,12 +170,18 @@ async def ingest_medical_document(
     result = await session.execute(
         select(ExternalDocument).where(
             ExternalDocument.source_system == "quick_clinic",
+            ExternalDocument.tenant_id == _auth.tenant_id,
             ExternalDocument.external_document_id == clean_document_id,
         )
     )
     existing_record = result.scalar_one_or_none()
 
     if existing_record:
+        if existing_record.external_patient_id != clean_patient_id:
+            raise HTTPException(status_code=409, detail="Document identity is already assigned to another subject.")
+        existing_record.tenant_id = _auth.tenant_id
+        existing_record.collection_id = _auth.collection_id
+        existing_record.owner_subject_id = clean_patient_id
         existing_record.external_patient_id = clean_patient_id
         existing_record.storage_path = storage_path
         existing_record.file_name = clean_file_name
@@ -186,6 +199,9 @@ async def ingest_medical_document(
     else:
         new_record = ExternalDocument(
             source_system="quick_clinic",
+            tenant_id=_auth.tenant_id,
+            collection_id=_auth.collection_id,
+            owner_subject_id=clean_patient_id,
             external_document_id=clean_document_id,
             external_patient_id=clean_patient_id,
             storage_path=storage_path,
@@ -203,12 +219,17 @@ async def ingest_medical_document(
             patient_id=clean_patient_id,
         )
 
+    record = existing_record or new_record
     await session.commit()
+    await session.refresh(record)
 
     # Enqueue background processing task via RabbitMQ/Dramatiq
-    request_id = request.headers.get("X-Request-ID")
-    enqueued = enqueue_medical_document(clean_document_id, request_id=request_id)
+    request_id = getattr(request.state, "request_id", None)
+    enqueued = enqueue_medical_document(record.id, request_id=request_id)
     if not enqueued:
+        record.status = "FAILED"
+        record.processing_error = "Processing queue is unavailable; retry ingestion."
+        await session.commit()
         logger.warning(
             "Medical document queued in database but worker queue unavailable",
             document_id=clean_document_id,
@@ -217,7 +238,7 @@ async def ingest_medical_document(
     response.status_code = status.HTTP_202_ACCEPTED
     return MedicalDocumentIngestResponse(
         documentId=clean_document_id,
-        status="QUEUED",
+        status=record.status,
     )
 
 
@@ -230,7 +251,7 @@ async def ingest_medical_document(
 )
 async def get_medical_document_status(
     document_id: str,
-    _auth: bool = Depends(verify_service_secret),
+    _auth: ServiceContext = Depends(get_medical_context),
     session: AsyncSession = Depends(get_db),
 ) -> MedicalDocumentStatusResponse:
     clean_document_id = sanitize_identifier(document_id, "document_id")
@@ -238,6 +259,7 @@ async def get_medical_document_status(
     result = await session.execute(
         select(ExternalDocument).where(
             ExternalDocument.source_system == "quick_clinic",
+            ExternalDocument.tenant_id == _auth.tenant_id,
             ExternalDocument.external_document_id == clean_document_id,
         )
     )
@@ -249,6 +271,7 @@ async def get_medical_document_status(
             detail=f"Medical document '{clean_document_id}' not found.",
         )
 
+    bind_patient(_auth, record.external_patient_id)
     return MedicalDocumentStatusResponse(
         documentId=record.external_document_id,
         status=record.status,
@@ -265,48 +288,35 @@ async def get_medical_document_status(
 )
 async def delete_medical_document_index(
     document_id: str,
-    _auth: bool = Depends(verify_service_secret),
+    _auth: ServiceContext = Depends(get_medical_context),
     session: AsyncSession = Depends(get_db),
 ) -> MedicalDocumentDeleteIndexResponse:
     clean_document_id = sanitize_identifier(document_id, "document_id")
 
-    # 1. Clean vector store points from Qdrant
+    result = await session.execute(select(ExternalDocument).where(
+        ExternalDocument.source_system == _auth.client_id,
+        ExternalDocument.tenant_id == _auth.tenant_id,
+        ExternalDocument.external_document_id == clean_document_id,
+    ))
+    record = result.scalar_one_or_none()
+    if not record:
+        raise HTTPException(status_code=404, detail="Medical document not found.")
+    scope = bind_patient(_auth, record.external_patient_id)
     vector_store = QdrantVectorStore()
     try:
-        await vector_store.delete_document_points(clean_document_id)
+        await vector_store.delete_document_points(clean_document_id, filters=scope.to_qdrant_filter())
     except Exception as exc:
-        logger.warning(
-            "Vector points deletion encountered an error (or points do not exist)",
-            document_id=clean_document_id,
-            error=str(exc),
-        )
+        raise HTTPException(status_code=503, detail="Document deletion is temporarily unavailable.") from exc
     finally:
         await vector_store.close()
-
-    # 2. Delete database ingestion metadata, observations, and cascaded content
-    await session.execute(
-        delete(MedicalObservation).where(
-            MedicalObservation.source_system == "quick_clinic",
-            MedicalObservation.external_document_id == clean_document_id,
-        )
-    )
-
-    result = await session.execute(
-        select(ExternalDocument).where(
-            ExternalDocument.source_system == "quick_clinic",
-            ExternalDocument.external_document_id == clean_document_id,
-        )
-    )
-    record = result.scalar_one_or_none()
-    if record:
-        await session.delete(record)
-        await session.commit()
-        logger.info(
-            "External document record, observations, and extracted text deleted",
-            document_id=clean_document_id,
-        )
-    else:
-        await session.commit()
+    await session.execute(delete(MedicalObservation).where(
+        MedicalObservation.source_system == scope.client_id,
+        MedicalObservation.tenant_id == scope.tenant_id,
+        MedicalObservation.external_patient_id == scope.subject_id,
+        MedicalObservation.external_document_id == clean_document_id,
+    ))
+    await session.delete(record)
+    await session.commit()
 
     return MedicalDocumentDeleteIndexResponse(
         success=True,

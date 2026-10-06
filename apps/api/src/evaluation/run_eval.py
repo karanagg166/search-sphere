@@ -8,8 +8,8 @@ from src.evaluation.evaluator import RAGEvaluator
 
 async def evaluate_representative_benchmark(dataset_path: Path, output_report_path: Path):
     """
-    Executes the standard Search Sphere RAG evaluation benchmark across the
-    30 representative document-QA cases and saves a detailed Markdown report.
+    Exercises evaluation metrics against preset outputs for 30 synthetic cases.
+    This is a deterministic evaluator check, not a live retrieval/provider benchmark.
     """
     if not dataset_path.exists():
         raise FileNotFoundError(f"Evaluation dataset not found at {dataset_path}")

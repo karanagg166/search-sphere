@@ -146,7 +146,7 @@ async def test_ensure_collection_creates_when_missing() -> None:
     assert sparse_config["bm25"].modifier == models.Modifier.IDF
 
     # Payload index must be created
-    mock_client.create_payload_index.assert_awaited_once_with(
+    mock_client.create_payload_index.assert_any_await(
         collection_name="test_col",
         field_name="document_id",
         field_schema=models.PayloadSchemaType.KEYWORD,
@@ -167,7 +167,7 @@ async def test_ensure_collection_skips_creation_when_valid() -> None:
     mock_info.config.params.sparse_vectors = {
         "bm25": models.SparseVectorParams(modifier=models.Modifier.IDF)
     }
-    mock_info.payload_schema = {"document_id": MagicMock()}
+    mock_info.payload_schema = {field: MagicMock() for field in ("document_id", "client_id", "tenant_id", "collection_id", "owner_subject_id", "source_system", "patient_id", "document_type")}
     mock_client.get_collection.return_value = mock_info
 
     store = QdrantVectorStore(
@@ -326,7 +326,7 @@ async def test_payload_index_created_if_not_present_in_existing_collection() -> 
 
     await store.ensure_collection()
 
-    mock_client.create_payload_index.assert_awaited_once_with(
+    mock_client.create_payload_index.assert_any_await(
         collection_name="no_index_col",
         field_name="document_id",
         field_schema=models.PayloadSchemaType.KEYWORD,
@@ -351,7 +351,7 @@ async def test_delete_document_points_uses_filtered_selector() -> None:
     assert kwargs["collection_name"] == "del_col"
     selector = kwargs["points_selector"]
     assert isinstance(selector, models.Filter)
-    assert len(selector.must) == 1
+    assert len(selector.must) == 3
     condition = selector.must[0]
     assert condition.key == "document_id"
     assert condition.match.value == "doc-xyz"

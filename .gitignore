@@ -63,3 +63,8 @@ Thumbs.db
 data/
 *.log
 .fastembed_cache/
+
+# Synthetic evaluation fixture required by make eval
+!apps/api/src/evaluation/data/
+apps/api/src/evaluation/data/*
+!apps/api/src/evaluation/data/evaluation_dataset.json

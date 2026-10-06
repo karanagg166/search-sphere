@@ -1,3 +1,5 @@
+from src.security.medical_context import get_medical_context, bind_patient, validate_storage_scope, patient_collection_id
+from src.security.service_context import ServiceContext
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,11 +33,12 @@ router = APIRouter(
 )
 async def query_patient_observations(
     body: MedicalObservationQueryRequest,
-    _auth: bool = Depends(verify_service_secret),
+    _auth: ServiceContext = Depends(get_medical_context),
     session: AsyncSession = Depends(get_db),
     obs_service: MedicalObservationService = Depends(get_medical_observation_service),
 ) -> MedicalObservationQueryResponse:
     clean_patient_id = sanitize_identifier(body.patient_id, "patient_id")
+    _auth = bind_patient(_auth, clean_patient_id)
 
     total_count = await obs_service.count_observations(
         session=session,
@@ -92,11 +95,12 @@ async def get_patient_observations(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     sort: str = Query("desc", pattern="^(asc|desc)$"),
-    _auth: bool = Depends(verify_service_secret),
+    _auth: ServiceContext = Depends(get_medical_context),
     session: AsyncSession = Depends(get_db),
     obs_service: MedicalObservationService = Depends(get_medical_observation_service),
 ) -> MedicalObservationQueryResponse:
     clean_patient_id = sanitize_identifier(patient_id, "patient_id")
+    _auth = bind_patient(_auth, clean_patient_id)
     types = [observation_type] if observation_type else None
 
     total_count = await obs_service.count_observations(

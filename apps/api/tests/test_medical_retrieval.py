@@ -1,3 +1,4 @@
+from src.security.medical_context import patient_collection_id
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 import uuid
@@ -103,6 +104,9 @@ async def test_medical_retrieval_patient_isolation_pat_a_and_pat_b():
         doc_a = ExternalDocument(
             source_system="quick_clinic",
             external_document_id=doc_a_id,
+            tenant_id="quick_clinic_default",
+            owner_subject_id=pat_a_id,
+            collection_id=patient_collection_id(pat_a_id),
             external_patient_id=pat_a_id,
             storage_path=f"medical-documents/{pat_a_id}/{doc_a_id}/bp_normal.pdf",
             file_name="bp_normal.pdf",
@@ -115,6 +119,9 @@ async def test_medical_retrieval_patient_isolation_pat_a_and_pat_b():
         doc_b = ExternalDocument(
             source_system="quick_clinic",
             external_document_id=doc_b_id,
+            tenant_id="quick_clinic_default",
+            owner_subject_id=pat_b_id,
+            collection_id=patient_collection_id(pat_b_id),
             external_patient_id=pat_b_id,
             storage_path=f"medical-documents/{pat_b_id}/{doc_b_id}/bp_high.pdf",
             file_name="bp_high.pdf",
@@ -142,6 +149,10 @@ async def test_medical_retrieval_patient_isolation_pat_a_and_pat_b():
         rrf_score=0.033,
         score=0.95,
         rank=1,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=pat_a_id,
+        collection_id=patient_collection_id(pat_a_id),
         patient_id=pat_a_id,
         source_system="quick_clinic",
         document_type="LAB_REPORT",
@@ -163,6 +174,10 @@ async def test_medical_retrieval_patient_isolation_pat_a_and_pat_b():
         rrf_score=0.031,
         score=0.93,
         rank=1,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=pat_b_id,
+        collection_id=patient_collection_id(pat_b_id),
         patient_id=pat_b_id,
         source_system="quick_clinic",
         document_type="LAB_REPORT",
@@ -242,6 +257,9 @@ async def test_medical_retrieval_only_ready_documents_and_deleted_safety():
             ExternalDocument(
                 source_system="quick_clinic",
                 external_document_id=ready_doc_id,
+                tenant_id="quick_clinic_default",
+                owner_subject_id=pat_id,
+                collection_id=patient_collection_id(pat_id),
                 external_patient_id=pat_id,
                 storage_path="path/1.pdf",
                 file_name="ready.pdf",
@@ -255,6 +273,9 @@ async def test_medical_retrieval_only_ready_documents_and_deleted_safety():
             ExternalDocument(
                 source_system="quick_clinic",
                 external_document_id=failed_doc_id,
+                tenant_id="quick_clinic_default",
+                owner_subject_id=pat_id,
+                collection_id=patient_collection_id(pat_id),
                 external_patient_id=pat_id,
                 storage_path="path/2.pdf",
                 file_name="failed.pdf",
@@ -280,6 +301,10 @@ async def test_medical_retrieval_only_ready_documents_and_deleted_safety():
         rerank_score=0.9,
         score=0.9,
         rank=1,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=pat_id,
+        collection_id=patient_collection_id(pat_id),
         patient_id=pat_id,
     )
     chunk_failed = RerankedSearchResult(
@@ -295,6 +320,10 @@ async def test_medical_retrieval_only_ready_documents_and_deleted_safety():
         rerank_score=0.85,
         score=0.85,
         rank=2,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=pat_id,
+        collection_id=patient_collection_id(pat_id),
         patient_id=pat_id,
     )
     chunk_deleted = RerankedSearchResult(
@@ -310,6 +339,10 @@ async def test_medical_retrieval_only_ready_documents_and_deleted_safety():
         rerank_score=0.80,
         score=0.80,
         rank=3,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=pat_id,
+        collection_id=patient_collection_id(pat_id),
         patient_id=pat_id,
     )
 

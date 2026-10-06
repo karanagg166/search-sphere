@@ -1,5 +1,6 @@
+from tests.binary_fixtures import pdf_bytes, image_bytes
 import uuid
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -7,7 +8,7 @@ from src.main import app
 from src.storage.object_storage import LocalStorage, get_object_storage
 from tests.conftest import VALID_AUTH_HEADER
 
-SAMPLE_PDF_BYTES = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<<>>\n%%EOF"
+SAMPLE_PDF_BYTES = pdf_bytes()
 
 
 @pytest.fixture
@@ -17,7 +18,9 @@ def mock_storage(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_v1_document_lifecycle(mock_storage):
+async def test_v1_document_lifecycle(mock_storage, monkeypatch):
+    monkeypatch.setattr("src.services.generic_document_service.enqueue_generic_document", lambda *args, **kwargs: True)
+    monkeypatch.setattr("src.routers.v1.documents.QdrantVectorStore", lambda: AsyncMock())
     """Test full document workflow: upload, registration, status check, signed-url, and deletion."""
     app.dependency_overrides[get_object_storage] = lambda: mock_storage
 

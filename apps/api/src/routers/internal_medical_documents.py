@@ -1,3 +1,5 @@
+from src.security.medical_context import get_medical_context, bind_patient, validate_storage_scope, patient_collection_id
+from src.security.service_context import ServiceContext
 import hmac
 import os
 import re
@@ -62,6 +64,8 @@ def detect_and_validate_file_type(data: bytes, reported_content_type: str | None
             detail=f"Unsupported reported content type '{reported_content_type}'.",
         )
 
+    from src.processing.file_validation import validate_binary_document
+    validate_binary_document(data, detected, reported_content_type)
     return detected
 
 
@@ -140,10 +144,11 @@ async def upload_medical_document(
     file: UploadFile = File(..., description="The medical document file"),
     patient_id: str = Form(..., description="Unique patient identifier"),
     document_id: str = Form(..., description="Unique medical document identifier"),
-    _auth: bool = Depends(verify_service_secret),
+    _auth: ServiceContext = Depends(get_medical_context),
     storage: ObjectStorage = Depends(get_object_storage),
 ) -> MedicalDocumentUploadResponse:
     clean_patient_id = sanitize_identifier(patient_id, "patient_id")
+    _auth = bind_patient(_auth, clean_patient_id)
     clean_document_id = sanitize_identifier(document_id, "document_id")
 
     data = await file.read()
@@ -163,10 +168,10 @@ async def upload_medical_document(
     clean_filename = sanitize_filename(file.filename or "document")
 
     storage_path = f"medical-documents/{clean_patient_id}/{clean_document_id}/{clean_filename}"
+    validate_storage_scope(_auth, storage_path)
 
     logger.info(
         "Persisting medical document to storage",
-        patient_id=clean_patient_id,
         document_id=clean_document_id,
         path=storage_path,
         size=len(data),
@@ -204,10 +209,11 @@ async def upload_medical_document(
 async def get_medical_document_signed_url(
     storage_path: str = Query(..., alias="storagePath", description="The private storage path of the document"),
     expires_in: int = Query(600, alias="expiresIn", ge=300, le=900, description="Expiration time in seconds (300 to 900)"),
-    _auth: bool = Depends(verify_service_secret),
+    _auth: ServiceContext = Depends(get_medical_context),
     storage: ObjectStorage = Depends(get_object_storage),
 ) -> SignedUrlResponse:
     cleaned_path = storage_path.strip()
+    validate_storage_scope(_auth, cleaned_path)
     if not cleaned_path.startswith("medical-documents/"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -248,10 +254,12 @@ async def get_medical_document_signed_url(
 async def delete_medical_document(
     storage_path: str | None = Query(None, alias="storagePath", description="Storage path as query param"),
     body: DeleteRequestBody | None = Body(None),
-    _auth: bool = Depends(verify_service_secret),
+    _auth: ServiceContext = Depends(get_medical_context),
     storage: ObjectStorage = Depends(get_object_storage),
 ) -> DeleteResponse:
     target_path = (storage_path or (body.storage_path if body else None) or "").strip()
+
+    validate_storage_scope(_auth, target_path)
 
     if not target_path:
         raise HTTPException(

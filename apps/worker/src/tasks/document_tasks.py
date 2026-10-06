@@ -56,9 +56,13 @@ def process_document_task(document_id: str) -> None:
 )
 def process_medical_document_task(document_id: str, request_id: str | None = None) -> None:
     """Background job responsible for processing a Quick Clinic medical document."""
+    structlog.contextvars.clear_contextvars()
     if request_id:
         structlog.contextvars.bind_contextvars(request_id=request_id)
-    asyncio.run(_process_medical_document(document_id, request_id=request_id))
+    try:
+        asyncio.run(_process_medical_document(document_id, request_id=request_id))
+    finally:
+        structlog.contextvars.clear_contextvars()
 
 
 @dramatiq.actor(
@@ -68,9 +72,13 @@ def process_medical_document_task(document_id: str, request_id: str | None = Non
 )
 def process_generic_document_task(document_id: str, request_id: str | None = None) -> None:
     """Background job responsible for processing a generic multi-tenant external document."""
+    structlog.contextvars.clear_contextvars()
     if request_id:
         structlog.contextvars.bind_contextvars(request_id=request_id)
-    asyncio.run(_process_generic_document(document_id, request_id=request_id))
+    try:
+        asyncio.run(_process_generic_document(document_id, request_id=request_id))
+    finally:
+        structlog.contextvars.clear_contextvars()
 
 
 async def _process_pipeline(
@@ -292,10 +300,18 @@ async def _process_generic_document(
     async with get_session() as session:
         result = await session.execute(
             select(ExternalDocument).where(
-                (ExternalDocument.id == document_id) | (ExternalDocument.external_document_id == document_id)
+                ExternalDocument.id == document_id
             )
         )
         external_doc = result.scalar_one_or_none()
+        # Drain pre-migration medical jobs only within their historical scope.
+        if not external_doc and force_medical:
+            result = await session.execute(select(ExternalDocument).where(
+                ExternalDocument.source_system == "quick_clinic",
+                ExternalDocument.tenant_id == "quick_clinic_default",
+                ExternalDocument.external_document_id == document_id,
+            ))
+            external_doc = result.scalar_one_or_none()
         if not external_doc:
             raise ValueError(f"External document not found: {document_id}")
 
@@ -357,7 +373,7 @@ async def _process_generic_document(
             "file_name": file_name,
             # Backward-compatibility payload fields
             "source_system": external_doc.source_system,
-            "patient_id": external_doc.external_patient_id,
+            "patient_id": owner_subject_id,
         }
 
         extracted_doc, _, chunked_doc, embedded_doc, points_written = await _process_pipeline(
@@ -411,13 +427,16 @@ async def _process_generic_document(
                 await session.execute(
                     delete(MedicalObservation).where(
                         MedicalObservation.source_system == external_doc.source_system,
+                        MedicalObservation.tenant_id == tenant_id,
                         MedicalObservation.external_document_id == source_doc_id,
+                        MedicalObservation.external_patient_id == owner_subject_id,
                     )
                 )
 
                 for obs in extracted_observations:
                     obs_row = MedicalObservation(
                         source_system=external_doc.source_system,
+                        tenant_id=tenant_id,
                         external_patient_id=owner_subject_id,
                         external_document_id=source_doc_id,
                         observation_type=obs.observation_type,

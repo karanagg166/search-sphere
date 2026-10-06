@@ -49,7 +49,7 @@ async def test_v1_search_and_grounded_answers():
     mock_retriever.search.return_value = [chunk_1]
 
     mock_generator.generate_answer.return_value = (
-        "According to Newton's Universal Gravitation Law, the gravitational force between two objects is given by F = G * (m1 * m2) / r^2 [1]."
+        "According to Newton's Universal Gravitation Law, the gravitational force between two objects is given by F = G * (m1 * m2) / r^2 [1].", [chunk_1]
     )
 
     async def mock_stream(*args, **kwargs):

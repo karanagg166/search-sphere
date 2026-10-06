@@ -1,3 +1,4 @@
+from src.security.medical_context import patient_collection_id
 from datetime import datetime, timezone
 import json
 import uuid
@@ -43,6 +44,9 @@ async def sample_patient_documents():
     async with AsyncSessionLocal() as session:
         doc_a1 = ExternalDocument(
             source_system="quick_clinic",
+            tenant_id="quick_clinic_default",
+            owner_subject_id=patient_a_id,
+            collection_id=patient_collection_id(patient_a_id),
             external_patient_id=patient_a_id,
             external_document_id=doc_a1_id,
             file_name="bp_report_a.pdf",
@@ -55,6 +59,9 @@ async def sample_patient_documents():
         )
         doc_b1 = ExternalDocument(
             source_system="quick_clinic",
+            tenant_id="quick_clinic_default",
+            owner_subject_id=patient_b_id,
+            collection_id=patient_collection_id(patient_b_id),
             external_patient_id=patient_b_id,
             external_document_id=doc_b1_id,
             file_name="cardiac_panel_b.pdf",
@@ -137,6 +144,10 @@ async def test_medical_chat_multi_turn_query_rewriting(sample_patient_documents)
         RerankedSearchResult(
             point_id="pt-1",
             document_id=doc_a1,
+            client_id="quick_clinic",
+            tenant_id="quick_clinic_default",
+            owner_subject_id=patient_a,
+            collection_id=patient_collection_id(patient_a),
             patient_id=patient_a,
             content="Oct 3 follow-up: Blood pressure 125/82 mmHg.",
             score=0.95,
@@ -237,6 +248,10 @@ async def test_medical_chat_patient_filter_and_contamination_defense(sample_pati
         RerankedSearchResult(
             point_id="pt-a",
             document_id=doc_a1,
+            client_id="quick_clinic",
+            tenant_id="quick_clinic_default",
+            owner_subject_id=patient_a,
+            collection_id=patient_collection_id(patient_a),
             patient_id=patient_a,
             content="Patient A BP: 120/80 mmHg.",
             score=0.90,
@@ -251,6 +266,10 @@ async def test_medical_chat_patient_filter_and_contamination_defense(sample_pati
         RerankedSearchResult(
             point_id="pt-b",
             document_id=doc_b1,
+            client_id="quick_clinic",
+            tenant_id="quick_clinic_default",
+            owner_subject_id=patient_b,
+            collection_id=patient_collection_id(patient_b),
             patient_id=patient_b,
             content="Patient B BP: 180/110 mmHg.",
             score=0.95,
@@ -322,6 +341,10 @@ async def test_medical_chat_fresh_grounding(sample_patient_documents):
         RerankedSearchResult(
             point_id="pt-a",
             document_id=doc_a1,
+            client_id="quick_clinic",
+            tenant_id="quick_clinic_default",
+            owner_subject_id=patient_a,
+            collection_id=patient_collection_id(patient_a),
             patient_id=patient_a,
             content="Freshly retrieved report: Blood pressure is 120/80.",
             score=0.91,
@@ -384,6 +407,10 @@ async def test_medical_chat_streaming_sse_flow(sample_patient_documents):
     chunk = RerankedSearchResult(
         point_id="pt-a",
         document_id=doc_a1,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=patient_a,
+        collection_id=patient_collection_id(patient_a),
         patient_id=patient_a,
         content="Lab report shows glucose 95 mg/dL.",
         score=0.92,
@@ -456,6 +483,10 @@ async def test_medical_chat_streaming_error_handling(sample_patient_documents):
     chunk = RerankedSearchResult(
         point_id="pt-a",
         document_id=doc_a1,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=patient_a,
+        collection_id=patient_collection_id(patient_a),
         patient_id=patient_a,
         content="Lab report.",
         score=0.92,

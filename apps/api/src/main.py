@@ -62,7 +62,7 @@ async def lifespan(app: FastAPI):
 
 import re
 
-SAFE_REQUEST_ID_REGEX = re.compile(r"^[a-zA-Z0-9_\-\.:]{8,128}$")
+SAFE_REQUEST_ID_REGEX = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.I)
 
 
 class RequestCorrelationMiddleware(BaseHTTPMiddleware):
@@ -80,6 +80,7 @@ class RequestCorrelationMiddleware(BaseHTTPMiddleware):
         else:
             request_id = str(uuid.uuid4())
 
+        request.state.request_id = request_id
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(request_id=request_id)
         try:

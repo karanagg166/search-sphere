@@ -58,6 +58,7 @@ class MedicalObservationService:
     ) -> Select:
         stmt: Select = select(MedicalObservation).where(
             MedicalObservation.source_system == "quick_clinic",
+            MedicalObservation.tenant_id == "quick_clinic_default",
             MedicalObservation.external_patient_id == patient_id,
         )
 

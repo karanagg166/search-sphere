@@ -1,3 +1,4 @@
+from src.security.medical_context import patient_collection_id
 from datetime import datetime, timezone
 import uuid
 from unittest.mock import AsyncMock, patch
@@ -66,7 +67,7 @@ async def test_medical_rag_auth_invalid():
 
 @pytest.mark.asyncio
 async def test_medical_rag_auth_server_secret_not_configured():
-    """PART 30: Fails closed with 500 when server secret is not configured."""
+    """PART 30: Invalid credentials return 401 when legacy auth is disabled."""
     with patch.object(settings, "QUICK_CLINIC_SERVICE_SECRET", None):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -78,8 +79,8 @@ async def test_medical_rag_auth_server_secret_not_configured():
                     "query": "What blood pressure readings are available?",
                 },
             )
-            assert resp.status_code == 500
-            assert "service secret is not configured" in resp.json()["detail"]
+            assert resp.status_code == 401
+            assert "Invalid service secret" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -143,6 +144,9 @@ async def test_medical_rag_grounding_exact_extraction():
         doc = ExternalDocument(
             source_system="quick_clinic",
             external_document_id=doc_id,
+            tenant_id="quick_clinic_default",
+            owner_subject_id=pat_id,
+            collection_id=patient_collection_id(pat_id),
             external_patient_id=pat_id,
             storage_path=f"medical-documents/{pat_id}/{doc_id}/vitals.pdf",
             file_name="vitals_report.pdf",
@@ -169,6 +173,10 @@ async def test_medical_rag_grounding_exact_extraction():
         rrf_score=0.035,
         score=0.96,
         rank=1,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=pat_id,
+        collection_id=patient_collection_id(pat_id),
         patient_id=pat_id,
         source_system="quick_clinic",
         document_type="LAB_REPORT",
@@ -225,6 +233,9 @@ async def test_medical_rag_hallucination_prevention():
         doc = ExternalDocument(
             source_system="quick_clinic",
             external_document_id=doc_id,
+            tenant_id="quick_clinic_default",
+            owner_subject_id=pat_id,
+            collection_id=patient_collection_id(pat_id),
             external_patient_id=pat_id,
             storage_path=f"medical-documents/{pat_id}/{doc_id}/xray.pdf",
             file_name="knee_xray.pdf",
@@ -251,6 +262,10 @@ async def test_medical_rag_hallucination_prevention():
         rrf_score=0.02,
         score=0.72,
         rank=1,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=pat_id,
+        collection_id=patient_collection_id(pat_id),
         patient_id=pat_id,
         source_system="quick_clinic",
         document_type="RADIOLOGY_SCAN",
@@ -304,6 +319,9 @@ async def test_medical_rag_cross_patient_isolation():
             ExternalDocument(
                 source_system="quick_clinic",
                 external_document_id=doc_a,
+                tenant_id="quick_clinic_default",
+                owner_subject_id=pat_a,
+                collection_id=patient_collection_id(pat_a),
                 external_patient_id=pat_a,
                 storage_path=f"medical-documents/{pat_a}/{doc_a}/a.pdf",
                 file_name="doc_a.pdf",
@@ -317,6 +335,9 @@ async def test_medical_rag_cross_patient_isolation():
             ExternalDocument(
                 source_system="quick_clinic",
                 external_document_id=doc_b,
+                tenant_id="quick_clinic_default",
+                owner_subject_id=pat_b,
+                collection_id=patient_collection_id(pat_b),
                 external_patient_id=pat_b,
                 storage_path=f"medical-documents/{pat_b}/{doc_b}/b.pdf",
                 file_name="doc_b.pdf",
@@ -342,6 +363,10 @@ async def test_medical_rag_cross_patient_isolation():
         rrf_score=0.035,
         score=0.95,
         rank=1,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=pat_a,
+        collection_id=patient_collection_id(pat_a),
         patient_id=pat_a,
         source_system="quick_clinic",
         document_type="LAB_REPORT",
@@ -361,6 +386,10 @@ async def test_medical_rag_cross_patient_isolation():
         rrf_score=0.034,
         score=0.94,
         rank=1,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=pat_b,
+        collection_id=patient_collection_id(pat_b),
         patient_id=pat_b,
         source_system="quick_clinic",
         document_type="LAB_REPORT",
@@ -428,6 +457,9 @@ async def test_medical_rag_malicious_cross_patient_chunk_filtered():
             ExternalDocument(
                 source_system="quick_clinic",
                 external_document_id=doc_a,
+                tenant_id="quick_clinic_default",
+                owner_subject_id=pat_a,
+                collection_id=patient_collection_id(pat_a),
                 external_patient_id=pat_a,
                 storage_path=f"medical-documents/{pat_a}/{doc_a}/a.pdf",
                 file_name="doc_a.pdf",
@@ -441,6 +473,9 @@ async def test_medical_rag_malicious_cross_patient_chunk_filtered():
             ExternalDocument(
                 source_system="quick_clinic",
                 external_document_id=doc_b,
+                tenant_id="quick_clinic_default",
+                owner_subject_id=pat_b,
+                collection_id=patient_collection_id(pat_b),
                 external_patient_id=pat_b,
                 storage_path=f"medical-documents/{pat_b}/{doc_b}/b.pdf",
                 file_name="doc_b.pdf",
@@ -466,6 +501,10 @@ async def test_medical_rag_malicious_cross_patient_chunk_filtered():
         rrf_score=0.035,
         score=0.95,
         rank=1,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=pat_a,
+        collection_id=patient_collection_id(pat_a),
         patient_id=pat_a,
         source_system="quick_clinic",
         document_type="LAB_REPORT",
@@ -486,6 +525,10 @@ async def test_medical_rag_malicious_cross_patient_chunk_filtered():
         rrf_score=0.039,
         score=0.99,
         rank=1,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=pat_b,
+        collection_id=patient_collection_id(pat_b),
         patient_id=pat_b,
         source_system="quick_clinic",
         document_type="LAB_REPORT",
@@ -540,6 +583,9 @@ async def test_medical_rag_citation_integrity_and_sanitization():
         doc = ExternalDocument(
             source_system="quick_clinic",
             external_document_id=doc_id,
+            tenant_id="quick_clinic_default",
+            owner_subject_id=pat_id,
+            collection_id=patient_collection_id(pat_id),
             external_patient_id=pat_id,
             storage_path=f"medical-documents/{pat_id}/{doc_id}/report.pdf",
             file_name="lab_report.pdf",
@@ -566,6 +612,10 @@ async def test_medical_rag_citation_integrity_and_sanitization():
         rrf_score=0.03,
         score=0.92,
         rank=1,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=pat_id,
+        collection_id=patient_collection_id(pat_id),
         patient_id=pat_id,
         source_system="quick_clinic",
         document_type="LAB_REPORT",
@@ -627,6 +677,9 @@ async def test_medical_rag_multiple_source_answer():
             ExternalDocument(
                 source_system="quick_clinic",
                 external_document_id=doc_1,
+                tenant_id="quick_clinic_default",
+                owner_subject_id=pat_id,
+                collection_id=patient_collection_id(pat_id),
                 external_patient_id=pat_id,
                 storage_path=f"medical-documents/{pat_id}/{doc_1}/oct1.pdf",
                 file_name="oct1_report.pdf",
@@ -641,6 +694,9 @@ async def test_medical_rag_multiple_source_answer():
             ExternalDocument(
                 source_system="quick_clinic",
                 external_document_id=doc_2,
+                tenant_id="quick_clinic_default",
+                owner_subject_id=pat_id,
+                collection_id=patient_collection_id(pat_id),
                 external_patient_id=pat_id,
                 storage_path=f"medical-documents/{pat_id}/{doc_2}/oct3.pdf",
                 file_name="oct3_report.pdf",
@@ -667,6 +723,10 @@ async def test_medical_rag_multiple_source_answer():
         rrf_score=0.035,
         score=0.95,
         rank=1,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=pat_id,
+        collection_id=patient_collection_id(pat_id),
         patient_id=pat_id,
         source_system="quick_clinic",
         document_type="LAB_REPORT",
@@ -687,6 +747,10 @@ async def test_medical_rag_multiple_source_answer():
         rrf_score=0.032,
         score=0.93,
         rank=2,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=pat_id,
+        collection_id=patient_collection_id(pat_id),
         patient_id=pat_id,
         source_system="quick_clinic",
         document_type="LAB_REPORT",
@@ -742,6 +806,9 @@ async def test_medical_rag_contradictory_records():
             ExternalDocument(
                 source_system="quick_clinic",
                 external_document_id=doc_1,
+                tenant_id="quick_clinic_default",
+                owner_subject_id=pat_id,
+                collection_id=patient_collection_id(pat_id),
                 external_patient_id=pat_id,
                 storage_path=f"medical-documents/{pat_id}/{doc_1}/allergy1.pdf",
                 file_name="allergy_form.pdf",
@@ -755,6 +822,9 @@ async def test_medical_rag_contradictory_records():
             ExternalDocument(
                 source_system="quick_clinic",
                 external_document_id=doc_2,
+                tenant_id="quick_clinic_default",
+                owner_subject_id=pat_id,
+                collection_id=patient_collection_id(pat_id),
                 external_patient_id=pat_id,
                 storage_path=f"medical-documents/{pat_id}/{doc_2}/allergy2.pdf",
                 file_name="discharge_summary.pdf",
@@ -780,6 +850,10 @@ async def test_medical_rag_contradictory_records():
         rrf_score=0.03,
         score=0.91,
         rank=1,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=pat_id,
+        collection_id=patient_collection_id(pat_id),
         patient_id=pat_id,
         source_system="quick_clinic",
         document_type="OTHER",
@@ -799,6 +873,10 @@ async def test_medical_rag_contradictory_records():
         rrf_score=0.029,
         score=0.90,
         rank=2,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=pat_id,
+        collection_id=patient_collection_id(pat_id),
         patient_id=pat_id,
         source_system="quick_clinic",
         document_type="DISCHARGE_SUMMARY",
@@ -846,6 +924,9 @@ async def test_medical_rag_prompt_injection_in_document():
         doc = ExternalDocument(
             source_system="quick_clinic",
             external_document_id=doc_id,
+            tenant_id="quick_clinic_default",
+            owner_subject_id=pat_id,
+            collection_id=patient_collection_id(pat_id),
             external_patient_id=pat_id,
             storage_path=f"medical-documents/{pat_id}/{doc_id}/note.pdf",
             file_name="physician_note.pdf",
@@ -871,6 +952,10 @@ async def test_medical_rag_prompt_injection_in_document():
         rrf_score=0.025,
         score=0.85,
         rank=1,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=pat_id,
+        collection_id=patient_collection_id(pat_id),
         patient_id=pat_id,
         source_system="quick_clinic",
         document_type="OTHER",
@@ -922,6 +1007,9 @@ async def test_medical_rag_failed_or_processing_document_excluded():
             ExternalDocument(
                 source_system="quick_clinic",
                 external_document_id=doc_failed_id,
+                tenant_id="quick_clinic_default",
+                owner_subject_id=pat_id,
+                collection_id=patient_collection_id(pat_id),
                 external_patient_id=pat_id,
                 storage_path="path/1",
                 file_name="corrupt.pdf",
@@ -935,6 +1023,9 @@ async def test_medical_rag_failed_or_processing_document_excluded():
             ExternalDocument(
                 source_system="quick_clinic",
                 external_document_id=doc_processing_id,
+                tenant_id="quick_clinic_default",
+                owner_subject_id=pat_id,
+                collection_id=patient_collection_id(pat_id),
                 external_patient_id=pat_id,
                 storage_path="path/2",
                 file_name="pending.pdf",
@@ -960,6 +1051,10 @@ async def test_medical_rag_failed_or_processing_document_excluded():
         rrf_score=0.03,
         score=0.9,
         rank=1,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=pat_id,
+        collection_id=patient_collection_id(pat_id),
         patient_id=pat_id,
         source_system="quick_clinic",
         document_type="LAB_REPORT",
@@ -979,6 +1074,10 @@ async def test_medical_rag_failed_or_processing_document_excluded():
         rrf_score=0.028,
         score=0.88,
         rank=2,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=pat_id,
+        collection_id=patient_collection_id(pat_id),
         patient_id=pat_id,
         source_system="quick_clinic",
         document_type="LAB_REPORT",
@@ -1025,6 +1124,9 @@ async def test_medical_rag_evaluation_dataset():
             ExternalDocument(
                 source_system="quick_clinic",
                 external_document_id=eval_doc_id,
+                tenant_id="quick_clinic_default",
+                owner_subject_id=eval_patient,
+                collection_id=patient_collection_id(eval_patient),
                 external_patient_id=eval_patient,
                 storage_path=f"medical-documents/{eval_patient}/{eval_doc_id}/cbc.pdf",
                 file_name="cbc_report.pdf",
@@ -1051,6 +1153,10 @@ async def test_medical_rag_evaluation_dataset():
         rrf_score=0.038,
         score=0.98,
         rank=1,
+        client_id="quick_clinic",
+        tenant_id="quick_clinic_default",
+        owner_subject_id=eval_patient,
+        collection_id=patient_collection_id(eval_patient),
         patient_id=eval_patient,
         source_system="quick_clinic",
         document_type="LAB_REPORT",

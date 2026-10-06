@@ -1,0 +1,74 @@
+# Isolated synthetic integration stack. No production database/storage configuration.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: rag_test
+      POSTGRES_PASSWORD: synthetic_local_only
+      POSTGRES_DB: rag_test
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U rag_test -d rag_test]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes: [test_postgres:/var/lib/postgresql/data]
+    ports: ["127.0.0.1:15432:5432"]
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    user: rabbitmq
+    environment:
+      RABBITMQ_ERLANG_COOKIE: synthetic-integration-cookie
+    tmpfs: [/var/lib/rabbitmq]
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+  qdrant:
+    image: qdrant/qdrant:latest
+    volumes: [test_qdrant:/qdrant/storage]
+  api:
+    image: ${SEARCH_SPHERE_TEST_IMAGE:-search-sphere-compat-test:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile.integration
+    environment: &runtime
+      DATABASE_URL: postgresql+asyncpg://rag_test:synthetic_local_only@postgres:5432/rag_test
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION_NAME: synthetic_compatibility
+      STORAGE_BACKEND: local
+      LOCAL_STORAGE_DIR: /synthetic-storage
+      FASTEMBED_CACHE_PATH: /app/.fastembed_cache
+      REDIS_URL: redis://unconfigured-test-cache:6379/0
+      QUICK_CLINIC_SERVICE_SECRET: synthetic-local-bootstrap-only
+      JWT_SECRET_KEY: synthetic-test-jwt-key-not-for-deployment
+      COHERE_API_KEY: ${SEARCH_SPHERE_TEST_COHERE_API_KEY:-}
+      ENVIRONMENT: development
+      PYTHONPATH: /app
+      QDRANT_API_KEY: ""
+    command: sh -c "alembic upgrade head && uvicorn src.main:app --host 0.0.0.0 --port 8000"
+    ports: ["127.0.0.1:${SEARCH_SPHERE_TEST_PORT:-18000}:8000"]
+    volumes:
+      - ./apps/api/src:/app/src
+      - ./apps/api/tests:/app/tests
+      - ./apps/api/alembic:/app/alembic
+      - ./apps/api/alembic.ini:/app/alembic.ini:ro
+      - test_storage:/synthetic-storage
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+  worker:
+    image: ${SEARCH_SPHERE_TEST_IMAGE:-search-sphere-compat-test:latest}
+    environment: *runtime
+    command: dramatiq --processes 1 --threads 2 src.main
+    volumes:
+      - ./apps/worker/src:/app/src
+      - ./apps/worker/tests:/app/tests
+      - test_storage:/synthetic-storage
+    depends_on:
+      api: {condition: service_started}
+volumes:
+  test_postgres:
+  test_qdrant:
+  test_storage:

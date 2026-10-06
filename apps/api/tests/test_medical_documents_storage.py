@@ -1,3 +1,4 @@
+from tests.binary_fixtures import pdf_bytes, image_bytes
 from unittest.mock import patch
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -27,10 +28,10 @@ def mock_storage(tmp_path):
 
 
 # Valid sample file bytes
-SAMPLE_PDF_BYTES = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<<>>\n%%EOF"
-SAMPLE_JPEG_BYTES = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xdb"
-SAMPLE_PNG_BYTES = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-SAMPLE_WEBP_BYTES = b"RIFF\x1a\x00\x00\x00WEBPVP8 \x0e\x00\x00\x00"
+SAMPLE_PDF_BYTES = pdf_bytes()
+SAMPLE_JPEG_BYTES = image_bytes("JPEG")
+SAMPLE_PNG_BYTES = image_bytes("PNG")
+SAMPLE_WEBP_BYTES = image_bytes("WEBP")
 
 
 @pytest.mark.asyncio

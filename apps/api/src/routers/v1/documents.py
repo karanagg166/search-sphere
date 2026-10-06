@@ -13,6 +13,7 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import get_db
+from src.extensions.medical_cleanup import delete_observations
 from src.schemas.v1.documents import (
     DocumentDeleteResponse,
     DocumentListResponse,
@@ -77,7 +78,7 @@ async def register_document(
     storage: ObjectStorage = Depends(get_object_storage),
 ) -> DocumentResponse:
     service = GenericDocumentService(db, storage)
-    req_id = request.headers.get("X-Request-ID")
+    req_id = getattr(request.state, "request_id", None)
     doc = await service.register_document(context=context, request=body, request_id=req_id)
     return DocumentResponse.model_validate(doc)
 
@@ -160,7 +161,7 @@ async def delete_document(
     db: AsyncSession = Depends(get_db),
     storage: ObjectStorage = Depends(get_object_storage),
 ) -> DocumentDeleteResponse:
-    service = GenericDocumentService(db, storage)
+    service = GenericDocumentService(db, storage, delete_extension=delete_observations)
     vector_store = QdrantVectorStore()
     try:
         await service.delete_document(context, document_id, vector_store=vector_store)

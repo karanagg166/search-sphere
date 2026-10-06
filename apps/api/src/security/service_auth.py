@@ -79,7 +79,11 @@ async def _authenticate_service_context(
     legacy_secret = settings.QUICK_CLINIC_SERVICE_SECRET
     if legacy_secret and hmac.compare_digest(token.encode("utf-8"), legacy_secret.encode("utf-8")):
         tenant_id = (x_tenant_id or "quick_clinic_default").strip()
-        client_id = (x_client_id or "quick_clinic").strip()
+        client_id = "quick_clinic"
+        if x_client_id and x_client_id.strip() != client_id:
+            raise HTTPException(status_code=403, detail="Client identity does not match credential.")
+        if tenant_id != "quick_clinic_default":
+            raise HTTPException(status_code=403, detail="Legacy credential is not authorized for this tenant.")
         return ServiceContext(
             client_id=client_id,
             tenant_id=tenant_id,
@@ -104,7 +108,7 @@ async def _authenticate_service_context(
         logger.warning("Unrecognized, inactive, or revoked service credential attempt")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or revoked service credentials.",
+            detail="Invalid service secret or revoked service credentials.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -227,14 +231,6 @@ async def verify_service_secret(
     client = result.scalar_one_or_none()
     if client:
         return True
-
-    # If neither legacy secret nor database client matches
-    if not legacy_secret:
-        logger.error("Internal service secret is not configured on server (failing closed)")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Server configuration error: service secret is not configured.",
-        )
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

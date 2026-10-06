@@ -1,3 +1,5 @@
+from src.security.medical_context import get_medical_context, bind_patient, validate_storage_scope, patient_collection_id
+from src.security.service_context import ServiceContext
 import time
 from typing import Any
 
@@ -37,7 +39,7 @@ router = APIRouter(prefix="/internal/medical-retrieval", tags=["Internal Medical
 )
 async def search_medical_records(
     body: MedicalRetrievalSearchRequest,
-    _auth: bool = Depends(verify_service_secret),
+    _auth: ServiceContext = Depends(get_medical_context),
     session: AsyncSession = Depends(get_db),
     retriever: RerankedHybridRetriever = Depends(get_retriever),
 ) -> MedicalRetrievalSearchResponse:
@@ -45,6 +47,7 @@ async def search_medical_records(
 
     # 1. Input sanitization & validation
     clean_patient_id = sanitize_identifier(body.patient_id, "patient_id")
+    _auth = bind_patient(_auth, clean_patient_id)
     clean_query = body.query.strip()
     if not clean_query:
         raise HTTPException(
@@ -58,6 +61,7 @@ async def search_medical_records(
     # 2. Construct mandatory Qdrant server-side filter
     # Mandatory patient isolation: filtering MUST occur inside the Qdrant query itself
     qdrant_filters: dict[str, Any] = {
+        **_auth.to_qdrant_filter(),
         "source_system": "quick_clinic",
         "patient_id": clean_patient_id,
     }
@@ -82,7 +86,7 @@ async def search_medical_records(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Medical retrieval execution failed: {exc}",
+            detail="Medical retrieval is temporarily unavailable.",
         ) from exc
 
     if not reranked_chunks:
@@ -100,6 +104,9 @@ async def search_medical_records(
     db_result = await session.execute(
         select(ExternalDocument).where(
             ExternalDocument.source_system == "quick_clinic",
+            ExternalDocument.tenant_id == _auth.tenant_id,
+            ExternalDocument.owner_subject_id == _auth.subject_id,
+            ExternalDocument.collection_id == _auth.collection_id,
             ExternalDocument.external_patient_id == clean_patient_id,
             ExternalDocument.external_document_id.in_(chunk_doc_ids),
             ExternalDocument.status == "READY",
@@ -110,6 +117,8 @@ async def search_medical_records(
     # 5. Build output results with verified metadata
     results: list[MedicalRetrievalChunkResult] = []
     for chunk in reranked_chunks:
+        if any(getattr(chunk, key, None) != value for key, value in _auth.to_qdrant_filter().items()):
+            continue
         # Defense-in-depth: exclude chunks from documents that are not READY or deleted
         if chunk.document_id not in ready_docs:
             continue

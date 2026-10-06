@@ -1,3 +1,4 @@
+import os
 import math
 from typing import Any
 
@@ -282,7 +283,7 @@ class DenseEmbedder:
                 "Loading FastEmbed TextEmbedding model (ONNX Runtime)",
                 model_name=fastembed_model_name,
             )
-            loaded_model = TextEmbedding(model_name=fastembed_model_name)
+            loaded_model = TextEmbedding(model_name=fastembed_model_name, cache_dir=getattr(settings, "FASTEMBED_CACHE_PATH", None) or os.getenv("FASTEMBED_CACHE_PATH"))
             DenseEmbedder._cached_model = loaded_model
             DenseEmbedder._cached_model_name = self.model_name
             self._model = loaded_model

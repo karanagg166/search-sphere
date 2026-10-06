@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
     EMBEDDING_BATCH_SIZE: int = 32
     EMBEDDING_DEVICE: str = "cpu"
+    FASTEMBED_CACHE_PATH: str | None = None
 
     # ------------------------------------------------------------------
     # Qdrant Vector Database

@@ -1,3 +1,4 @@
+from src.security.medical_context import patient_collection_id
 from datetime import datetime, timedelta, timezone
 import json
 import uuid
@@ -227,6 +228,9 @@ async def seed_observations_data():
         # Documents
         doc_a1 = ExternalDocument(
             source_system="quick_clinic",
+            tenant_id="quick_clinic_default",
+            owner_subject_id=patient_a_id,
+            collection_id=patient_collection_id(patient_a_id),
             external_patient_id=patient_a_id,
             external_document_id=doc_a1_id,
             file_name="recent_vitals_a.pdf",
@@ -239,6 +243,9 @@ async def seed_observations_data():
         )
         doc_a2 = ExternalDocument(
             source_system="quick_clinic",
+            tenant_id="quick_clinic_default",
+            owner_subject_id=patient_a_id,
+            collection_id=patient_collection_id(patient_a_id),
             external_patient_id=patient_a_id,
             external_document_id=doc_a2_id,
             file_name="old_vitals_a.pdf",
@@ -251,6 +258,9 @@ async def seed_observations_data():
         )
         doc_b1 = ExternalDocument(
             source_system="quick_clinic",
+            tenant_id="quick_clinic_default",
+            owner_subject_id=patient_b_id,
+            collection_id=patient_collection_id(patient_b_id),
             external_patient_id=patient_b_id,
             external_document_id=doc_b1_id,
             file_name="patient_b_vitals.pdf",
@@ -521,7 +531,8 @@ async def test_observation_reprocessing_idempotency():
 
 
 @pytest.mark.asyncio
-async def test_document_deletion_cleanup():
+async def test_document_deletion_cleanup(monkeypatch):
+    monkeypatch.setattr("src.routers.internal_medical_ingestion.QdrantVectorStore", lambda: AsyncMock())
     """Deleting a document via internal API cleans up its MedicalObservation records."""
     patient_id = f"pat-del-{uuid.uuid4().hex[:8]}"
     doc_id = f"doc-del-{uuid.uuid4().hex[:8]}"
@@ -529,6 +540,9 @@ async def test_document_deletion_cleanup():
     async with AsyncSessionLocal() as session:
         doc = ExternalDocument(
             source_system="quick_clinic",
+            tenant_id="quick_clinic_default",
+            owner_subject_id=patient_id,
+            collection_id=patient_collection_id(patient_id),
             external_patient_id=patient_id,
             external_document_id=doc_id,
             file_name="to_delete.pdf",
@@ -702,6 +716,10 @@ async def test_chat_hybrid_query_response(seed_observations_data):
         RerankedSearchResult(
             point_id="pt-hyb-1",
             document_id=doc_a1,
+            client_id="quick_clinic",
+            tenant_id="quick_clinic_default",
+            owner_subject_id=patient_a,
+            collection_id=patient_collection_id(patient_a),
             patient_id=patient_a,
             content="Discharge summary: Doctor advised continuing ACE inhibitor therapy [2].",
             score=0.92,

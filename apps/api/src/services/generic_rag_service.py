@@ -27,6 +27,7 @@ from src.services.answer_generator import (
     NO_RESULTS_ANSWER,
     AnswerGenerator,
     extract_citation_numbers,
+    sanitize_citations,
     format_context_chunks,
 )
 
@@ -93,6 +94,10 @@ class GenericRagService:
             (ExternalDocument.id.in_(doc_ids) | ExternalDocument.external_document_id.in_(doc_ids)),
             ExternalDocument.status == "READY",
         )
+        if context.subject_id:
+            stmt = stmt.where(ExternalDocument.owner_subject_id == context.subject_id)
+        if context.collection_id:
+            stmt = stmt.where(ExternalDocument.collection_id == context.collection_id)
         res = await self.db.execute(stmt)
         docs = list(res.scalars().all())
 
@@ -106,6 +111,9 @@ class GenericRagService:
         for chunk in raw_chunks:
             doc = doc_map.get(chunk.document_id)
             if doc:
+                expected = context.to_qdrant_filter()
+                if any(getattr(chunk, key, None) != value for key, value in expected.items()):
+                    continue
                 verified.append((chunk, doc))
 
         return verified
@@ -116,6 +124,7 @@ class GenericRagService:
         request: SearchRequest,
     ) -> SearchResponse:
         """Executes two-stage reranked hybrid search scoped strictly to authenticated client & tenant."""
+        context = context.resolve_scope(request.collection_id, request.owner_subject_id)
         start_time = time.perf_counter()
         clean_query = request.query.strip()
         if not clean_query:
@@ -146,7 +155,7 @@ class GenericRagService:
             logger.exception("Generic retrieval failed", error=str(exc))
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Retrieval execution failed: {exc}",
+                detail="Retrieval is temporarily unavailable.",
             ) from exc
 
         verified_pairs = await self._verify_and_enrich_chunks(context, raw_chunks)
@@ -187,6 +196,7 @@ class GenericRagService:
         request: AnswerRequest,
     ) -> AnswerResponse:
         """Generates grounded answer with source citations based on retrieved documents."""
+        context = context.resolve_scope(request.collection_id, request.owner_subject_id)
         start_time = time.perf_counter()
         clean_query = request.query.strip()
         if not clean_query:
@@ -217,7 +227,7 @@ class GenericRagService:
             logger.exception("Retrieval failed during answer generation", error=str(exc))
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Retrieval execution failed: {exc}",
+                detail="Retrieval is temporarily unavailable.",
             ) from exc
 
         verified_pairs = await self._verify_and_enrich_chunks(context, raw_chunks)
@@ -243,9 +253,9 @@ class GenericRagService:
         preamble = request.system_prompt or ANSWER_SYSTEM_PREAMBLE
 
         try:
-            answer_text = await self.answer_generator.generate_answer(
+            answer_text, verified_chunks = await self.answer_generator.generate_answer(
                 query=clean_query,
-                context_chunks=verified_chunks,
+                chunks=verified_chunks,
                 conversation_context=conversation_context,
                 preamble=preamble,
                 no_results_answer=NO_RESULTS_ANSWER,
@@ -254,9 +264,10 @@ class GenericRagService:
             logger.error("Answer generation LLM failed", error=str(exc))
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"LLM answer generation failed: {exc}",
+                detail="Answer generation is temporarily unavailable.",
             ) from exc
 
+        answer_text = sanitize_citations(answer_text, len(verified_chunks))
         # Extract citation numbers and build citation list
         cited_numbers = extract_citation_numbers(answer_text, len(verified_chunks))
         citations: list[AnswerCitation] = []
@@ -291,6 +302,7 @@ class GenericRagService:
         request: AnswerRequest,
     ) -> AsyncIterator[str]:
         """Streams grounded answer tokens via Server-Sent Events (SSE)."""
+        context = context.resolve_scope(request.collection_id, request.owner_subject_id)
         clean_query = request.query.strip()
         if not clean_query:
             yield f"data: {json.dumps({'event': 'error', 'detail': 'Empty query'})}\n\n"
@@ -335,9 +347,9 @@ class GenericRagService:
         preamble = request.system_prompt or ANSWER_SYSTEM_PREAMBLE
 
         accumulated_text = []
-        token_stream, _ = await self.answer_generator.generate_answer_stream(
+        token_stream, verified_chunks = await self.answer_generator.generate_answer_stream(
             query=clean_query,
-            context_chunks=verified_chunks,
+            chunks=verified_chunks,
             conversation_context=conversation_context,
             preamble=preamble,
             no_results_answer=NO_RESULTS_ANSWER,

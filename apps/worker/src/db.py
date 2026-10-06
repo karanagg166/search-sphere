@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
 
 from src.config import settings
 
@@ -16,7 +17,9 @@ class Base(DeclarativeBase):
 
 engine = create_async_engine(
     settings.DATABASE_URL,
-    pool_pre_ping=True,
+    # Dramatiq threads create a fresh asyncio loop for each job. Connections
+    # must never be reused across those loops.
+    poolclass=NullPool,
 )
 
 

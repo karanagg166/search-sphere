@@ -40,6 +40,8 @@ class MedicalObservation(Base):
         index=True,
     )
 
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False, default="quick_clinic_default", index=True)
+
     external_patient_id: Mapped[str] = mapped_column(
         String(128),
         nullable=False,

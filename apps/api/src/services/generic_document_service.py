@@ -40,6 +40,8 @@ def sanitize_path_segment(value: str, field_name: str) -> str:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"{field_name} is required and cannot be empty.",
         )
+    if cleaned in {".", ".."}:
+        raise HTTPException(status_code=400, detail="Path traversal is not permitted.")
     if not re.match(r"^[a-zA-Z0-9_\-\.:]+$", cleaned):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -99,13 +101,19 @@ def detect_and_validate_file_type(data: bytes, reported_content_type: str | None
     if reported_content_type == "image/jpg":
         reported_content_type = "image/jpeg"
 
+    if detected in ("application/pdf", "image/jpeg", "image/png", "image/webp"):
+        from src.processing.file_validation import validate_binary_document
+        validate_binary_document(data, detected, reported_content_type)
+    elif reported_content_type not in (None, "", detected, "text/x-markdown"):
+        raise HTTPException(status_code=400, detail="Reported MIME type does not match file content.")
     return detected
 
 
 class GenericDocumentService:
-    def __init__(self, db: AsyncSession, storage: ObjectStorage):
+    def __init__(self, db: AsyncSession, storage: ObjectStorage, delete_extension=None):
         self.db = db
         self.storage = storage
+        self.delete_extension = delete_extension
 
     async def upload_file(
         self,
@@ -129,6 +137,15 @@ class GenericDocumentService:
                 detail=f"File exceeds maximum allowed size of {MAX_GENERIC_DOC_SIZE_BYTES // (1024 * 1024)}MB.",
             )
 
+        context = context.resolve_scope(collection_id)
+        collection_id = context.collection_id
+        existing = (await self.db.execute(select(ExternalDocument).where(
+            ExternalDocument.source_system == context.client_id,
+            ExternalDocument.tenant_id == context.tenant_id,
+            ExternalDocument.external_document_id == document_id,
+        ))).scalar_one_or_none()
+        if existing and (existing.owner_subject_id != context.subject_id or existing.collection_id != collection_id):
+            raise HTTPException(status_code=403, detail="Document belongs to another scope.")
         detected_mime = detect_and_validate_file_type(file_bytes, content_type)
         clean_doc_id = sanitize_path_segment(document_id, "document_id")
         clean_filename = sanitize_filename(original_filename)
@@ -167,13 +184,18 @@ class GenericDocumentService:
     ) -> ExternalDocument:
         """Registers or updates a multi-tenant document and enqueues it for asynchronous processing."""
         clean_ext_id = sanitize_path_segment(request.external_document_id, "external_document_id")
+        context = context.resolve_scope(request.collection_id, request.owner_subject_id)
         storage_key = request.storage_key.strip()
+        expected_prefix = f"documents/{context.client_id}/{context.tenant_id}/{context.collection_id or 'default'}/{clean_ext_id}/"
 
         if ".." in storage_key:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Path traversal is not permitted in storage key.",
             )
+
+        if not storage_key.startswith(expected_prefix):
+            raise HTTPException(status_code=403, detail="Storage object is outside the requested document scope.")
 
         # Validate collection existence if provided
         if request.collection_id:
@@ -202,22 +224,26 @@ class GenericDocumentService:
         doc = res.scalar_one_or_none()
 
         if doc:
-            doc.collection_id = request.collection_id
-            doc.owner_subject_id = request.owner_subject_id
+            if doc.owner_subject_id != context.subject_id or doc.collection_id != context.collection_id:
+                raise HTTPException(status_code=409, detail="Document identity is already assigned to another scope.")
+            doc.collection_id = context.collection_id
+            doc.owner_subject_id = context.subject_id
             doc.storage_path = storage_key
             doc.file_name = clean_file_name
             doc.mime_type = request.mime_type
             doc.file_size = request.file_size
             doc.document_type = clean_doc_type
             doc.metadata_json = request.metadata
+            doc.external_patient_id = context.subject_id or "default"
             doc.status = "QUEUED"
             doc.processing_error = None
         else:
             doc = ExternalDocument(
                 source_system=context.client_id,
                 tenant_id=context.tenant_id,
-                collection_id=request.collection_id,
-                owner_subject_id=request.owner_subject_id,
+                collection_id=context.collection_id,
+                owner_subject_id=context.subject_id,
+                external_patient_id=context.subject_id or "default",
                 external_document_id=clean_ext_id,
                 storage_path=storage_key,
                 file_name=clean_file_name,
@@ -233,7 +259,11 @@ class GenericDocumentService:
         await self.db.refresh(doc)
 
         # Enqueue processing task using the database primary key ID
-        enqueue_generic_document(doc.id, request_id=request_id)
+        if not enqueue_generic_document(doc.id, request_id=request_id):
+            doc.status = "FAILED"
+            doc.processing_error = "Processing queue is unavailable; retry registration."
+            await self.db.commit()
+            await self.db.refresh(doc)
 
         logger.info(
             "Registered document and enqueued processing",
@@ -258,6 +288,10 @@ class GenericDocumentService:
                 | (ExternalDocument.external_document_id == doc_id_or_external_id)
             ),
         )
+        if context.subject_id:
+            stmt = stmt.where(ExternalDocument.owner_subject_id == context.subject_id)
+        if context.collection_id:
+            stmt = stmt.where(ExternalDocument.collection_id == context.collection_id)
         res = await self.db.execute(stmt)
         doc = res.scalar_one_or_none()
         if not doc:
@@ -277,6 +311,8 @@ class GenericDocumentService:
         offset: int = 0,
     ) -> tuple[list[ExternalDocument], int]:
         """Lists documents strictly scoped to client and tenant with optional filters."""
+        context = context.resolve_scope(collection_id, owner_subject_id)
+        collection_id, owner_subject_id = context.collection_id, context.subject_id
         base_stmt = select(ExternalDocument).where(
             ExternalDocument.source_system == context.client_id,
             ExternalDocument.tenant_id == context.tenant_id,
@@ -304,28 +340,21 @@ class GenericDocumentService:
         """Deletes document from database, object storage, and vector store with strict tenant isolation."""
         doc = await self.get_document(context, doc_id_or_external_id)
 
-        # 1. Delete vectors from Qdrant
+        # External IDs can collide across clients; every mutation uses the scope.
         if vector_store:
             try:
-                # Delete by document_id and also by external_document_id
-                await vector_store.delete_document_chunks(doc.id)
-                await vector_store.delete_document_chunks(doc.external_document_id)
+                await vector_store.delete_document_points(doc.external_document_id, filters={
+                    "client_id": doc.client_id, "tenant_id": doc.tenant_id,
+                })
             except Exception as exc:
-                logger.warning(
-                    "Error deleting vectors for document",
-                    doc_id=doc.id,
-                    error=str(exc),
-                )
-
-        # 2. Delete file from storage
+                raise HTTPException(status_code=503, detail="Document deletion is temporarily unavailable.") from exc
         try:
             await self.storage.delete(key=doc.storage_path)
         except Exception as exc:
-            logger.warning(
-                "Error deleting file from storage",
-                storage_path=doc.storage_path,
-                error=str(exc),
-            )
+            raise HTTPException(status_code=503, detail="Document deletion is temporarily unavailable.") from exc
+
+        if self.delete_extension is not None:
+            await self.delete_extension(self.db, doc)
 
         # 3. Delete database record
         await self.db.delete(doc)

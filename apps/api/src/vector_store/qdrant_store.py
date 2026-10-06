@@ -1,3 +1,4 @@
+import json
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -294,6 +295,9 @@ class QdrantVectorStore:
 
     async def _ensure_payload_indexes(self, info: Any = None) -> None:
         """Ensure keyword payload index exists for document_id, source_system, patient_id, and document_type fields."""
+        # CollectionInfo.payload_schema is a mapping of field names to index info.
+        # Newly created collections and older client responses may omit it.
+        payload_schema = getattr(info, "payload_schema", None) or {}
         fields_to_index = [
             "document_id",
             "client_id",
@@ -329,16 +333,20 @@ class QdrantVectorStore:
                     error=str(exc),
                 )
 
-    async def delete_document_points(self, document_id: str) -> None:
+    async def delete_document_points(self, document_id: str, filters: dict[str, Any] | None = None) -> None:
         """Delete all points belonging to a specific document_id."""
-        delete_filter = models.Filter(
-            must=[
-                models.FieldCondition(
-                    key="document_id",
-                    match=models.MatchValue(value=document_id),
-                )
-            ]
-        )
+        scope = dict(filters or {})
+        scope["document_id"] = document_id
+        delete_filter = models.Filter(must=[
+            models.FieldCondition(key=key, match=models.MatchValue(value=value))
+            for key, value in scope.items() if value is not None
+        ])
+        if not filters:
+            # Native documents have no external client/source payload.
+            delete_filter.must.extend([
+                models.IsEmptyCondition(is_empty=models.PayloadField(key="client_id")),
+                models.IsEmptyCondition(is_empty=models.PayloadField(key="source_system")),
+            ])
         try:
             await self.client.delete(
                 collection_name=self.collection_name,
@@ -383,7 +391,11 @@ class QdrantVectorStore:
 
         points: list[models.PointStruct] = []
         for idx, chunk in enumerate(document.chunks):
-            point_id = generate_point_id(document_id, chunk.chunk_index)
+            # External IDs are only unique within the authenticated client/tenant.
+            identity = document_id
+            if extra_payload and extra_payload.get("client_id"):
+                identity = json.dumps([extra_payload["client_id"], extra_payload.get("tenant_id"), document_id], separators=(",", ":"))
+            point_id = generate_point_id(identity, chunk.chunk_index)
             payload: dict[str, Any] = {
                 "document_id": document_id,
                 "chunk_index": chunk.chunk_index,
@@ -461,7 +473,12 @@ class QdrantVectorStore:
         7. Return total points written.
         """
         await self.ensure_collection()
-        await self.delete_document_points(document_id)
+        if extra_payload and extra_payload.get("client_id"):
+            await self.delete_document_points(document_id, filters={
+                key: extra_payload[key] for key in ("client_id", "tenant_id")
+            })
+        else:
+            await self.delete_document_points(document_id)
 
         if not document.chunks:
             logger.info(

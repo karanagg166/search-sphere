@@ -36,3 +36,15 @@ def ensure_test_service_secret():
     """Ensure settings.QUICK_CLINIC_SERVICE_SECRET is configured to a non-production test-only secret."""
     with patch.object(settings, "QUICK_CLINIC_SERVICE_SECRET", TEST_SERVICE_SECRET):
         yield
+
+
+@pytest.fixture(autouse=True)
+def isolate_unit_test_queue():
+    """Unit HTTP tests must not dispatch jobs into a running worker."""
+    from src.tasks import document_tasks
+    if not hasattr(document_tasks, "broker"):
+        yield
+        return
+    with patch.object(document_tasks.broker, "enqueue") as enqueue:
+        enqueue.side_effect = lambda message, **kwargs: message
+        yield

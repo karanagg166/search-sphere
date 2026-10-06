@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -51,10 +51,17 @@ class ServiceContext:
             "client_id": self.client_id,
             "tenant_id": self.tenant_id,
         }
-        eff_collection = collection_id or self.collection_id
+        resolved = self.resolve_scope(collection_id, owner_subject_id)
+        eff_collection = resolved.collection_id
         if eff_collection:
             filters["collection_id"] = eff_collection
-        eff_subject = owner_subject_id or self.subject_id
+        eff_subject = resolved.subject_id
         if eff_subject:
             filters["owner_subject_id"] = eff_subject
         return filters
+
+    def resolve_scope(self, collection_id: str | None = None, owner_subject_id: str | None = None) -> "ServiceContext":
+        for supplied, bound in ((collection_id, self.collection_id), (owner_subject_id, self.subject_id)):
+            if supplied is not None and bound is not None and supplied != bound:
+                raise HTTPException(status_code=403, detail="Requested scope conflicts with authenticated request scope.")
+        return replace(self, collection_id=self.collection_id or collection_id, subject_id=self.subject_id or owner_subject_id)
