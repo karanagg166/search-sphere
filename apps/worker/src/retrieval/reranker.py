@@ -257,6 +257,26 @@ class CrossEncoderReranker:
                 )
             )
 
+            client_id = (
+                getattr(cand, "client_id", None)
+                if hasattr(cand, "client_id")
+                else (cand.get("client_id") if isinstance(cand, dict) else None)
+            )
+            tenant_id = (
+                getattr(cand, "tenant_id", None)
+                if hasattr(cand, "tenant_id")
+                else (cand.get("tenant_id") if isinstance(cand, dict) else None)
+            )
+            collection_id = (
+                getattr(cand, "collection_id", None)
+                if hasattr(cand, "collection_id")
+                else (cand.get("collection_id") if isinstance(cand, dict) else None)
+            )
+            owner_subject_id = (
+                getattr(cand, "owner_subject_id", None)
+                if hasattr(cand, "owner_subject_id")
+                else (cand.get("owner_subject_id") if isinstance(cand, dict) else None)
+            )
             patient_id = (
                 getattr(cand, "patient_id", None)
                 if hasattr(cand, "patient_id")
@@ -298,6 +318,10 @@ class CrossEncoderReranker:
                     rrf_score=rrf_score,
                     score=score,
                     rank=rank_idx,
+                    client_id=client_id or source_system,
+                    tenant_id=tenant_id,
+                    collection_id=collection_id,
+                    owner_subject_id=owner_subject_id or patient_id,
                     patient_id=patient_id,
                     source_system=source_system,
                     document_type=document_type,

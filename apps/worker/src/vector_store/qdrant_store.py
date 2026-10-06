@@ -294,8 +294,16 @@ class QdrantVectorStore:
 
     async def _ensure_payload_indexes(self, info: Any = None) -> None:
         """Ensure keyword payload index exists for document_id, source_system, patient_id, and document_type fields."""
-        payload_schema = getattr(info, "payload_schema", None) if info else None
-        fields_to_index = ["document_id", "source_system", "patient_id", "document_type"]
+        fields_to_index = [
+            "document_id",
+            "client_id",
+            "tenant_id",
+            "collection_id",
+            "owner_subject_id",
+            "source_system",
+            "patient_id",
+            "document_type",
+        ]
         for field in fields_to_index:
             if isinstance(payload_schema, dict) and field in payload_schema:
                 continue
@@ -560,6 +568,10 @@ class QdrantVectorStore:
                 page_numbers=list(payload["page_numbers"]),
                 block_types=list(payload["block_types"]),
                 rank=rank,
+                client_id=payload.get("client_id") or payload.get("source_system"),
+                tenant_id=payload.get("tenant_id"),
+                collection_id=payload.get("collection_id"),
+                owner_subject_id=payload.get("owner_subject_id") or payload.get("patient_id"),
                 patient_id=payload.get("patient_id"),
                 source_system=payload.get("source_system"),
                 document_type=payload.get("document_type"),
@@ -744,6 +756,10 @@ class QdrantVectorStore:
                 page_numbers=list(payload["page_numbers"]),
                 block_types=list(payload["block_types"]),
                 rank=rank,
+                client_id=payload.get("client_id") or payload.get("source_system"),
+                tenant_id=payload.get("tenant_id"),
+                collection_id=payload.get("collection_id"),
+                owner_subject_id=payload.get("owner_subject_id") or payload.get("patient_id"),
                 patient_id=payload.get("patient_id"),
                 source_system=payload.get("source_system"),
                 document_type=payload.get("document_type"),

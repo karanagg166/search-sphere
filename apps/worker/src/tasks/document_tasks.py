@@ -61,6 +61,18 @@ def process_medical_document_task(document_id: str, request_id: str | None = Non
     asyncio.run(_process_medical_document(document_id, request_id=request_id))
 
 
+@dramatiq.actor(
+    queue_name="default",
+    actor_name="process_generic_document_task",
+    max_retries=3,
+)
+def process_generic_document_task(document_id: str, request_id: str | None = None) -> None:
+    """Background job responsible for processing a generic multi-tenant external document."""
+    if request_id:
+        structlog.contextvars.bind_contextvars(request_id=request_id)
+    asyncio.run(_process_generic_document(document_id, request_id=request_id))
+
+
 async def _process_pipeline(
     document_id: str,
     raw_content: bytes,
@@ -258,7 +270,7 @@ async def _process_document(
             await doc_vector_store.close()
 
 
-async def _process_medical_document(
+async def _process_generic_document(
     document_id: str,
     request_id: str | None = None,
     storage: ObjectStorage | None = None,
@@ -269,8 +281,9 @@ async def _process_medical_document(
     sparse_embedder: BM25Embedder | None = None,
     vector_store: QdrantVectorStore | None = None,
     session_factory: Any | None = None,
+    force_medical: bool = False,
 ) -> EmbeddedDocument | None:
-    """Processes external medical documents from Quick Clinic with strict isolation & PHI logging."""
+    """Processes external documents across arbitrary clients and tenants with isolation."""
     start_time = time.time()
     if request_id:
         structlog.contextvars.bind_contextvars(request_id=request_id)
@@ -279,13 +292,12 @@ async def _process_medical_document(
     async with get_session() as session:
         result = await session.execute(
             select(ExternalDocument).where(
-                ExternalDocument.source_system == "quick_clinic",
-                ExternalDocument.external_document_id == document_id,
+                (ExternalDocument.id == document_id) | (ExternalDocument.external_document_id == document_id)
             )
         )
         external_doc = result.scalar_one_or_none()
         if not external_doc:
-            raise ValueError(f"External medical document not found: {document_id}")
+            raise ValueError(f"External document not found: {document_id}")
 
         external_doc.status = "PROCESSING"
         external_doc.processing_error = None
@@ -293,18 +305,33 @@ async def _process_medical_document(
 
         storage_path = external_doc.storage_path
         mime_type = external_doc.mime_type
-        patient_id = external_doc.external_patient_id
+        client_id = external_doc.client_id
+        tenant_id = external_doc.tenant_id
+        collection_id = external_doc.collection_id
+        owner_subject_id = external_doc.owner_subject_id or external_doc.external_patient_id
         doc_type = external_doc.document_type
         file_name = external_doc.file_name
         report_date_iso = external_doc.report_date.isoformat() if external_doc.report_date else None
         db_doc_id = external_doc.id
+        source_doc_id = external_doc.external_document_id
 
-    logger.info(
-        "Medical document processing started",
-        document_id=document_id,
-        patient_id=patient_id,
-        mime_type=mime_type,
-    )
+    is_medical = force_medical or (client_id == "quick_clinic") or (external_doc.source_system == "quick_clinic")
+
+    if is_medical:
+        logger.info(
+            "Medical document processing started",
+            document_id=source_doc_id,
+            patient_id=owner_subject_id,
+            mime_type=mime_type,
+        )
+    else:
+        logger.info(
+            "Document processing started",
+            document_id=source_doc_id,
+            client_id=client_id,
+            tenant_id=tenant_id,
+            mime_type=mime_type,
+        )
 
     doc_storage = storage or get_object_storage()
     doc_extractor = extractor or DocumentExtractor()
@@ -317,19 +344,24 @@ async def _process_medical_document(
     try:
         content = await doc_storage.download(storage_path)
         if not content:
-            raise RuntimeError(f"Downloaded medical document is empty: {document_id}")
+            raise RuntimeError(f"Downloaded document is empty: {document_id}")
 
         extra_payload = {
-            "source_system": "quick_clinic",
-            "patient_id": patient_id,
-            "document_id": document_id,
+            "client_id": client_id,
+            "tenant_id": tenant_id,
+            "collection_id": collection_id,
+            "owner_subject_id": owner_subject_id,
+            "document_id": source_doc_id,
             "document_type": doc_type,
             "report_date": report_date_iso,
             "file_name": file_name,
+            # Backward-compatibility payload fields
+            "source_system": external_doc.source_system,
+            "patient_id": external_doc.external_patient_id,
         }
 
         extracted_doc, _, chunked_doc, embedded_doc, points_written = await _process_pipeline(
-            document_id=document_id,
+            document_id=source_doc_id,
             raw_content=content,
             mime_type=mime_type,
             extractor=doc_extractor,
@@ -339,22 +371,21 @@ async def _process_medical_document(
             sparse_embedder=doc_sparse_embedder,
             vector_store=doc_vector_store,
             extra_payload=extra_payload,
-            is_medical=True,
-            patient_id=patient_id,
+            is_medical=is_medical,
+            patient_id=owner_subject_id if is_medical else None,
         )
 
-        # Structured medical observation extraction (PART 6, 18, 20-24)
-        is_ocr = mime_type.lower() in ("image/jpeg", "image/png", "image/webp", "image/jpg")
-        default_method = "OCR" if is_ocr else "REGEX"
+        extracted_observations = []
+        if is_medical:
+            is_ocr = mime_type.lower() in ("image/jpeg", "image/png", "image/webp", "image/jpg")
+            default_method = "OCR" if is_ocr else "REGEX"
+            observation_extractor = MedicalObservationExtractor()
+            extracted_observations = observation_extractor.extract_from_extracted_document(
+                extracted_doc=extracted_doc,
+                report_date=external_doc.report_date,
+                default_extraction_method=default_method,
+            )
 
-        observation_extractor = MedicalObservationExtractor()
-        extracted_observations = observation_extractor.extract_from_extracted_document(
-            extracted_doc=extracted_doc,
-            report_date=external_doc.report_date,
-            default_extraction_method=default_method,
-        )
-
-        # Store extracted text and structured observations in database
         async with get_session() as session:
             raw_text = extracted_doc.combined_text()
             char_count = len(raw_text)
@@ -376,34 +407,34 @@ async def _process_medical_document(
                 )
                 session.add(content_row)
 
-            # Reconcile / deduplicate prior observations for this document (PART 3 & PART 20)
-            await session.execute(
-                delete(MedicalObservation).where(
-                    MedicalObservation.source_system == "quick_clinic",
-                    MedicalObservation.external_document_id == document_id,
+            if is_medical:
+                await session.execute(
+                    delete(MedicalObservation).where(
+                        MedicalObservation.source_system == external_doc.source_system,
+                        MedicalObservation.external_document_id == source_doc_id,
+                    )
                 )
-            )
 
-            for obs in extracted_observations:
-                obs_row = MedicalObservation(
-                    source_system="quick_clinic",
-                    external_patient_id=patient_id,
-                    external_document_id=document_id,
-                    observation_type=obs.observation_type,
-                    display_name=obs.display_name,
-                    value_numeric=obs.value_numeric,
-                    value_text=obs.value_text,
-                    value_secondary_numeric=obs.value_secondary_numeric,
-                    unit=obs.unit,
-                    observed_at=obs.observed_at,
-                    reported_at=obs.reported_at,
-                    is_date_inferred=obs.is_date_inferred,
-                    page_number=obs.page_number,
-                    chunk_index=obs.chunk_index,
-                    confidence=obs.confidence,
-                    extraction_method=obs.extraction_method,
-                )
-                session.add(obs_row)
+                for obs in extracted_observations:
+                    obs_row = MedicalObservation(
+                        source_system=external_doc.source_system,
+                        external_patient_id=owner_subject_id,
+                        external_document_id=source_doc_id,
+                        observation_type=obs.observation_type,
+                        display_name=obs.display_name,
+                        value_numeric=obs.value_numeric,
+                        value_text=obs.value_text,
+                        value_secondary_numeric=obs.value_secondary_numeric,
+                        unit=obs.unit,
+                        observed_at=obs.observed_at,
+                        reported_at=obs.reported_at,
+                        is_date_inferred=obs.is_date_inferred,
+                        page_number=obs.page_number,
+                        chunk_index=obs.chunk_index,
+                        confidence=obs.confidence,
+                        extraction_method=obs.extraction_method,
+                    )
+                    session.add(obs_row)
 
             res_doc = await session.execute(
                 select(ExternalDocument).where(ExternalDocument.id == db_doc_id)
@@ -415,27 +446,25 @@ async def _process_medical_document(
             await session.commit()
 
         duration = round(time.time() - start_time, 2)
-        # PHI-safe logging: log only observation count and IDs (PART 18)
         logger.info(
-            "Medical document processing succeeded",
-            document_id=document_id,
-            patient_id=patient_id,
+            "Document processing succeeded",
+            document_id=source_doc_id,
+            client_id=client_id,
+            tenant_id=tenant_id,
             pages=len(extracted_doc.pages),
             characters=len(raw_text),
             chunk_count=len(chunked_doc.chunks),
-            observation_count=len(extracted_observations),
+            is_medical=is_medical,
             processing_status="READY",
             duration=duration,
         )
-
         return embedded_doc
 
     except Exception as exc:
         duration = round(time.time() - start_time, 2)
         logger.error(
-            "Medical document processing failed",
+            "Document processing failed",
             document_id=document_id,
-            patient_id=patient_id,
             processing_status="FAILED",
             duration=duration,
             error=str(exc),
@@ -459,3 +488,31 @@ async def _process_medical_document(
     finally:
         if vector_store is None:
             await doc_vector_store.close()
+
+
+async def _process_medical_document(
+    document_id: str,
+    request_id: str | None = None,
+    storage: ObjectStorage | None = None,
+    extractor: DocumentExtractor | None = None,
+    cleaner: TextCleaner | None = None,
+    chunker: DocumentChunker | None = None,
+    embedder: DenseEmbedder | None = None,
+    sparse_embedder: BM25Embedder | None = None,
+    vector_store: QdrantVectorStore | None = None,
+    session_factory: Any | None = None,
+) -> EmbeddedDocument | None:
+    """Processes external medical documents from Quick Clinic with strict isolation & PHI logging."""
+    return await _process_generic_document(
+        document_id=document_id,
+        request_id=request_id,
+        storage=storage,
+        extractor=extractor,
+        cleaner=cleaner,
+        chunker=chunker,
+        embedder=embedder,
+        sparse_embedder=sparse_embedder,
+        vector_store=vector_store,
+        session_factory=session_factory,
+        force_medical=True,
+    )
