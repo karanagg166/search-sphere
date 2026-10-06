@@ -62,3 +62,4 @@ Thumbs.db
 # Docker data mounts (if created on host)
 data/
 *.log
+.fastembed_cache/

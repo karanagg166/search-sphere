@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, DateTime, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db import Base
@@ -31,6 +31,25 @@ class ExternalDocument(Base):
         index=True,
     )
 
+    tenant_id: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+        default="default",
+        index=True,
+    )
+
+    collection_id: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
+        index=True,
+    )
+
+    owner_subject_id: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
+        index=True,
+    )
+
     external_document_id: Mapped[str] = mapped_column(
         String(128),
         nullable=False,
@@ -40,7 +59,13 @@ class ExternalDocument(Base):
     external_patient_id: Mapped[str] = mapped_column(
         String(128),
         nullable=False,
+        default="default",
         index=True,
+    )
+
+    metadata_json: Mapped[dict | None] = mapped_column(
+        JSON,
+        nullable=True,
     )
 
     storage_path: Mapped[str] = mapped_column(
@@ -118,10 +143,19 @@ class ExternalDocument(Base):
         ),
     )
 
+    @property
+    def client_id(self) -> str:
+        return self.source_system
+
+    @client_id.setter
+    def client_id(self, val: str) -> None:
+        self.source_system = val
+
     def __repr__(self) -> str:
         return (
             f"<ExternalDocument id={self.id} "
-            f"source={self.source_system} "
+            f"client={self.source_system} "
+            f"tenant={self.tenant_id} "
             f"ext_doc={self.external_document_id} "
             f"status={self.status}>"
         )
