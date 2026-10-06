@@ -22,6 +22,13 @@ from src.routers.internal_medical_observations import router as internal_medical
 from src.routers.internal_medical_rag import router as internal_medical_rag_router
 from src.routers.internal_medical_retrieval import router as internal_medical_retrieval_router
 from src.routers.search import router as search_router
+from src.routers.v1 import (
+    answers_router as v1_answers_router,
+    clients_router as v1_clients_router,
+    collections_router as v1_collections_router,
+    documents_router as v1_documents_router,
+    search_router as v1_search_router,
+)
 
 logger = structlog.get_logger()
 
@@ -151,6 +158,13 @@ app.include_router(internal_medical_ingest_router)
 app.include_router(internal_medical_retrieval_router)
 app.include_router(internal_medical_obs_router)
 app.include_router(internal_medical_rag_router)
+
+# Include Generic Multi-Tenant V1 Microservice Routes
+app.include_router(v1_clients_router)
+app.include_router(v1_collections_router)
+app.include_router(v1_documents_router)
+app.include_router(v1_search_router)
+app.include_router(v1_answers_router)
 
 
 @app.get("/health", tags=["Health"])

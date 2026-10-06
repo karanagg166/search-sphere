@@ -33,7 +33,7 @@ def generate_api_key(prefix: str = "ss_live_") -> tuple[str, str, str]:
     return raw_key, key_prefix, key_hash
 
 
-async def get_service_context(
+async def _authenticate_service_context(
     request: Request,
     authorization: str | None = Header(None),
     x_client_id: str | None = Header(None, alias="X-Client-ID"),
@@ -144,6 +144,43 @@ async def get_service_context(
     )
 
 
+class ServiceContextDependency:
+    """FastAPI dependency callable that validates credentials and enforces required scopes."""
+
+    def __init__(self, required_scopes: set[str] | list[str] | None = None):
+        self.required_scopes = set(required_scopes) if required_scopes else set()
+
+    async def __call__(
+        self,
+        request: Request,
+        authorization: str | None = Header(None),
+        x_client_id: str | None = Header(None, alias="X-Client-ID"),
+        x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
+        x_subject_id: str | None = Header(None, alias="X-Subject-ID"),
+        x_collection_id: str | None = Header(None, alias="X-Collection-ID"),
+        session: AsyncSession = Depends(get_db),
+    ) -> ServiceContext:
+        context = await _authenticate_service_context(
+            request=request,
+            authorization=authorization,
+            x_client_id=x_client_id,
+            x_tenant_id=x_tenant_id,
+            x_subject_id=x_subject_id,
+            x_collection_id=x_collection_id,
+            session=session,
+        )
+        for scope in self.required_scopes:
+            context.require_scope(scope)
+        return context
+
+
+def get_service_context(
+    required_scopes: set[str] | list[str] | None = None,
+) -> ServiceContextDependency:
+    """FastAPI dependency factory for multi-tenant microservice authentication."""
+    return ServiceContextDependency(required_scopes=required_scopes)
+
+
 async def verify_service_secret(
     authorization: str | None = Header(None),
     session: AsyncSession = Depends(get_db),
@@ -203,14 +240,6 @@ async def verify_service_secret(
     )
 
 
-def require_scopes(*required_scopes: str) -> Callable:
+def require_scopes(*required_scopes: str) -> ServiceContextDependency:
     """FastAPI dependency factory enforcing that caller has all specified scopes."""
-
-    async def _dependency(
-        context: ServiceContext = Depends(get_service_context),
-    ) -> ServiceContext:
-        for scope in required_scopes:
-            context.require_scope(scope)
-        return context
-
-    return _dependency
+    return ServiceContextDependency(required_scopes=set(required_scopes))
