@@ -2,19 +2,63 @@ name: Keep Render Backend Awake
 
 on:
   schedule:
-    # Run every 14 minutes to prevent Render 15-minute inactivity spin-down
-    - cron: "*/14 * * * *"
+    # Run every 10 minutes to prevent Render 15-minute inactivity spin-down
+    - cron: "*/10 * * * *"
   workflow_dispatch:
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Backend Health Endpoint
+      - name: Ping Backend Health and Readiness Endpoints
         env:
           BACKEND_URL: ${{ secrets.RENDER_BACKEND_URL }}
         run: |
-          TARGET_URL="${BACKEND_URL:-https://search-sphere-api.onrender.com}/health"
-          echo "Pinging $TARGET_URL to keep Render container warm..."
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$TARGET_URL" || echo "000")
-          echo "Received HTTP Status: $HTTP_STATUS"
+          set -euo pipefail
+          BASE_URL="${BACKEND_URL:-https://search-sphere-api.onrender.com}"
+          BASE_URL="${BASE_URL%/}"
+
+          echo "Target Backend: $BASE_URL"
+
+          ping_endpoint() {
+            local endpoint="$1"
+            local max_attempts=3
+            local attempt=1
+            local target="${BASE_URL}${endpoint}"
+
+            echo "=== Checking endpoint: $target ==="
+            while [ $attempt -le $max_attempts ]; do
+              echo "Attempt $attempt of $max_attempts..."
+              response_file=$(mktemp)
+              http_code=$(curl -sS -o "$response_file" -w "%{http_code}" --max-time 60 "$target" || echo "FAILED")
+
+              if [ "$http_code" = "200" ]; then
+                echo "Success (HTTP 200) for $endpoint on attempt $attempt:"
+                cat "$response_file"
+                echo ""
+                rm -f "$response_file"
+                return 0
+              else
+                echo "Warning: Attempt $attempt returned HTTP status: $http_code"
+                if [ -s "$response_file" ]; then
+                  cat "$response_file"
+                  echo ""
+                fi
+                rm -f "$response_file"
+                if [ $attempt -lt $max_attempts ]; then
+                  echo "Waiting 5 seconds before retrying (allowing cold start to complete)..."
+                  sleep 5
+                fi
+              fi
+              attempt=$((attempt + 1))
+            done
+
+            echo "ERROR: Endpoint $target failed after $max_attempts attempts." >&2
+            return 1
+          }
+
+          # Verify both health and database readiness
+          ping_endpoint "/health"
+          ping_endpoint "/ready"
+
+          echo "All backend keep-alive health checks passed successfully."
