@@ -28,7 +28,6 @@ from src.services.answer_generator import (
     AnswerGenerator,
     extract_citation_numbers,
     sanitize_citations,
-    format_context_chunks,
 )
 
 logger = structlog.get_logger()

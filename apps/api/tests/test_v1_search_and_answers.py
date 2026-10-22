@@ -1,5 +1,6 @@
 import uuid
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -112,8 +113,9 @@ async def test_v1_search_and_grounded_answers():
             assert reg_res.status_code == 202
 
             # Directly update document status to READY in database so retriever verification passes
-            from src.db import AsyncSessionLocal
             from sqlalchemy import update
+
+            from src.db import AsyncSessionLocal
             async with AsyncSessionLocal() as session:
                 await session.execute(
                     update(ExternalDocument)

@@ -1,5 +1,6 @@
 import pytest
 from qdrant_client import AsyncQdrantClient
+
 from src.processing.models.document import EmbeddedChunk, EmbeddedDocument
 from src.vector_store.qdrant_store import QdrantVectorStore
 
@@ -11,6 +12,7 @@ def document(contents):
 @pytest.mark.asyncio
 async def test_hybrid_result_preserves_scope_through_reranking():
     from unittest.mock import MagicMock
+
     from src.processing.models.sparse_vector import SparseVector
     from src.retrieval.reranker import CrossEncoderReranker
 

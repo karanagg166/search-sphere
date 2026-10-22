@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -46,7 +46,7 @@ def parse_date_string(text: str, default_year: int = 2026) -> datetime | None:
     if m_iso:
         try:
             year, month, day = int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3))
-            return datetime(year, month, day, tzinfo=timezone.utc)
+            return datetime(year, month, day, tzinfo=UTC)
         except ValueError:
             pass
 
@@ -62,7 +62,7 @@ def parse_date_string(text: str, default_year: int = 2026) -> datetime | None:
             month = MONTH_NAMES.get(mon_str[:3], 1)
             day = int(m_mon_yr.group(2))
             year = int(m_mon_yr.group(3))
-            return datetime(year, month, day, tzinfo=timezone.utc)
+            return datetime(year, month, day, tzinfo=UTC)
         except ValueError:
             pass
 
@@ -78,7 +78,7 @@ def parse_date_string(text: str, default_year: int = 2026) -> datetime | None:
             mon_str = m_day_mon_yr.group(2).lower()
             month = MONTH_NAMES.get(mon_str[:3], 1)
             year = int(m_day_mon_yr.group(3))
-            return datetime(year, month, day, tzinfo=timezone.utc)
+            return datetime(year, month, day, tzinfo=UTC)
         except ValueError:
             pass
 
@@ -93,7 +93,7 @@ def parse_date_string(text: str, default_year: int = 2026) -> datetime | None:
             mon_str = m_mon_day.group(1).lower()
             month = MONTH_NAMES.get(mon_str[:3], 1)
             day = int(m_mon_day.group(2))
-            return datetime(default_year, month, day, tzinfo=timezone.utc)
+            return datetime(default_year, month, day, tzinfo=UTC)
         except ValueError:
             pass
 
@@ -107,7 +107,7 @@ def parse_date_string(text: str, default_year: int = 2026) -> datetime | None:
         else:
             month, day = p1, p2
         try:
-            return datetime(yr, month, day, tzinfo=timezone.utc)
+            return datetime(yr, month, day, tzinfo=UTC)
         except ValueError:
             pass
 

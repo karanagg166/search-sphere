@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Sequence
 
 import structlog
 from sqlalchemy import Select, asc, desc, func, select

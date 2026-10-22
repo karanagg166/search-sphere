@@ -1,11 +1,12 @@
-from tests.binary_fixtures import pdf_bytes, image_bytes
 from unittest.mock import patch
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from src.config import settings
 from src.main import app
 from src.storage.object_storage import LocalStorage, get_object_storage
+from tests.binary_fixtures import image_bytes, pdf_bytes
 
 # Test Service Secret (test fixture only, no production fallback)
 TEST_SERVICE_SECRET = "test-service-secret"

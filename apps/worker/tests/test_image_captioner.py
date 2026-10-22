@@ -1,7 +1,7 @@
-from collections.abc import Generator
-from unittest.mock import MagicMock, patch
 import sys
+from collections.abc import Generator
 from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 

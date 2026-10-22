@@ -1,10 +1,9 @@
 import hashlib
 import uuid
-from datetime import datetime, timezone
-from unittest.mock import ANY, AsyncMock, MagicMock
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from qdrant_client import models
 from sqlalchemy import select
 
 from src.db import AsyncSessionLocal
@@ -27,7 +26,8 @@ def mock_storage() -> MagicMock:
 
 @pytest.fixture(autouse=True)
 async def isolated_medical_database(tmp_path, monkeypatch):
-    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
     from src.db import Base
     from src.tasks import document_tasks
 
@@ -72,7 +72,7 @@ async def test_process_medical_document_pdf_success(
             mime_type="application/pdf",
             file_size=len(sample_pdf_bytes),
             document_type="LAB_REPORT",
-            report_date=datetime(2026, 10, 1, tzinfo=timezone.utc),
+            report_date=datetime(2026, 10, 1, tzinfo=UTC),
             status="QUEUED",
         )
         session.add(doc)

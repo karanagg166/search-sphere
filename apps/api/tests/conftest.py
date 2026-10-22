@@ -1,5 +1,8 @@
+from unittest.mock import patch
+
 import pytest
 
+from src.config import settings
 from src.db import engine, init_db
 
 
@@ -22,9 +25,6 @@ async def cleanup_db_connections():
     yield
     await engine.dispose()
 
-
-from unittest.mock import patch
-from src.config import settings
 
 TEST_SERVICE_SECRET = "test-service-secret"
 VALID_AUTH_HEADER = {"Authorization": f"Bearer {TEST_SERVICE_SECRET}"}

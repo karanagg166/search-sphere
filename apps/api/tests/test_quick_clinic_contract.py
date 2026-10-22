@@ -1,6 +1,5 @@
 """Synthetic API contract regression tests; providers are mocked explicitly."""
-import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -10,11 +9,11 @@ from sqlalchemy import delete
 from src.db import AsyncSessionLocal
 from src.main import app
 from src.models.service_client import ServiceClient
+from src.security.medical_context import patient_collection_id
 from src.security.service_auth import generate_api_key, verify_service_secret
 from src.security.service_context import ServiceContext
-from src.security.medical_context import patient_collection_id
-from src.services.search_service import get_retriever
 from src.services.answer_generator import get_answer_generator
+from src.services.search_service import get_retriever
 from src.storage.object_storage import get_object_storage
 
 
@@ -23,13 +22,20 @@ async def service_keys():
     keys = {}
     ids = []
     async with AsyncSessionLocal() as session:
+        await session.execute(
+            delete(ServiceClient).where(
+                ServiceClient.client_id.in_(["quick_clinic", "exam_arena_test_client", "revoked_test_client"])
+            )
+        )
+        await session.commit()
+
         for client_id, revoked in (("quick_clinic", False), ("exam_arena_test_client", False), ("revoked_test_client", True)):
             raw, prefix, hashed = generate_api_key()
             row = ServiceClient(
                 client_id=client_id, name="Synthetic contract client", api_key_hash=hashed,
                 api_key_prefix=prefix, allowed_scopes=["documents:read", "documents:write", "documents:delete", "search:execute", "answers:generate", "collections:manage"],
                 authorized_tenants=["quick_clinic_default"],
-                revoked_at=datetime.now(timezone.utc) if revoked else None,
+                revoked_at=datetime.now(UTC) if revoked else None,
             )
             session.add(row)
             await session.flush()

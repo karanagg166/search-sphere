@@ -1,6 +1,3 @@
-from src.security.medical_context import get_medical_context, bind_patient, validate_storage_scope, patient_collection_id
-from src.security.service_context import ServiceContext
-import hmac
 import os
 import re
 
@@ -11,7 +8,6 @@ from fastapi import (
     Depends,
     File,
     Form,
-    Header,
     HTTPException,
     Query,
     UploadFile,
@@ -19,7 +15,13 @@ from fastapi import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.config import settings
+from src.security.medical_context import (
+    bind_patient,
+    get_medical_context,
+    validate_storage_scope,
+)
+from src.security.service_auth import verify_service_secret  # noqa: F401
+from src.security.service_context import ServiceContext
 from src.storage.object_storage import ObjectStorage, get_object_storage
 
 logger = structlog.get_logger()
@@ -100,9 +102,6 @@ def sanitize_identifier(identifier: str, field_name: str) -> str:
             detail=f"Invalid characters in {field_name}.",
         )
     return cleaned
-
-
-from src.security.service_auth import verify_service_secret  # noqa: F401
 
 
 # Response Schemas

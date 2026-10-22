@@ -1,11 +1,12 @@
-from tests.binary_fixtures import pdf_bytes, image_bytes
 import uuid
-from unittest.mock import patch, AsyncMock
+from unittest.mock import AsyncMock
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from src.main import app
 from src.storage.object_storage import LocalStorage, get_object_storage
+from tests.binary_fixtures import pdf_bytes
 from tests.conftest import VALID_AUTH_HEADER
 
 SAMPLE_PDF_BYTES = pdf_bytes()

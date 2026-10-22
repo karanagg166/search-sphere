@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import func, select
@@ -102,7 +102,7 @@ class ConversationRepository:
         """Persist a new message into the specified conversation."""
         msg = Message(
             conversation_id=conversation_id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             role=role,
             content=content,
             original_query=original_query,

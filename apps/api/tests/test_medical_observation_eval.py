@@ -2,8 +2,6 @@
 
 Measures extraction precision, recall, and enforces zero false positives on non-medical distractors across >=20 clinical snippets.
 """
-import pytest
-from datetime import datetime, timezone
 from src.processing.extraction.medical_observation_extractor import (
     MedicalObservationExtractor,
 )

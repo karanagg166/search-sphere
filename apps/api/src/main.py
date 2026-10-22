@@ -1,4 +1,5 @@
 import asyncio
+import re
 import uuid
 from contextlib import asynccontextmanager
 
@@ -16,17 +17,33 @@ from src.routers.auth import router as auth_router
 from src.routers.conversations import router as conversations_router
 from src.routers.documents import router as documents_router
 from src.routers.feedback import router as feedback_router
-from src.routers.internal_medical_documents import router as internal_medical_docs_router
-from src.routers.internal_medical_ingestion import router as internal_medical_ingest_router
-from src.routers.internal_medical_observations import router as internal_medical_obs_router
+from src.routers.internal_medical_documents import (
+    router as internal_medical_docs_router,
+)
+from src.routers.internal_medical_ingestion import (
+    router as internal_medical_ingest_router,
+)
+from src.routers.internal_medical_observations import (
+    router as internal_medical_obs_router,
+)
 from src.routers.internal_medical_rag import router as internal_medical_rag_router
-from src.routers.internal_medical_retrieval import router as internal_medical_retrieval_router
+from src.routers.internal_medical_retrieval import (
+    router as internal_medical_retrieval_router,
+)
 from src.routers.search import router as search_router
 from src.routers.v1 import (
     answers_router as v1_answers_router,
+)
+from src.routers.v1 import (
     clients_router as v1_clients_router,
+)
+from src.routers.v1 import (
     collections_router as v1_collections_router,
+)
+from src.routers.v1 import (
     documents_router as v1_documents_router,
+)
+from src.routers.v1 import (
     search_router as v1_search_router,
 )
 
@@ -59,8 +76,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("Error disposing database connection pool", error=str(e))
 
-
-import re
 
 SAFE_REQUEST_ID_REGEX = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.I)
 

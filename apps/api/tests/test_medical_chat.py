@@ -1,8 +1,8 @@
-from src.security.medical_context import patient_collection_id
-from datetime import datetime, timezone
 import json
 import uuid
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
@@ -13,12 +13,11 @@ from src.main import app
 from src.models.external_document import ExternalDocument
 from src.processing.models.search import RerankedSearchResult
 from src.schemas.search import RewriteResult
+from src.security.medical_context import patient_collection_id
 from src.services.answer_generator import (
-    AnswerGenerator,
-    MEDICAL_NO_RESULTS_ANSWER,
     get_answer_generator,
 )
-from src.services.query_rewriter import QueryRewriter, get_query_rewriter
+from src.services.query_rewriter import get_query_rewriter
 from src.services.search_service import get_retriever
 
 TEST_SERVICE_SECRET = "test-service-secret"
@@ -54,7 +53,7 @@ async def sample_patient_documents():
             file_size=1024,
             storage_path=f"medical-documents/{patient_a_id}/{doc_a1_id}/bp_report_a.pdf",
             document_type="LAB_REPORT",
-            report_date=datetime(2026, 10, 1, tzinfo=timezone.utc),
+            report_date=datetime(2026, 10, 1, tzinfo=UTC),
             status="READY",
         )
         doc_b1 = ExternalDocument(
@@ -69,7 +68,7 @@ async def sample_patient_documents():
             file_size=2048,
             storage_path=f"medical-documents/{patient_b_id}/{doc_b1_id}/cardiac_panel_b.pdf",
             document_type="LAB_REPORT",
-            report_date=datetime(2026, 10, 3, tzinfo=timezone.utc),
+            report_date=datetime(2026, 10, 3, tzinfo=UTC),
             status="READY",
         )
         session.add_all([doc_a1, doc_b1])
@@ -460,7 +459,7 @@ async def test_medical_chat_streaming_sse_flow(sample_patient_documents):
 
             # Verify citations payload in citations event
             lines = content.split("\n")
-            citation_events = [lines[i + 1] for i, l in enumerate(lines) if l == "event: citations"]
+            citation_events = [lines[i + 1] for i, line_text in enumerate(lines) if line_text == "event: citations"]
             assert len(citation_events) > 0
             citation_data = json.loads(citation_events[0].replace("data: ", ""))
             assert len(citation_data["citations"]) == 1

@@ -21,6 +21,14 @@ services:
         value: https://jyzjgoniuwexvipbbpwa.supabase.co
       - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
         value: sb_publishable_akdD07TJBdKVGZ16monKaQ_MEjd8GG7
+      - key: STORAGE_BACKEND
+        value: supabase
+      - key: SUPABASE_STORAGE_BUCKET
+        value: documents
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: QUICK_CLINIC_SERVICE_SECRET
+        sync: false
       - key: GOOGLE_CLIENT_ID
         value: 819492193967-4j16egplrleocade2fqhiv0lcs0nl1mg.apps.googleusercontent.com
       - key: GOOGLE_REDIRECT_URI

@@ -1,8 +1,7 @@
-from src.security.medical_context import patient_collection_id
-from datetime import datetime, timedelta, timezone
-import json
 import uuid
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
@@ -14,17 +13,14 @@ from src.models.external_document import ExternalDocument
 from src.models.medical_observation import MedicalObservation
 from src.processing.extraction.medical_observation_extractor import (
     MedicalObservationExtractor,
-    ExtractedObservationData,
 )
 from src.processing.models.search import RerankedSearchResult
 from src.schemas.search import ConversationMessage, RewriteResult
+from src.security.medical_context import patient_collection_id
 from src.services.answer_generator import get_answer_generator
-from src.services.medical_observation_service import get_medical_observation_service
 from src.services.medical_query_router import (
     MedicalQueryRoute,
     MedicalQueryRouter,
-    get_medical_query_router,
-    parse_relative_time_range,
 )
 from src.services.query_rewriter import get_query_rewriter
 from src.services.search_service import get_retriever
@@ -48,7 +44,7 @@ def ensure_service_secret():
 
 def test_extractor_blood_pressure_variations():
     extractor = MedicalObservationExtractor()
-    report_date = datetime(2026, 10, 1, 10, 0, tzinfo=timezone.utc)
+    report_date = datetime(2026, 10, 1, 10, 0, tzinfo=UTC)
 
     # Various BP formats
     texts = [
@@ -181,7 +177,7 @@ def test_extractor_sanity_bounds_rejection():
 def test_extractor_date_resolution():
     """Explicit measurement date takes precedence over document report date fallback."""
     extractor = MedicalObservationExtractor()
-    doc_fallback_date = datetime(2026, 10, 1, 8, 0, tzinfo=timezone.utc)
+    doc_fallback_date = datetime(2026, 10, 1, 8, 0, tzinfo=UTC)
 
     # 1. Explicit nearby date
     text_with_date = "Recorded on 2026-10-03: BP: 120/80 mmHg."
@@ -219,7 +215,7 @@ async def seed_observations_data():
     doc_b1_id = f"doc-b1-{uuid.uuid4().hex[:8]}"
 
     # Fixed reference dates
-    now_utc = datetime(2026, 10, 5, 12, 0, 0, tzinfo=timezone.utc)
+    now_utc = datetime(2026, 10, 5, 12, 0, 0, tzinfo=UTC)
     date_1d_ago = now_utc - timedelta(days=1)
     date_2d_ago = now_utc - timedelta(days=2)
     date_10d_ago = now_utc - timedelta(days=10)
@@ -395,7 +391,6 @@ async def test_observation_query_patient_isolation(seed_observations_data):
     """Ensure querying Patient A never leaks Patient B's observations."""
     data = seed_observations_data
     patient_a = data["patient_a_id"]
-    patient_b = data["patient_b_id"]
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -472,7 +467,7 @@ async def test_observation_reprocessing_idempotency():
             value_numeric=120.0,
             value_secondary_numeric=80.0,
             unit="mmHg",
-            observed_at=datetime.now(timezone.utc),
+            observed_at=datetime.now(UTC),
             confidence=0.9,
             extraction_method="REGEX",
         )
@@ -508,7 +503,7 @@ async def test_observation_reprocessing_idempotency():
             value_numeric=122.0,
             value_secondary_numeric=82.0,
             unit="mmHg",
-            observed_at=datetime.now(timezone.utc),
+            observed_at=datetime.now(UTC),
             confidence=0.95,
             extraction_method="REGEX",
         )
@@ -560,7 +555,7 @@ async def test_document_deletion_cleanup(monkeypatch):
             display_name="Heart Rate",
             value_numeric=75.0,
             unit="bpm",
-            observed_at=datetime.now(timezone.utc),
+            observed_at=datetime.now(UTC),
             confidence=0.95,
             extraction_method="REGEX",
         )
@@ -592,7 +587,7 @@ async def test_document_deletion_cleanup(monkeypatch):
 
 def test_query_router_classification():
     router = MedicalQueryRouter()
-    ref_time = datetime(2026, 10, 5, 12, 0, 0, tzinfo=timezone.utc)
+    ref_time = datetime(2026, 10, 5, 12, 0, 0, tzinfo=UTC)
 
     # 1. STRUCTURED
     q_struct_latest = router.route_query("What is the latest BP?", now=ref_time)
@@ -627,7 +622,7 @@ def test_query_router_classification():
 
 def test_query_router_multi_turn_followup():
     router = MedicalQueryRouter()
-    ref_time = datetime(2026, 10, 5, 12, 0, 0, tzinfo=timezone.utc)
+    ref_time = datetime(2026, 10, 5, 12, 0, 0, tzinfo=UTC)
 
     history = [
         ConversationMessage(role="user", content="What was the patient's blood pressure?"),
@@ -851,7 +846,7 @@ async def test_observation_query_pagination_and_deterministic_order():
     patient_id = f"pat-pag-{uuid.uuid4().hex[:8]}"
     doc_id = f"doc-{uuid.uuid4().hex[:8]}"
 
-    base_date = datetime(2026, 10, 1, 10, 0, 0, tzinfo=timezone.utc)
+    base_date = datetime(2026, 10, 1, 10, 0, 0, tzinfo=UTC)
     async with AsyncSessionLocal() as session:
         for i in range(5):
             obs = MedicalObservation(

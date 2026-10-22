@@ -192,6 +192,16 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "Production configuration failure: COHERE_API_KEY must be provided in production."
                 )
+            if self.STORAGE_BACKEND.lower() == "local":
+                raise ValueError(
+                    "Production configuration failure: STORAGE_BACKEND must be 'supabase' in production. "
+                    "Ephemeral local storage causes data loss on container sleep/restart."
+                )
+            if self.STORAGE_BACKEND.lower() == "supabase" and not self.SUPABASE_SERVICE_ROLE_KEY:
+                raise ValueError(
+                    "Production security failure: SUPABASE_SERVICE_ROLE_KEY must be configured in production "
+                    "to prevent unauthorized downgrade to public/anon credentials for private document storage."
+                )
         return self
 
     model_config = SettingsConfigDict(
