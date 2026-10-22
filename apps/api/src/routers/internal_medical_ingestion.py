@@ -1,6 +1,4 @@
-from src.security.medical_context import get_medical_context, bind_patient, validate_storage_scope, patient_collection_id
-from src.security.service_context import ServiceContext
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from fastapi import (
@@ -24,7 +22,6 @@ from src.routers.internal_medical_documents import (
     sanitize_filename,
     sanitize_identifier,
 )
-from src.security.service_auth import verify_service_secret
 from src.schemas.internal_medical_documents import (
     MedicalDocumentDeleteIndexResponse,
     MedicalDocumentIngestRequest,
@@ -32,6 +29,12 @@ from src.schemas.internal_medical_documents import (
     MedicalDocumentStaleRecoveryResponse,
     MedicalDocumentStatusResponse,
 )
+from src.security.medical_context import (
+    bind_patient,
+    get_medical_context,
+    validate_storage_scope,
+)
+from src.security.service_context import ServiceContext
 from src.tasks.document_tasks import enqueue_medical_document
 from src.vector_store import QdrantVectorStore
 
@@ -68,7 +71,7 @@ async def recover_stale_documents(
     _auth: ServiceContext = Depends(get_medical_context),
     session: AsyncSession = Depends(get_db),
 ) -> MedicalDocumentStaleRecoveryResponse:
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
+    cutoff = datetime.now(UTC) - timedelta(minutes=threshold_minutes)
     stmt = select(ExternalDocument).where(
         ExternalDocument.source_system == "quick_clinic",
             ExternalDocument.tenant_id == _auth.tenant_id,

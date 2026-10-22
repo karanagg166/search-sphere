@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 import structlog
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -76,7 +77,7 @@ class ServiceClientService:
         raw_key, prefix, key_hash = generate_api_key()
         client.api_key_hash = key_hash
         client.api_key_prefix = prefix
-        client.updated_at = datetime.now(timezone.utc)
+        client.updated_at = datetime.now(UTC)
         await self.db.commit()
         await self.db.refresh(client)
 
@@ -96,7 +97,7 @@ class ServiceClientService:
             )
 
         client.status = "revoked"
-        client.revoked_at = datetime.now(timezone.utc)
+        client.revoked_at = datetime.now(UTC)
         await self.db.commit()
         await self.db.refresh(client)
 

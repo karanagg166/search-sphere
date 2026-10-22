@@ -1,5 +1,3 @@
-from src.security.medical_context import get_medical_context, bind_patient, validate_storage_scope, patient_collection_id
-from src.security.service_context import ServiceContext
 import json
 import time
 from typing import Any
@@ -15,16 +13,16 @@ from src.models.external_document import ExternalDocument
 from src.models.medical_observation import MedicalObservation
 from src.retrieval.reranked_retriever import RerankedHybridRetriever
 from src.routers.internal_medical_documents import sanitize_identifier
-from src.security.service_auth import verify_service_secret
 from src.schemas.internal_medical_rag import (
     MedicalAnswerCitation,
-    MedicalChatMessage,
     MedicalChatRequest,
     MedicalChatResponse,
     MedicalRagAnswerRequest,
     MedicalRagAnswerResponse,
 )
 from src.schemas.search import ConversationMessage
+from src.security.medical_context import bind_patient, get_medical_context
+from src.security.service_context import ServiceContext
 from src.services.answer_generator import (
     MEDICAL_ANSWER_SYSTEM_PREAMBLE,
     MEDICAL_NO_RESULTS_ANSWER,
@@ -407,8 +405,6 @@ async def generate_medical_answer(
     retriever: RerankedHybridRetriever = Depends(get_retriever),
     answer_generator: AnswerGenerator = Depends(get_answer_generator),
 ) -> MedicalRagAnswerResponse:
-    start_time = time.perf_counter()
-
     clean_patient_id = sanitize_identifier(body.patient_id, "patient_id")
     _auth = bind_patient(_auth, clean_patient_id)
     clean_query = body.query.strip()

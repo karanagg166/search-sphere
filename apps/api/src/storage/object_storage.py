@@ -55,12 +55,17 @@ class SupabaseStorage(ObjectStorage):
         bucket: str | None = None,
     ):
         self.base_url = (base_url or settings.NEXT_PUBLIC_SUPABASE_URL).rstrip("/")
-        # Prefer service role key if available, else publishable/anon key
-        self.api_key = (
-            settings.SUPABASE_SERVICE_ROLE_KEY
-            or api_key
-            or settings.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-        )
+        # Authoritative private storage operations require the service-role key.
+        # Reject silent downgrade to publishable/anon credentials in production.
+        service_key = settings.SUPABASE_SERVICE_ROLE_KEY or api_key
+        if not service_key:
+            if settings.ENVIRONMENT.lower() == "production":
+                raise RuntimeError(
+                    "Missing SUPABASE_SERVICE_ROLE_KEY for private storage backend in production."
+                )
+            service_key = settings.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+
+        self.api_key = service_key
         self.bucket = bucket or settings.SUPABASE_STORAGE_BUCKET
 
     def _headers(
@@ -168,10 +173,18 @@ class SupabaseStorage(ObjectStorage):
         return response.content
 
     async def exists(self, key: str) -> bool:
-        url = await self.get_url(key)
+        url = f"{self.base_url}/storage/v1/object/{self.bucket}/{key}"
+        headers = self._headers()
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.head(url)
-            return resp.status_code == 200
+            resp = await client.head(url, headers=headers)
+            if resp.status_code == 200:
+                return True
+            if resp.status_code == 404:
+                return False
+            # Some reverse proxies reject HEAD; fallback to byte-range GET
+            headers["Range"] = "bytes=0-0"
+            resp_get = await client.get(url, headers=headers)
+            return resp_get.status_code in (200, 206)
 
 
 class LocalStorage(ObjectStorage):
@@ -220,10 +233,17 @@ class LocalStorage(ObjectStorage):
 
 def get_object_storage() -> ObjectStorage:
     """Dependency provider returning the configured ObjectStorage backend."""
-    if (
-        settings.STORAGE_BACKEND.lower() == "supabase"
-        and settings.NEXT_PUBLIC_SUPABASE_URL
-        and "your-project" not in settings.NEXT_PUBLIC_SUPABASE_URL
-    ):
+    backend = settings.STORAGE_BACKEND.lower()
+    if backend == "supabase":
+        if not settings.NEXT_PUBLIC_SUPABASE_URL or "your-project" in settings.NEXT_PUBLIC_SUPABASE_URL:
+            raise RuntimeError("NEXT_PUBLIC_SUPABASE_URL is not configured for Supabase storage backend.")
         return SupabaseStorage()
+
+    if settings.ENVIRONMENT.lower() == "production":
+        logger.error("Attempted to use ephemeral LocalStorage in production environment.")
+        raise RuntimeError(
+            "Production configuration failure: STORAGE_BACKEND must be 'supabase' in production. "
+            "Ephemeral local storage causes data loss on container sleep/restart."
+        )
+
     return LocalStorage()

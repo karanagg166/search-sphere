@@ -1,5 +1,3 @@
-from src.security.medical_context import get_medical_context, bind_patient, validate_storage_scope, patient_collection_id
-from src.security.service_context import ServiceContext
 import time
 from typing import Any
 
@@ -12,12 +10,13 @@ from src.db import get_db
 from src.models.external_document import ExternalDocument
 from src.retrieval.reranked_retriever import RerankedHybridRetriever
 from src.routers.internal_medical_documents import sanitize_identifier
-from src.security.service_auth import verify_service_secret
 from src.schemas.internal_medical_retrieval import (
     MedicalRetrievalChunkResult,
     MedicalRetrievalSearchRequest,
     MedicalRetrievalSearchResponse,
 )
+from src.security.medical_context import bind_patient, get_medical_context
+from src.security.service_context import ServiceContext
 from src.services.search_service import get_retriever
 
 logger = structlog.get_logger()

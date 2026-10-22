@@ -1,16 +1,16 @@
-from src.security.medical_context import patient_collection_id
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
 import uuid
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
 
 from src.config import settings
 from src.db import AsyncSessionLocal
 from src.main import app
 from src.models.external_document import ExternalDocument
 from src.processing.models.search import RerankedSearchResult
+from src.security.medical_context import patient_collection_id
 from src.services.search_service import get_retriever
 
 TEST_SERVICE_SECRET = "test-service-secret"
@@ -113,7 +113,7 @@ async def test_medical_retrieval_patient_isolation_pat_a_and_pat_b():
             mime_type="application/pdf",
             file_size=2048,
             document_type="LAB_REPORT",
-            report_date=datetime(2026, 10, 1, 0, 0, tzinfo=timezone.utc),
+            report_date=datetime(2026, 10, 1, 0, 0, tzinfo=UTC),
             status="READY",
         )
         doc_b = ExternalDocument(
@@ -128,7 +128,7 @@ async def test_medical_retrieval_patient_isolation_pat_a_and_pat_b():
             mime_type="application/pdf",
             file_size=2048,
             document_type="LAB_REPORT",
-            report_date=datetime(2026, 10, 1, 0, 0, tzinfo=timezone.utc),
+            report_date=datetime(2026, 10, 1, 0, 0, tzinfo=UTC),
             status="READY",
         )
         session.add(doc_a)

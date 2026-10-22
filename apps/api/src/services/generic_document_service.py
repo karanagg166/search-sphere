@@ -1,5 +1,6 @@
 import os
 import re
+
 import structlog
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
@@ -8,9 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.collection import DocumentCollection
 from src.models.external_document import ExternalDocument
 from src.schemas.v1.documents import (
-    DocumentListResponse,
     DocumentRegisterRequest,
-    DocumentResponse,
 )
 from src.security.service_context import ServiceContext
 from src.storage.object_storage import ObjectStorage

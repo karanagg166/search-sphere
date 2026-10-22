@@ -140,8 +140,8 @@ def mock_vector_store() -> MagicMock:
 
 @pytest.fixture
 def mock_sparse_embedder() -> MagicMock:
-    from src.processing.sparse_embedding import BM25Embedder
     from src.processing.models.sparse_vector import SparseVector
+    from src.processing.sparse_embedding import BM25Embedder
 
     mock = MagicMock(spec=BM25Embedder)
     mock.embed_chunks.side_effect = lambda chunks: [SparseVector(indices=[101], values=[1.0]) for _ in chunks]

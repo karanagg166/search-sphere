@@ -1,13 +1,13 @@
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from enum import Enum
 import re
-from typing import Any
+import zoneinfo
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 
 from src.schemas.search import ConversationMessage
 
 
-class MedicalQueryRoute(str, Enum):
+class MedicalQueryRoute(StrEnum):
     STRUCTURED = "STRUCTURED"
     RAG = "RAG"
     HYBRID = "HYBRID"
@@ -83,9 +83,6 @@ ELLIPTICAL_FOLLOWUP_PATTERN = re.compile(
 )
 
 
-import zoneinfo
-
-
 def parse_relative_time_range(
     query: str,
     now: datetime | None = None,
@@ -109,9 +106,9 @@ def parse_relative_time_range(
     from_date and to_date to UTC for querying UTC timestamps in PostgreSQL.
     """
     try:
-        local_tz = zoneinfo.ZoneInfo(tz_name) if tz_name else timezone.utc
+        local_tz = zoneinfo.ZoneInfo(tz_name) if tz_name else UTC
     except Exception:
-        local_tz = timezone.utc
+        local_tz = UTC
 
     if now is not None:
         local_now = now.astimezone(local_tz) if now.tzinfo else now.replace(tzinfo=local_tz)
@@ -132,8 +129,8 @@ def parse_relative_time_range(
     if re.search(r"\btoday\b", query_lower):
         start_of_today_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
         return TimeRangeFilter(
-            from_date=start_of_today_local.astimezone(timezone.utc),
-            to_date=local_now.astimezone(timezone.utc),
+            from_date=start_of_today_local.astimezone(UTC),
+            to_date=local_now.astimezone(UTC),
             description="today",
         )
 
@@ -143,8 +140,8 @@ def parse_relative_time_range(
         start_of_yesterday_local = start_of_today_local - timedelta(days=1)
         end_of_yesterday_local = start_of_today_local - timedelta(microseconds=1)
         return TimeRangeFilter(
-            from_date=start_of_yesterday_local.astimezone(timezone.utc),
-            to_date=end_of_yesterday_local.astimezone(timezone.utc),
+            from_date=start_of_yesterday_local.astimezone(UTC),
+            to_date=end_of_yesterday_local.astimezone(UTC),
             description="yesterday",
         )
 
@@ -154,8 +151,8 @@ def parse_relative_time_range(
         num_days = int(m_days.group(1))
         from_dt = local_now - timedelta(days=num_days)
         return TimeRangeFilter(
-            from_date=from_dt.astimezone(timezone.utc),
-            to_date=local_now.astimezone(timezone.utc),
+            from_date=from_dt.astimezone(UTC),
+            to_date=local_now.astimezone(UTC),
             description=f"last {num_days} days",
         )
 
@@ -166,8 +163,8 @@ def parse_relative_time_range(
             hour=0, minute=0, second=0, microsecond=0
         )
         return TimeRangeFilter(
-            from_date=start_of_week_local.astimezone(timezone.utc),
-            to_date=local_now.astimezone(timezone.utc),
+            from_date=start_of_week_local.astimezone(UTC),
+            to_date=local_now.astimezone(UTC),
             description="this week",
         )
 
@@ -180,8 +177,8 @@ def parse_relative_time_range(
         last_monday_local = this_monday_local - timedelta(days=7)
         last_sunday_end_local = this_monday_local - timedelta(microseconds=1)
         return TimeRangeFilter(
-            from_date=last_monday_local.astimezone(timezone.utc),
-            to_date=last_sunday_end_local.astimezone(timezone.utc),
+            from_date=last_monday_local.astimezone(UTC),
+            to_date=last_sunday_end_local.astimezone(UTC),
             description="last week",
         )
 

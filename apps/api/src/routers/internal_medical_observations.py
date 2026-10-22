@@ -1,16 +1,15 @@
-from src.security.medical_context import get_medical_context, bind_patient, validate_storage_scope, patient_collection_id
-from src.security.service_context import ServiceContext
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import get_db
 from src.routers.internal_medical_documents import sanitize_identifier
-from src.security.service_auth import verify_service_secret
 from src.schemas.internal_medical_observations import (
     MedicalObservationQueryRequest,
     MedicalObservationQueryResponse,
 )
+from src.security.medical_context import bind_patient, get_medical_context
+from src.security.service_context import ServiceContext
 from src.services.medical_observation_service import (
     MedicalObservationService,
     get_medical_observation_service,

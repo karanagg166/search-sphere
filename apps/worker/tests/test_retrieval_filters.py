@@ -1,6 +1,6 @@
 from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from qdrant_client import models
 
 from src.processing.models.search import (
     DenseSearchResult,
@@ -9,10 +9,10 @@ from src.processing.models.search import (
 )
 from src.processing.models.sparse_vector import SparseVector
 from src.retrieval.dense_retriever import DenseRetriever
-from src.retrieval.sparse_retriever import SparseRetriever
 from src.retrieval.hybrid_retriever import HybridRetriever
 from src.retrieval.reranked_retriever import RerankedHybridRetriever
 from src.retrieval.reranker import CrossEncoderReranker
+from src.retrieval.sparse_retriever import SparseRetriever
 from src.vector_store.qdrant_store import QdrantVectorStore
 
 
@@ -231,7 +231,6 @@ async def test_reranked_hybrid_retriever_safety_and_metadata_preservation():
         )
     ]
 
-    mock_reranker = MagicMock(spec=CrossEncoderReranker)
     # Reranker rerank method returns reranked result
     reranker = CrossEncoderReranker(model=MagicMock())
     reranker.rerank = MagicMock()

@@ -2,7 +2,7 @@ import pytest
 from fastapi import HTTPException
 
 from src.routers.internal_medical_documents import detect_and_validate_file_type
-from tests.binary_fixtures import pdf_bytes, image_bytes
+from tests.binary_fixtures import image_bytes, pdf_bytes
 
 
 @pytest.mark.parametrize("data,mime", [(pdf_bytes(), "application/pdf"), (image_bytes("JPEG"), "image/jpeg"), (image_bytes("PNG"), "image/png"), (image_bytes("WEBP"), "image/webp")])

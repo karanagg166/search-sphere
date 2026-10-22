@@ -1,20 +1,17 @@
-from src.security.medical_context import patient_collection_id
-from datetime import datetime, timezone
 import uuid
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
+
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
 
 from src.config import settings
 from src.db import AsyncSessionLocal
 from src.main import app
 from src.models.external_document import ExternalDocument
 from src.processing.models.search import RerankedSearchResult
-from src.routers.internal_medical_rag import generate_medical_answer
+from src.security.medical_context import patient_collection_id
 from src.services.answer_generator import (
-    AnswerGenerator,
-    MEDICAL_ANSWER_SYSTEM_PREAMBLE,
     MEDICAL_NO_RESULTS_ANSWER,
     get_answer_generator,
 )
@@ -153,7 +150,7 @@ async def test_medical_rag_grounding_exact_extraction():
             mime_type="application/pdf",
             file_size=1024,
             document_type="LAB_REPORT",
-            report_date=datetime(2026, 10, 1, 0, 0, tzinfo=timezone.utc),
+            report_date=datetime(2026, 10, 1, 0, 0, tzinfo=UTC),
             status="READY",
         )
         session.add(doc)
@@ -242,7 +239,7 @@ async def test_medical_rag_hallucination_prevention():
             mime_type="application/pdf",
             file_size=1024,
             document_type="RADIOLOGY_SCAN",
-            report_date=datetime(2026, 9, 15, 0, 0, tzinfo=timezone.utc),
+            report_date=datetime(2026, 9, 15, 0, 0, tzinfo=UTC),
             status="READY",
         )
         session.add(doc)
@@ -592,7 +589,7 @@ async def test_medical_rag_citation_integrity_and_sanitization():
             mime_type="application/pdf",
             file_size=1024,
             document_type="LAB_REPORT",
-            report_date=datetime(2026, 10, 2, 0, 0, tzinfo=timezone.utc),
+            report_date=datetime(2026, 10, 2, 0, 0, tzinfo=UTC),
             status="READY",
         )
         session.add(doc)
@@ -686,7 +683,7 @@ async def test_medical_rag_multiple_source_answer():
                 mime_type="application/pdf",
                 file_size=1024,
                 document_type="LAB_REPORT",
-                report_date=datetime(2026, 10, 1, 0, 0, tzinfo=timezone.utc),
+                report_date=datetime(2026, 10, 1, 0, 0, tzinfo=UTC),
                 status="READY",
             )
         )
@@ -703,7 +700,7 @@ async def test_medical_rag_multiple_source_answer():
                 mime_type="application/pdf",
                 file_size=1024,
                 document_type="LAB_REPORT",
-                report_date=datetime(2026, 10, 3, 0, 0, tzinfo=timezone.utc),
+                report_date=datetime(2026, 10, 3, 0, 0, tzinfo=UTC),
                 status="READY",
             )
         )
@@ -1133,7 +1130,7 @@ async def test_medical_rag_evaluation_dataset():
                 mime_type="application/pdf",
                 file_size=1024,
                 document_type="LAB_REPORT",
-                report_date=datetime(2026, 10, 1, 0, 0, tzinfo=timezone.utc),
+                report_date=datetime(2026, 10, 1, 0, 0, tzinfo=UTC),
                 status="READY",
             )
         )

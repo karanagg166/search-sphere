@@ -7,8 +7,7 @@ Tests routing accuracy across >=40 representative clinical queries spanning:
 
 Measures precision, recall, and overall accuracy, enforcing an accuracy threshold >= 90%.
 """
-import pytest
-from src.services.medical_query_router import MedicalQueryRoute, MedicalQueryRouter
+from src.services.medical_query_router import MedicalQueryRouter
 
 # 45 representative clinical queries with ground-truth expected routes
 ROUTING_EVAL_DATASET: list[dict[str, str]] = [

@@ -1,6 +1,6 @@
 import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import dramatiq
@@ -15,10 +15,8 @@ from src.processing.chunking import DocumentChunker
 from src.processing.cleaning import TextCleaner
 from src.processing.embedding import (
     DenseEmbedder,
-    DenseEmbeddingError,
 )
 from src.processing.extraction import (
-    DocumentExtractionError,
     DocumentExtractor,
     MedicalObservationExtractor,
 )
@@ -30,11 +28,10 @@ from src.processing.models.document import (
 )
 from src.processing.sparse_embedding import (
     BM25Embedder,
-    SparseEmbeddingError,
 )
 from src.services.document_fetcher import DocumentFetcher
 from src.storage.object_storage import ObjectStorage, get_object_storage
-from src.vector_store import QdrantVectorStore, QdrantVectorStoreError
+from src.vector_store import QdrantVectorStore
 
 logger = structlog.get_logger()
 
@@ -460,7 +457,7 @@ async def _process_generic_document(
             )
             doc_in_session = res_doc.scalar_one()
             doc_in_session.status = "READY"
-            doc_in_session.processed_at = datetime.now(timezone.utc)
+            doc_in_session.processed_at = datetime.now(UTC)
             doc_in_session.processing_error = None
             await session.commit()
 

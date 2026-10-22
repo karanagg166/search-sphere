@@ -1,7 +1,6 @@
 import hashlib
 import hmac
 import secrets
-from typing import Any, Callable
 
 import structlog
 from fastapi import Depends, Header, HTTPException, Request, status
@@ -9,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
-from src.db import AsyncSessionLocal, get_db
+from src.db import get_db
 from src.models.service_client import ServiceClient
 from src.security.service_context import ServiceContext
 

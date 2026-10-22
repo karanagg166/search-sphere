@@ -1,7 +1,6 @@
-from src.security.medical_context import patient_collection_id
-from datetime import datetime, timedelta, timezone
 import uuid
-from unittest.mock import ANY, AsyncMock, patch
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -11,6 +10,7 @@ from src.config import settings
 from src.db import AsyncSessionLocal
 from src.main import app
 from src.models.external_document import ExternalDocument
+from src.security.medical_context import patient_collection_id
 
 TEST_SERVICE_SECRET = "test-service-secret"
 VALID_AUTH_HEADER = {"Authorization": f"Bearer {TEST_SERVICE_SECRET}"}
@@ -106,7 +106,7 @@ async def test_ingest_validation_errors():
             headers=VALID_AUTH_HEADER,
             json={
                 "patientId": "pat-123",
-                "storagePath": f"medical-documents/pat-123/../../etc/passwd",
+                "storagePath": "medical-documents/pat-123/../../etc/passwd",
                 "fileName": "passwd",
                 "mimeType": "application/pdf",
                 "fileSize": 1024,
@@ -334,7 +334,7 @@ async def test_stale_documents_recovery():
     doc_id1 = f"doc-stale-1-{uuid.uuid4().hex[:8]}"
     doc_id2 = f"doc-stale-2-{uuid.uuid4().hex[:8]}"
     patient_id = f"pat-{uuid.uuid4().hex[:8]}"
-    old_time = datetime.now(timezone.utc) - timedelta(minutes=30)
+    old_time = datetime.now(UTC) - timedelta(minutes=30)
 
     async with AsyncSessionLocal() as session:
         doc1 = ExternalDocument(

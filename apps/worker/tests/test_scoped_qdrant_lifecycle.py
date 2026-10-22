@@ -1,6 +1,6 @@
 """Use Qdrant's actual local engine to exercise mutations and mandatory filters."""
-from qdrant_client import AsyncQdrantClient, models
 import pytest
+from qdrant_client import AsyncQdrantClient, models
 
 from src.processing.models.document import EmbeddedChunk, EmbeddedDocument
 from src.vector_store.qdrant_store import QdrantVectorStore
@@ -50,6 +50,7 @@ def test_api_and_worker_vector_store_copies_match():
 @pytest.mark.asyncio
 async def test_hybrid_result_preserves_scope_through_reranking():
     from unittest.mock import MagicMock
+
     from src.processing.models.sparse_vector import SparseVector
     from src.retrieval.reranker import CrossEncoderReranker
 
