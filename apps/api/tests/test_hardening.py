@@ -163,6 +163,10 @@ def test_production_secrets_validation_succeeds_with_secure_config():
         ENVIRONMENT="production",
         JWT_SECRET_KEY="completely-custom-production-jwt-secret-key-xyz123",
         COHERE_API_KEY="actual_production_cohere_key",
+        STORAGE_BACKEND="supabase",
+        SUPABASE_SERVICE_ROLE_KEY="test_supabase_service_role_key",
     )
     assert s.ENVIRONMENT == "production"
     assert s.JWT_SECRET_KEY == "completely-custom-production-jwt-secret-key-xyz123"
+    assert s.STORAGE_BACKEND == "supabase"
+    assert s.SUPABASE_SERVICE_ROLE_KEY == "test_supabase_service_role_key"
