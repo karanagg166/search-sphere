@@ -1,4 +1,3 @@
-import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -10,7 +9,6 @@ scripts_dir = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(scripts_dir))
 
 from monitor_backends import (
-    DEFAULT_TARGETS,
     EndpointConfig,
     ProbeResult,
     ServiceTarget,
@@ -111,6 +109,47 @@ class TestEndpointProbing:
 
         assert result.success is False
         assert "JSON field 'status' was 'degraded'" in result.message
+        assert result.failure_category == "service"
+
+    @patch("urllib.request.urlopen")
+    def test_stale_deployment_detection(self, mock_urlopen, monkeypatch):
+        monkeypatch.setenv("TEST_EXPECTED_SHA", "abcdef123456")
+        mock_resp = MagicMock()
+        mock_resp.getcode.return_value = 200
+        mock_resp.read.return_value = b'{"status": "ok", "git_commit": "oldsha999999"}'
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        config = EndpointConfig(
+            path="/health",
+            expected_sha_env="TEST_EXPECTED_SHA",
+            sha_field="git_commit",
+        )
+        result = probe_endpoint("Stale Service", "https://api.example.com/health", config, max_retries=1)
+
+        assert result.success is True
+        assert result.is_stale is True
+        assert result.detected_sha == "oldsha999999"
+        assert result.expected_sha == "abcdef123456"
+        assert "Stale deployment" in result.message
+
+    @patch("urllib.request.urlopen")
+    def test_infrastructure_failure_classification_503(self, mock_urlopen):
+        import urllib.error
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            url="https://api.example.com/ready",
+            code=503,
+            msg="Service Unavailable",
+            hdrs={},
+            fp=None,
+        )
+
+        config = EndpointConfig(path="/ready", check_type="readiness", failure_category="infrastructure")
+        with patch("time.sleep"):
+            result = probe_endpoint("Infra Down", "https://api.example.com/ready", config, max_retries=1)
+
+        assert result.success is False
+        assert result.failure_category == "infrastructure"
+        assert "503" in result.message
 
 
 class TestServiceTargetConfig:

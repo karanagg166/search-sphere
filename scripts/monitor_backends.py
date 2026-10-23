@@ -28,7 +28,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from typing import Any
 
 # Configure structured console logging
@@ -53,6 +52,11 @@ class EndpointConfig:
     expected_status: int = 200
     status_field: str = "status"
     allowed_status_values: tuple[str, ...] = ("ok", "ready")
+    check_type: str = "liveness"  # "liveness", "readiness", "worker_heartbeat"
+    sha_field: str | None = None
+    expected_sha_env: str | None = None
+    failure_category: str = "service"  # "infrastructure", "service"
+    is_critical: bool = True
 
 
 @dataclass
@@ -83,8 +87,23 @@ DEFAULT_TARGETS: list[ServiceTarget] = [
         default_url="https://search-sphere-api.onrender.com",
         enabled_env_var="MONITOR_SEARCH_SPHERE",
         endpoints=[
-            EndpointConfig(path="/health", expected_status=200, status_field="status", allowed_status_values=("ok",)),
-            EndpointConfig(path="/ready", expected_status=200, status_field="status", allowed_status_values=("ok", "ready")),
+            EndpointConfig(
+                path="/health",
+                expected_status=200,
+                status_field="status",
+                allowed_status_values=("ok",),
+                check_type="liveness",
+                sha_field="git_commit",
+                expected_sha_env="SEARCH_SPHERE_EXPECTED_SHA",
+            ),
+            EndpointConfig(
+                path="/ready",
+                expected_status=200,
+                status_field="status",
+                allowed_status_values=("ok", "ready"),
+                check_type="readiness",
+                failure_category="infrastructure",
+            ),
         ],
     ),
     ServiceTarget(
@@ -93,8 +112,23 @@ DEFAULT_TARGETS: list[ServiceTarget] = [
         default_url="https://quickclinic-socket-server.onrender.com",
         enabled_env_var="MONITOR_QUICK_CLINIC_SOCKET",
         endpoints=[
-            EndpointConfig(path="/health", expected_status=200, status_field="status", allowed_status_values=("ok",)),
-            EndpointConfig(path="/ready", expected_status=200, status_field="status", allowed_status_values=("ok", "ready")),
+            EndpointConfig(
+                path="/health",
+                expected_status=200,
+                status_field="status",
+                allowed_status_values=("ok",),
+                check_type="liveness",
+                sha_field="gitCommit",
+                expected_sha_env="QUICK_CLINIC_EXPECTED_SHA",
+            ),
+            EndpointConfig(
+                path="/ready",
+                expected_status=200,
+                status_field="status",
+                allowed_status_values=("ok", "ready"),
+                check_type="readiness",
+                failure_category="infrastructure",
+            ),
         ],
     ),
     ServiceTarget(
@@ -103,7 +137,24 @@ DEFAULT_TARGETS: list[ServiceTarget] = [
         default_url="https://exam-arena-mu.vercel.app",
         enabled_env_var="MONITOR_EXAM_ARENA",
         endpoints=[
-            EndpointConfig(path="/health", expected_status=200, status_field="status", allowed_status_values=("ok",)),
+            EndpointConfig(
+                path="/health",
+                expected_status=200,
+                status_field="status",
+                allowed_status_values=("ok",),
+                check_type="liveness",
+                sha_field="git_commit",
+                expected_sha_env="EXAM_ARENA_EXPECTED_SHA",
+            ),
+            EndpointConfig(
+                path="/api/health/worker",
+                expected_status=200,
+                status_field="worker_available",
+                allowed_status_values=("true", "1"),
+                check_type="worker_heartbeat",
+                failure_category="infrastructure",
+                is_critical=False,
+            ),
         ],
     ),
     ServiceTarget(
@@ -113,7 +164,13 @@ DEFAULT_TARGETS: list[ServiceTarget] = [
         enabled_env_var="MONITOR_QUICK_CLINIC_WEB",
         default_enabled=False,
         endpoints=[
-            EndpointConfig(path="/api/health", expected_status=200, status_field="status", allowed_status_values=("ok",)),
+            EndpointConfig(
+                path="/api/health",
+                expected_status=200,
+                status_field="status",
+                allowed_status_values=("ok",),
+                check_type="liveness",
+            ),
         ],
     ),
 ]
@@ -155,6 +212,12 @@ class ProbeResult:
     success: bool
     is_cold_start: bool
     message: str
+    failure_category: str | None = None  # "infrastructure", "service", "stale_deployment", or None
+    check_type: str = "liveness"
+    detected_sha: str | None = None
+    expected_sha: str | None = None
+    is_stale: bool = False
+    is_critical: bool = True
     data: dict[str, Any] | None = None
 
 
@@ -172,6 +235,8 @@ def probe_endpoint(
 
     last_error = ""
     is_cold_start = False
+    last_status_code: int | None = None
+    is_network_err = False
 
     for attempt in range(1, max_retries + 1):
         start_time = time.monotonic()
@@ -188,6 +253,7 @@ def probe_endpoint(
             with urllib.request.urlopen(req, timeout=total_timeout) as response:
                 elapsed = time.monotonic() - start_time
                 status_code = response.getcode()
+                last_status_code = status_code
                 raw_body = response.read(65536)  # Read up to 64KB
 
                 if status_code != endpoint_config.expected_status:
@@ -198,7 +264,7 @@ def probe_endpoint(
 
                 try:
                     payload = json.loads(raw_body.decode("utf-8"))
-                except Exception as json_err:
+                except (json.JSONDecodeError, UnicodeDecodeError) as json_err:
                     last_error = f"Invalid JSON response: {json_err}"
                     if attempt < max_retries:
                         time.sleep(backoff_seconds)
@@ -215,6 +281,28 @@ def probe_endpoint(
                         time.sleep(backoff_seconds)
                     continue
 
+                # Check deployment commit SHA if configured
+                detected_sha = None
+                if endpoint_config.sha_field:
+                    detected_sha = payload.get(endpoint_config.sha_field)
+                if not detected_sha:
+                    detected_sha = (
+                        payload.get("git_commit")
+                        or payload.get("gitCommit")
+                        or payload.get("commit")
+                    )
+
+                expected_sha = None
+                if endpoint_config.expected_sha_env:
+                    expected_sha = os.getenv(endpoint_config.expected_sha_env, "").strip()
+
+                is_stale = False
+                if expected_sha and detected_sha:
+                    clean_det = str(detected_sha).strip().lower()
+                    clean_exp = str(expected_sha).strip().lower()
+                    if not clean_det.startswith(clean_exp) and not clean_exp.startswith(clean_det):
+                        is_stale = True
+
                 # Success
                 return ProbeResult(
                     target_name=target_name,
@@ -224,13 +312,27 @@ def probe_endpoint(
                     attempts=attempt,
                     success=True,
                     is_cold_start=is_cold_start,
-                    message="OK",
+                    message="OK" if not is_stale else f"Stale deployment: live SHA ({str(detected_sha)[:7]}) != expected ({expected_sha[:7]})",
+                    failure_category="stale_deployment" if is_stale else None,
+                    check_type=endpoint_config.check_type,
+                    detected_sha=str(detected_sha) if detected_sha else None,
+                    expected_sha=expected_sha,
+                    is_stale=is_stale,
+                    is_critical=endpoint_config.is_critical,
                     data=payload,
                 )
 
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as exc:
+        except urllib.error.HTTPError as http_err:
             elapsed = time.monotonic() - start_time
-            is_cold_start = True  # Network delay or 502/503 during first attempts indicates container spin-up
+            last_status_code = http_err.code
+            last_error = f"HTTP {http_err.code}: {http_err.reason}"
+            if attempt < max_retries:
+                time.sleep(backoff_seconds)
+
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            elapsed = time.monotonic() - start_time
+            is_cold_start = True  # Network delay or container spin-up
+            is_network_err = True
             last_error = str(exc)
             logger.warning(
                 f"{YELLOW}[Attempt {attempt}/{max_retries}]{RESET} {target_name} ({full_url}) "
@@ -240,16 +342,26 @@ def probe_endpoint(
                 logger.info(f"Backing off {backoff_seconds}s for cold start completion...")
                 time.sleep(backoff_seconds)
 
+    # Classify failure category
+    fail_cat = endpoint_config.failure_category
+    if last_status_code in (502, 503, 504) or is_network_err:
+        fail_cat = "infrastructure"
+    elif last_status_code == 500 or "JSON" in last_error:
+        fail_cat = "service"
+
     # All retries exhausted
     return ProbeResult(
         target_name=target_name,
         url=full_url,
-        status_code=None,
+        status_code=last_status_code,
         elapsed_seconds=elapsed,
         attempts=max_retries,
         success=False,
         is_cold_start=is_cold_start,
         message=f"Failed after {max_retries} attempts: {last_error}",
+        failure_category=fail_cat,
+        check_type=endpoint_config.check_type,
+        is_critical=endpoint_config.is_critical,
     )
 
 
@@ -266,6 +378,9 @@ def run_monitor(
 
     logger.info(f"{BLUE}======================================================{RESET}")
     logger.info(f"{BLUE}🚀 Starting Multi-Project Backend Keep-Alive Monitor{RESET}")
+    logger.info("ℹ️ Free Hosting SLA Notice: Monitored targets run on free-tier infrastructure")
+    logger.info("   (Render free web services, Vercel free serverless). Cold starts and spin-downs")
+    logger.info("   after 15m of inactivity are inherent; no continuous uptime SLA is claimed.")
     logger.info(f"{BLUE}======================================================{RESET}")
 
     for target in active_targets:
@@ -291,16 +406,25 @@ def run_monitor(
 
             if result.success:
                 cold_tag = f" {YELLOW}(cold start resolved){RESET}" if result.is_cold_start else ""
+                stale_tag = f" {YELLOW}[STALE: live {result.detected_sha[:7] if result.detected_sha else 'unknown'} != exp {result.expected_sha[:7] if result.expected_sha else 'unknown'}]{RESET}" if result.is_stale else ""
                 logger.info(
-                    f"{GREEN}✅ [200 OK]{RESET} {ep.path} ({result.elapsed_seconds:.2f}s, "
-                    f"attempts={result.attempts}){cold_tag}"
+                    f"{GREEN}✅ [200 OK]{RESET} {ep.path} ({ep.check_type}) ({result.elapsed_seconds:.2f}s, "
+                    f"attempts={result.attempts}){cold_tag}{stale_tag}"
                 )
+                if result.is_stale:
+                    print(
+                        f"::warning title={target.name} Stale Deployment::{ep.path} ({ep.check_type}) "
+                        f"live SHA ({result.detected_sha[:7] if result.detected_sha else 'unknown'}) "
+                        f"does not match expected ({result.expected_sha[:7] if result.expected_sha else 'unknown'})"
+                    )
             else:
+                cat_label = (result.failure_category or "service").capitalize()
                 logger.error(
-                    f"{RED}❌ [FAIL]{RESET} {ep.path} after {result.attempts} attempts: {result.message}"
+                    f"{RED}❌ [FAIL - {cat_label.upper()}]{RESET} {ep.path} ({ep.check_type}) after {result.attempts} attempts: {result.message}"
                 )
-                # Output GitHub Actions error annotation
-                print(f"::error title={target.name} Failed::{ep.path} failed: {result.message}")
+                # Output GitHub Actions error annotation with failure category
+                alert_title = f"[{cat_label} Failure] {target.name}"
+                print(f"::error title={alert_title}::{ep.path} ({ep.check_type}) failed: {result.message}")
 
     # Summary
     logger.info(f"\n{BLUE}======================================================{RESET}")
@@ -308,15 +432,23 @@ def run_monitor(
     logger.info(f"{BLUE}======================================================{RESET}")
 
     failed_count = sum(1 for r in results if not r.success)
+    failed_critical = sum(1 for r in results if not r.success and r.is_critical)
     passed_count = sum(1 for r in results if r.success)
 
     for r in results:
-        status_sym = f"{GREEN}PASS{RESET}" if r.success else f"{RED}FAIL{RESET}"
-        logger.info(f"[{status_sym}] {r.target_name} -> {r.url} ({r.elapsed_seconds:.2f}s)")
+        if r.success:
+            if r.is_stale:
+                status_sym = f"{YELLOW}STALE{RESET}"
+            else:
+                status_sym = f"{GREEN}PASS{RESET}"
+        else:
+            cat = (r.failure_category or "service").upper()
+            status_sym = f"{RED}FAIL-{cat}{RESET}"
+        logger.info(f"[{status_sym}] {r.target_name} -> {r.url} ({r.check_type}, {r.elapsed_seconds:.2f}s)")
 
-    logger.info(f"Total: {len(results)} | Passed: {passed_count} | Failed: {failed_count}")
+    logger.info(f"Total: {len(results)} | Passed: {passed_count} | Failed: {failed_count} (Critical: {failed_critical})")
 
-    if failed_count > 0:
+    if failed_critical > 0:
         logger.error(f"{RED}💥 One or more critical backend endpoints failed keep-alive checks!{RESET}")
         return 1
 
