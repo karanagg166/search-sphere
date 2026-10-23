@@ -157,6 +157,31 @@ def test_production_secrets_validation_fails_on_missing_cohere_key():
     assert "COHERE_API_KEY must be provided in production" in str(exc_info.value)
 
 
+def test_production_secrets_validation_fails_on_local_storage():
+    """Verify that Settings validation fails when ENVIRONMENT=production and STORAGE_BACKEND=local."""
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(
+            ENVIRONMENT="production",
+            JWT_SECRET_KEY="completely-custom-production-jwt-secret-key-xyz123",
+            COHERE_API_KEY="valid_cohere_key",
+            STORAGE_BACKEND="local",
+        )
+    assert "STORAGE_BACKEND must be 'supabase' in production" in str(exc_info.value)
+
+
+def test_production_secrets_validation_fails_on_missing_supabase_service_role_key():
+    """Verify that Settings validation fails when STORAGE_BACKEND=supabase in production without service role key."""
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(
+            ENVIRONMENT="production",
+            JWT_SECRET_KEY="completely-custom-production-jwt-secret-key-xyz123",
+            COHERE_API_KEY="valid_cohere_key",
+            STORAGE_BACKEND="supabase",
+            SUPABASE_SERVICE_ROLE_KEY=None,
+        )
+    assert "SUPABASE_SERVICE_ROLE_KEY must be configured in production" in str(exc_info.value)
+
+
 def test_production_secrets_validation_succeeds_with_secure_config():
     """Verify that Settings validation passes in production when secure credentials are provided."""
     s = Settings(
@@ -170,3 +195,39 @@ def test_production_secrets_validation_succeeds_with_secure_config():
     assert s.JWT_SECRET_KEY == "completely-custom-production-jwt-secret-key-xyz123"
     assert s.STORAGE_BACKEND == "supabase"
     assert s.SUPABASE_SERVICE_ROLE_KEY == "test_supabase_service_role_key"
+
+
+def test_qdrant_error_classification():
+    """Verify that low-level Qdrant connection resets and timeouts are classified into domain errors."""
+    from src.vector_store.qdrant_store import (
+        classify_qdrant_error,
+        QdrantConnectionError,
+        QdrantTimeoutError,
+        QdrantSchemaError,
+        QdrantVectorStoreError,
+    )
+
+    # 1. Connection reset / network errors
+    err1 = RuntimeError("Connection reset by peer (errno 54)")
+    classified1 = classify_qdrant_error(err1, "query hybrid vectors", "documents")
+    assert isinstance(classified1, QdrantConnectionError)
+    assert isinstance(classified1, QdrantVectorStoreError)
+    assert "Failed to query hybrid vectors" in str(classified1)
+
+    # 2. Timeout error
+    err2 = TimeoutError("Deadline exceeded after 10.0s")
+    classified2 = classify_qdrant_error(err2, "query dense vectors", "documents")
+    assert isinstance(classified2, QdrantTimeoutError)
+    assert "Failed to query dense vectors" in str(classified2)
+
+    # 3. Schema error
+    err3 = ValueError("Collection missing vector param bm25")
+    classified3 = classify_qdrant_error(err3, "check collection existence", "documents")
+    assert isinstance(classified3, QdrantSchemaError)
+
+    # 4. General fallback
+    err4 = Exception("Unspecified internal error")
+    classified4 = classify_qdrant_error(err4, "query", "documents")
+    assert isinstance(classified4, QdrantVectorStoreError)
+    assert not isinstance(classified4, (QdrantConnectionError, QdrantTimeoutError, QdrantSchemaError))
+

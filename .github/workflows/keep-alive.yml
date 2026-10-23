@@ -1,64 +1,79 @@
-name: Keep Render Backend Awake
+name: Multi-Project Backend Health Monitor & Keep-Alive
 
 on:
   schedule:
-    # Run every 10 minutes to prevent Render 15-minute inactivity spin-down
-    - cron: "*/10 * * * *"
+    # Offset 10-minute cron schedule to keep Render free services awake without colliding on the hour
+    - cron: "7,17,27,37,47,57 * * * *"
   workflow_dispatch:
+    inputs:
+      retries:
+        description: "Max retry attempts per endpoint"
+        required: false
+        default: "3"
+      timeout:
+        description: "Total timeout per attempt (seconds)"
+        required: false
+        default: "35"
+      monitor_search_sphere:
+        description: "Monitor Search-Sphere API"
+        required: false
+        type: boolean
+        default: true
+      monitor_quick_clinic_socket:
+        description: "Monitor Quick-Clinic Socket.IO Server"
+        required: false
+        type: boolean
+        default: true
+      monitor_exam_arena:
+        description: "Monitor ExamArena API"
+        required: false
+        type: boolean
+        default: true
+      monitor_quick_clinic_web:
+        description: "Monitor Quick-Clinic Web App"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: backend-keep-alive-monitoring
+  cancel-in-progress: false
 
 jobs:
-  ping:
+  monitor-and-keep-alive:
+    name: Backend Health & Liveness Checks
     runs-on: ubuntu-latest
+
     steps:
-      - name: Ping Backend Health and Readiness Endpoints
-        env:
-          BACKEND_URL: ${{ secrets.RENDER_BACKEND_URL }}
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test runner dependencies
         run: |
-          set -euo pipefail
-          BASE_URL="${BACKEND_URL:-https://search-sphere-api.onrender.com}"
-          BASE_URL="${BASE_URL%/}"
+          python -m pip install --upgrade pip
+          pip install pytest
 
-          echo "Target Backend: $BASE_URL"
+      - name: Verify Monitor Integrity & Safety Suite
+        run: |
+          pytest scripts/tests/test_monitor.py -v
 
-          ping_endpoint() {
-            local endpoint="$1"
-            local max_attempts=3
-            local attempt=1
-            local target="${BASE_URL}${endpoint}"
-
-            echo "=== Checking endpoint: $target ==="
-            while [ $attempt -le $max_attempts ]; do
-              echo "Attempt $attempt of $max_attempts..."
-              response_file=$(mktemp)
-              http_code=$(curl -sS -o "$response_file" -w "%{http_code}" --max-time 60 "$target" || echo "FAILED")
-
-              if [ "$http_code" = "200" ]; then
-                echo "Success (HTTP 200) for $endpoint on attempt $attempt:"
-                cat "$response_file"
-                echo ""
-                rm -f "$response_file"
-                return 0
-              else
-                echo "Warning: Attempt $attempt returned HTTP status: $http_code"
-                if [ -s "$response_file" ]; then
-                  cat "$response_file"
-                  echo ""
-                fi
-                rm -f "$response_file"
-                if [ $attempt -lt $max_attempts ]; then
-                  echo "Waiting 5 seconds before retrying (allowing cold start to complete)..."
-                  sleep 5
-                fi
-              fi
-              attempt=$((attempt + 1))
-            done
-
-            echo "ERROR: Endpoint $target failed after $max_attempts attempts." >&2
-            return 1
-          }
-
-          # Verify both health and database readiness
-          ping_endpoint "/health"
-          ping_endpoint "/ready"
-
-          echo "All backend keep-alive health checks passed successfully."
+      - name: Execute Multi-Project Keep-Alive Probes
+        env:
+          SEARCH_SPHERE_API_URL: ${{ secrets.SEARCH_SPHERE_API_URL || 'https://search-sphere-api.onrender.com' }}
+          QUICK_CLINIC_SOCKET_URL: ${{ secrets.QUICK_CLINIC_SOCKET_URL || 'https://quickclinic-socket-server.onrender.com' }}
+          EXAM_ARENA_API_URL: ${{ secrets.EXAM_ARENA_API_URL || 'https://exam-arena-mu.vercel.app' }}
+          QUICK_CLINIC_WEB_URL: ${{ secrets.QUICK_CLINIC_WEB_URL || 'https://quick-clinic-nine.vercel.app' }}
+          MONITOR_SEARCH_SPHERE: ${{ github.event.inputs.monitor_search_sphere || 'true' }}
+          MONITOR_QUICK_CLINIC_SOCKET: ${{ github.event.inputs.monitor_quick_clinic_socket || 'true' }}
+          MONITOR_EXAM_ARENA: ${{ github.event.inputs.monitor_exam_arena || 'true' }}
+          MONITOR_QUICK_CLINIC_WEB: ${{ github.event.inputs.monitor_quick_clinic_web || 'false' }}
+        run: |
+          python scripts/monitor_backends.py \
+            --retries "${{ github.event.inputs.retries || '3' }}" \
+            --timeout "${{ github.event.inputs.timeout || '35' }}" \
+            --backoff 5

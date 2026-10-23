@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: str | None = None
     QDRANT_COLLECTION_NAME: str = "documents"
     QDRANT_UPSERT_BATCH_SIZE: int = 100
+    QDRANT_TIMEOUT_SECONDS: float = 10.0
 
     # ------------------------------------------------------------------
     # Dense Retrieval

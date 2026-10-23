@@ -1,4 +1,5 @@
 import asyncio
+import os
 import re
 import uuid
 from contextlib import asynccontextmanager
@@ -191,6 +192,7 @@ async def health_check():
         "service": "api",
         "version": "0.1.0",
         "environment": settings.ENVIRONMENT,
+        "git_commit": os.getenv("RENDER_GIT_COMMIT", os.getenv("GIT_COMMIT", "dev")),
     }
 
 
@@ -204,6 +206,7 @@ async def readiness_check():
             "status": "ready",
             "database": "connected",
             "environment": settings.ENVIRONMENT,
+            "git_commit": os.getenv("RENDER_GIT_COMMIT", os.getenv("GIT_COMMIT", "dev")),
         }
     except Exception as e:
         logger.error("Readiness check failed", error=str(e))
@@ -235,7 +238,7 @@ async def diagnostic_check():
     try:
         from src.vector_store.qdrant_store import QdrantVectorStore
         store = QdrantVectorStore()
-        info = store.client.get_collection(store.collection_name)
+        info = await store.client.get_collection(store.collection_name)
         res["qdrant"] = f"ok (collection '{store.collection_name}', {info.points_count} points)"
     except Exception as exc:
         res["qdrant"] = f"error: {exc}"

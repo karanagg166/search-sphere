@@ -28,6 +28,32 @@ class QdrantVectorStoreError(Exception):
     """Raised when an operation against Qdrant fails."""
 
 
+class QdrantConnectionError(QdrantVectorStoreError):
+    """Raised when connection to Qdrant cluster fails or is reset."""
+
+
+class QdrantTimeoutError(QdrantVectorStoreError):
+    """Raised when an operation against Qdrant times out."""
+
+
+class QdrantSchemaError(QdrantVectorStoreError):
+    """Raised when collection configuration or schema is invalid."""
+
+
+def classify_qdrant_error(exc: Exception, operation: str, collection: str) -> QdrantVectorStoreError:
+    """Classify low-level network/protocol exceptions into structured domain errors."""
+    err_str = str(exc).lower()
+    type_name = type(exc).__name__.lower()
+    msg = f"Failed to {operation} from collection '{collection}': {exc}"
+    if any(k in err_str or k in type_name for k in ["connection reset", "connecterror", "connection refused", "failed to establish a new connection", "errno 54", "errno 111", "recv failure", "remoteprotocolerror", "unreachable"]):
+        return QdrantConnectionError(msg)
+    if any(k in err_str or k in type_name for k in ["timeout", "timed out", "timeoutexception", "deadline exceeded"]):
+        return QdrantTimeoutError(msg)
+    if any(k in err_str or k in type_name for k in ["wrong vector size", "vector param", "does not exist", "schema", "not found"]):
+        return QdrantSchemaError(msg)
+    return QdrantVectorStoreError(msg)
+
+
 # Domain-consistent alias
 VectorStoreError = QdrantVectorStoreError
 
@@ -92,6 +118,7 @@ class QdrantVectorStore:
             self.client = AsyncQdrantClient(
                 url=resolved_url,
                 api_key=resolved_key if resolved_key else None,
+                timeout=getattr(settings, "QDRANT_TIMEOUT_SECONDS", 10.0),
             )
 
         self._collection_ensured = False
@@ -700,10 +727,7 @@ class QdrantVectorStore:
                 document_id=document_id,
                 error=str(exc),
             )
-            raise QdrantVectorStoreError(
-                f"Failed to query dense vectors from collection "
-                f"'{self.collection_name}': {exc}"
-            ) from exc
+            raise classify_qdrant_error(exc, "query dense vectors", self.collection_name) from exc
 
         points = getattr(response, "points", None)
         if points is None:
@@ -895,10 +919,7 @@ class QdrantVectorStore:
                 document_id=document_id,
                 error=str(exc),
             )
-            raise QdrantVectorStoreError(
-                f"Failed to query sparse vectors from collection "
-                f"'{self.collection_name}': {exc}"
-            ) from exc
+            raise classify_qdrant_error(exc, "query sparse vectors", self.collection_name) from exc
 
         points = getattr(response, "points", None)
         if points is None:
@@ -1141,10 +1162,7 @@ class QdrantVectorStore:
                 document_id=document_id,
                 error=str(exc),
             )
-            raise QdrantVectorStoreError(
-                f"Failed to query hybrid vectors from collection "
-                f"'{self.collection_name}': {exc}"
-            ) from exc
+            raise classify_qdrant_error(exc, "query hybrid vectors", self.collection_name) from exc
 
         points = getattr(response, "points", None)
         if points is None:

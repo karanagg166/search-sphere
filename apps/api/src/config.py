@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: str = ""
     SUPABASE_STORAGE_BUCKET: str = "documents"
     SUPABASE_SERVICE_ROLE_KEY: str | None = None
-    STORAGE_BACKEND: str = "local"
+    STORAGE_BACKEND: str = "supabase"
     LOCAL_STORAGE_DIR: str = "./data/storage"
     MAX_UPLOAD_SIZE_BYTES: int = 20 * 1024 * 1024  # 20 MB max upload
 
@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: str | None = None
     QDRANT_COLLECTION_NAME: str = "documents"
     QDRANT_UPSERT_BATCH_SIZE: int = 100
+    QDRANT_TIMEOUT_SECONDS: float = 10.0
 
     # Embeddings
     EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"

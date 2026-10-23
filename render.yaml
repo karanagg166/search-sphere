@@ -5,7 +5,7 @@ services:
     dockerfilePath: apps/api/Dockerfile
     dockerContext: apps/api
     plan: free
-    region: oregon
+    region: singapore
     healthCheckPath: /health
     autoDeploy: true
     envVars:
