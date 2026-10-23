@@ -200,11 +200,11 @@ def test_production_secrets_validation_succeeds_with_secure_config():
 def test_qdrant_error_classification():
     """Verify that low-level Qdrant connection resets and timeouts are classified into domain errors."""
     from src.vector_store.qdrant_store import (
-        classify_qdrant_error,
         QdrantConnectionError,
-        QdrantTimeoutError,
         QdrantSchemaError,
+        QdrantTimeoutError,
         QdrantVectorStoreError,
+        classify_qdrant_error,
     )
 
     # 1. Connection reset / network errors
