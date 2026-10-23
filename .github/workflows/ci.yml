@@ -112,7 +112,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install --extra-index-url https://download.pytorch.org/whl/cpu torch torchvision
           pip install -r apps/worker/requirements.txt
-          pip install pytest pytest-asyncio pytest-cov
+          pip install pytest pytest-asyncio pytest-cov aiosqlite
 
       - name: Run Worker Unit & Chunking Tests
         env:
