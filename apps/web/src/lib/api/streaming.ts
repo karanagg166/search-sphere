@@ -40,33 +40,33 @@ export async function streamAnswer(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-    signal,
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    let detail = errorText;
-    try {
-      const parsed = JSON.parse(errorText);
-      detail = parsed.detail || detail;
-    } catch {
-      // keep raw error text
-    }
-    handlers.onError?.(detail || `HTTP Error ${response.status}`);
-    return;
-  }
-
-  if (!response.body) {
-    handlers.onError?.("No response body received from streaming endpoint.");
-    return;
-  }
-
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      signal,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let detail = errorText;
+      try {
+        const parsed = JSON.parse(errorText);
+        detail = parsed.detail || detail;
+      } catch {
+        // keep raw error text
+      }
+      handlers.onError?.(detail || `HTTP Error ${response.status}`);
+      return;
+    }
+
+    if (!response.body) {
+      handlers.onError?.("No response body received from streaming endpoint.");
+      return;
+    }
+
     reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";

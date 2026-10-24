@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { FileText, ExternalLink, Trash2, Loader2, Database, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/auth-context";
+import { useBackendAvailability } from "@/context/backend-availability-context";
 import { fetchDocuments, deleteDocument, DocumentItem } from "@/lib/api";
 
 function formatBytes(bytes: number): string {
@@ -15,10 +16,11 @@ function formatBytes(bytes: number): string {
 
 export function DocumentList() {
   const { isAuthenticated } = useAuth();
+  const { isWaking } = useBackendAvailability();
   const queryClient = useQueryClient();
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["documents"],
     queryFn: fetchDocuments,
     enabled: isAuthenticated,
@@ -58,14 +60,19 @@ export function DocumentList() {
         </div>
       )}
 
-      {isLoading ? (
+      {isLoading || (isError && isWaking) ? (
         <div className="py-8 flex flex-col items-center justify-center text-muted-foreground gap-2">
-          <Loader2 className="w-6 h-6 animate-spin text-primary" />
-          <p className="text-xs">Loading stored documents...</p>
+          <Loader2 className="w-6 h-6 animate-spin text-amber-400" />
+          <p className="text-xs">
+            {isWaking ? "Waiting for Search Sphere backend to wake..." : "Loading stored documents..."}
+          </p>
         </div>
       ) : isError ? (
-        <div className="py-6 text-center text-xs text-destructive">
-          Failed to load documents: {(error as Error)?.message}
+        <div className="py-6 text-center text-xs text-destructive flex flex-col items-center gap-2">
+          <span>Failed to load documents: {(error as Error)?.message}</span>
+          <Button variant="outline" size="sm" onClick={() => refetch()} className="text-xs h-7">
+            Retry
+          </Button>
         </div>
       ) : !data || data.documents.length === 0 ? (
         <div className="py-8 text-center text-muted-foreground border border-dashed border-border rounded-lg flex flex-col items-center justify-center gap-2">

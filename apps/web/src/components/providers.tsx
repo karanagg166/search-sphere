@@ -5,6 +5,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { useState, type ReactNode } from "react";
 
 import { AuthProvider } from "@/context/auth-context";
+import { BackendAvailabilityProvider } from "@/context/backend-availability-context";
 
 export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(
@@ -22,9 +23,11 @@ export function Providers({ children }: { children: ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        {children}
-      </AuthProvider>
+      <BackendAvailabilityProvider>
+        <AuthProvider>
+          {children}
+        </AuthProvider>
+      </BackendAvailabilityProvider>
       <ReactQueryDevtools initialIsOpen={false} />
     </QueryClientProvider>
   );

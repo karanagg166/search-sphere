@@ -2,34 +2,24 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
-import { fetchHealth } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
 import { AuthModal } from "@/components/auth-modal";
 import { Button } from "@/components/ui/button";
 import {
-  Activity,
-  CheckCircle2,
   Search,
   Sparkles,
-  XCircle,
   LogIn,
   UserPlus,
   LogOut,
 } from "lucide-react";
 import { DocumentUpload } from "@/components/documents/document-upload";
 import { DocumentList } from "@/components/documents/document-list";
+import { BackendStatusIndicator } from "@/components/backend-status-indicator";
 
 export default function Home() {
   const { user, isAuthenticated, logout } = useAuth();
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<"signin" | "signup">("signin");
-
-  const { data: health, isLoading, isError } = useQuery({
-    queryKey: ["health"],
-    queryFn: fetchHealth,
-    refetchInterval: 15000,
-  });
 
   const openAuth = (mode: "signin" | "signup") => {
     setAuthModalMode(mode);
@@ -61,21 +51,7 @@ export default function Home() {
           </Link>
 
           {/* Backend Connection Indicator */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-border bg-card text-xs font-medium">
-            <Activity className="w-3.5 h-3.5 text-primary" />
-            <span>API:</span>
-            {isLoading ? (
-              <span className="text-muted-foreground">Connecting...</span>
-            ) : isError ? (
-              <span className="text-red-400 flex items-center gap-1">
-                <XCircle className="w-3.5 h-3.5" /> Offline
-              </span>
-            ) : (
-              <span className="text-emerald-400 flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Connected
-              </span>
-            )}
-          </div>
+          <BackendStatusIndicator />
 
           {/* User Authentication Menu */}
           {isAuthenticated && user ? (
