@@ -250,10 +250,12 @@ export default function SearchPage() {
         }
       }
 
+      const directApiUrl = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/+$/, "");
       const apiUrl =
-        typeof window !== "undefined"
+        directApiUrl ||
+        (typeof window !== "undefined"
           ? "/api/proxy"
-          : process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+          : "http://localhost:8000");
       const streamUrl = `${apiUrl}/conversations/${targetConvId}/answer/stream`;
       let accumulatedText = "";
       let receivedDone = false;

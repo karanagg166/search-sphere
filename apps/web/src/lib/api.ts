@@ -1,13 +1,15 @@
 import axios from "axios";
 
 const getBaseUrl = (): string => {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL.replace(/\/+$/, "");
+  }
   if (typeof window !== "undefined") {
-    // In browser client, prefer same-origin proxy to eliminate cross-origin CORS blocks
+    // In browser client without explicit direct URL, fallback to same-origin proxy
     return "/api/proxy";
   }
   return (
     process.env.INTERNAL_API_URL ||
-    process.env.NEXT_PUBLIC_API_URL ||
     "http://localhost:8000"
   );
 };
@@ -31,18 +33,26 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
-// Dual-redundancy: if same-origin /api/proxy returns 404 or network error, fallback to direct URL
+// Dual-redundancy: if same-origin /api/proxy returns 404, 502, 503, 504, or network error, fallback to direct URL
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    const directUrl = process.env.NEXT_PUBLIC_API_URL;
+    const directUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "");
+    const status = error.response?.status;
+    const isProxyFailure =
+      status === 404 ||
+      status === 502 ||
+      status === 503 ||
+      status === 504 ||
+      error.code === "ERR_NETWORK";
+
     if (
       typeof window !== "undefined" &&
       directUrl &&
       !originalRequest?._retried &&
       originalRequest?.baseURL === "/api/proxy" &&
-      (error.response?.status === 404 || error.code === "ERR_NETWORK")
+      isProxyFailure
     ) {
       originalRequest._retried = true;
       originalRequest.baseURL = directUrl;
