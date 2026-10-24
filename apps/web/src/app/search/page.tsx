@@ -19,7 +19,9 @@ import {
   Loader2,
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
-import { fetchDocuments, fetchHealth } from "@/lib/api";
+import { useBackendAvailability } from "@/context/backend-availability-context";
+import { BackendStatusIndicator } from "@/components/backend-status-indicator";
+import { fetchDocuments } from "@/lib/api";
 import {
   answerQuestion,
   ConversationMessage,
@@ -61,12 +63,8 @@ export default function SearchPage() {
   const [selectedDocId, setSelectedDocId] = useState<string | undefined>(undefined);
   const hasAutoLoadedRef = React.useRef(false);
 
-  // Health status
-  const { data: health, isLoading: healthLoading, isError: healthError } = useQuery({
-    queryKey: ["health"],
-    queryFn: fetchHealth,
-    refetchInterval: 15000,
-  });
+  // Centralized Backend Availability State
+  const { isReady, isWaking, isOffline, status } = useBackendAvailability();
 
   // Stored documents for filename resolution and scoping
   const { data: docData } = useQuery({
@@ -225,6 +223,37 @@ export default function SearchPage() {
       return;
     }
 
+    if (isWaking) {
+      const turnId = generateTurnId();
+      setTurns((prev) => [
+        ...prev,
+        {
+          id: turnId,
+          query: queryText,
+          status: "error",
+          errorMessage:
+            "Starting Search Sphere backend. This may take about a minute. Please wait until connected to submit questions.",
+          timestamp: new Date(),
+        },
+      ]);
+      return;
+    }
+
+    if (isOffline) {
+      const turnId = generateTurnId();
+      setTurns((prev) => [
+        ...prev,
+        {
+          id: turnId,
+          query: queryText,
+          status: "error",
+          errorMessage: "Backend is currently unavailable. Retry connection.",
+          timestamp: new Date(),
+        },
+      ]);
+      return;
+    }
+
     const turnId = generateTurnId();
     const newTurn: ChatTurn = {
       id: turnId,
@@ -337,7 +366,27 @@ export default function SearchPage() {
         streamError = err?.message || "Streaming connection failed";
       }
 
-      // If streaming failed or ended without yielding an answer, perform seamless fallback
+      // If streaming began emitting tokens but disconnected prematurely, show interrupted state
+      // DO NOT automatically re-execute to prevent duplicate assistant responses in database.
+      if (!receivedDone && accumulatedText.trim()) {
+        setTurns((prev) =>
+          prev.map((t) =>
+            t.id === turnId
+              ? {
+                  ...t,
+                  status: "error",
+                  answer: accumulatedText,
+                  errorMessage:
+                    "Streaming connection was interrupted prematurely. Response generation stopped.",
+                }
+              : t
+          )
+        );
+        refetchConversations();
+        return;
+      }
+
+      // If streaming failed upfront before receiving any tokens, perform fallback
       if (!receivedDone || !accumulatedText.trim()) {
         try {
           const directResp = await answerInConversation(targetConvId, {
@@ -461,21 +510,7 @@ export default function SearchPage() {
 
         <div className="flex flex-wrap items-center gap-3">
           {/* Backend Connection Indicator */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-border bg-card text-xs font-medium">
-            <Activity className="w-3.5 h-3.5 text-primary" />
-            <span>API:</span>
-            {healthLoading ? (
-              <span className="text-muted-foreground">Connecting...</span>
-            ) : healthError ? (
-              <span className="text-red-400 flex items-center gap-1">
-                <XCircle className="w-3.5 h-3.5" /> Offline
-              </span>
-            ) : (
-              <span className="text-emerald-400 flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Connected
-              </span>
-            )}
-          </div>
+          <BackendStatusIndicator />
 
           {/* User Auth Menu */}
           {isAuthenticated && user ? (
@@ -545,7 +580,7 @@ export default function SearchPage() {
             onSelect={handleSelectConversation}
             onNewChat={handleNewChat}
             onDelete={handleDeleteConversation}
-            isLoading={convsLoading}
+            isLoading={convsLoading || isWaking}
           />
         )}
 
@@ -653,6 +688,13 @@ export default function SearchPage() {
             <SearchInput
               onSearch={handleAskQuestion}
               isLoading={isAnswering}
+              placeholder={
+                isWaking
+                  ? "Starting Search Sphere backend. This may take about a minute..."
+                  : isOffline
+                  ? "Backend is currently unavailable. Retry connection."
+                  : undefined
+              }
               documents={documentOptions}
               selectedDocumentId={selectedDocId}
               onSelectDocumentId={setSelectedDocId}

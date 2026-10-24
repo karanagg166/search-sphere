@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { User, fetchMe, loginUser, signupUser, LoginPayload, SignupPayload } from "@/lib/api";
+import { useBackendAvailability } from "@/context/backend-availability-context";
 
 interface AuthContextType {
   user: User | null;
@@ -22,6 +23,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const TOKEN_KEY = "search_sphere_token";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const { isReady, status } = useBackendAvailability();
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -36,17 +38,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const userData = await fetchMe();
           setUser(userData);
         }
-      } catch (err) {
-        console.warn("Session restore failed or expired token:", err);
-        localStorage.removeItem(TOKEN_KEY);
-        setToken(null);
-        setUser(null);
+      } catch (err: any) {
+        const isAuthError =
+          err?.response?.status === 401 || err?.response?.status === 403;
+        if (isAuthError) {
+          console.warn("Session restore failed or expired token:", err);
+          localStorage.removeItem(TOKEN_KEY);
+          setToken(null);
+          setUser(null);
+        } else {
+          // Cold-start or transient outage: preserve token for automatic recovery
+          console.warn("Backend sleeping or unreachable during initAuth; preserving token for recovery.");
+        }
       } finally {
         setIsLoading(false);
       }
     }
     initAuth();
   }, []);
+
+  // When backend becomes ready, automatically fetch user profile if token is present but user profile is missing
+  useEffect(() => {
+    if (isReady && token && !user) {
+      fetchMe()
+        .then((userData) => {
+          setUser(userData);
+        })
+        .catch((err) => {
+          if (err?.response?.status === 401 || err?.response?.status === 403) {
+            localStorage.removeItem(TOKEN_KEY);
+            setToken(null);
+            setUser(null);
+          }
+        });
+    }
+  }, [isReady, token, user]);
 
   const setSession = useCallback(async (newToken: string, directUser?: User) => {
     localStorage.setItem(TOKEN_KEY, newToken);
@@ -125,7 +151,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         token,
         isLoading,
-        isAuthenticated: !!user && !!token,
+        isAuthenticated: !!token && (!!user || status !== "offline"),
         login,
         signup,
         loginWithGoogle,

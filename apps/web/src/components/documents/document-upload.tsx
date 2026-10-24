@@ -6,6 +6,7 @@ import { useDropzone } from "react-dropzone";
 import { UploadCloud, FileText, AlertCircle, CheckCircle, Loader2, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/auth-context";
+import { useBackendAvailability } from "@/context/backend-availability-context";
 import { uploadDocument } from "@/lib/api";
 
 interface DocumentUploadProps {
@@ -14,6 +15,7 @@ interface DocumentUploadProps {
 
 export function DocumentUpload({ onRequireAuth }: DocumentUploadProps) {
   const { isAuthenticated } = useAuth();
+  const { isWaking, isOffline } = useBackendAvailability();
   const queryClient = useQueryClient();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -42,10 +44,14 @@ export function DocumentUpload({ onRequireAuth }: DocumentUploadProps) {
       "application/pdf": [".pdf"],
     },
     maxFiles: 1,
-    disabled: !isAuthenticated || uploadMutation.isPending,
+    disabled: !isAuthenticated || uploadMutation.isPending || isWaking || isOffline,
     onDrop: (acceptedFiles) => {
       setErrorMessage(null);
       setSuccessMessage(null);
+
+      if (isWaking || isOffline) {
+        return;
+      }
 
       if (!acceptedFiles || acceptedFiles.length === 0) {
         setErrorMessage("Please select a valid PDF file.");
@@ -65,9 +71,19 @@ export function DocumentUpload({ onRequireAuth }: DocumentUploadProps) {
           Upload Document (PDF)
         </h2>
         {isAuthenticated && (
-          <span className="text-[11px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">
-            Ready to Ingest
-          </span>
+          isWaking ? (
+            <span className="text-[11px] bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded-full font-medium flex items-center gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" /> Waking Backend...
+            </span>
+          ) : isOffline ? (
+            <span className="text-[11px] bg-destructive/10 text-destructive px-2 py-0.5 rounded-full font-medium">
+              Backend Unavailable
+            </span>
+          ) : (
+            <span className="text-[11px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">
+              Ready to Ingest
+            </span>
+          )
         )}
       </div>
 
@@ -122,10 +138,18 @@ export function DocumentUpload({ onRequireAuth }: DocumentUploadProps) {
                 </div>
                 <div>
                   <p className="text-sm font-medium">
-                    {isDragActive ? "Drop the PDF here..." : "Drag & drop a PDF document, or click to browse"}
+                    {isWaking
+                      ? "Starting Search Sphere backend. This may take about a minute..."
+                      : isOffline
+                      ? "Backend is currently unavailable. Retry connection."
+                      : isDragActive
+                      ? "Drop the PDF here..."
+                      : "Drag & drop a PDF document, or click to browse"}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Accepts valid PDF files up to 20MB. Safe object storage persistence.
+                    {isWaking
+                      ? "Uploads will automatically activate as soon as the backend is connected."
+                      : "Accepts valid PDF files up to 20MB. Safe object storage persistence."}
                   </p>
                 </div>
               </>

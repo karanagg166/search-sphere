@@ -67,6 +67,15 @@ export interface HealthResponse {
   service: string;
   version: string;
   environment: string;
+  git_commit?: string;
+}
+
+export interface ReadyResponse {
+  status: string;
+  database: string;
+  environment: string;
+  git_commit?: string;
+  error?: string;
 }
 
 export interface User {
@@ -97,8 +106,13 @@ export interface LoginPayload {
   password: string;
 }
 
-export async function fetchHealth(): Promise<HealthResponse> {
-  const response = await apiClient.get<HealthResponse>("/health");
+export async function fetchHealth(signal?: AbortSignal): Promise<HealthResponse> {
+  const response = await apiClient.get<HealthResponse>("/health", { signal });
+  return response.data;
+}
+
+export async function fetchReady(signal?: AbortSignal): Promise<ReadyResponse> {
+  const response = await apiClient.get<ReadyResponse>("/ready", { signal });
   return response.data;
 }
 

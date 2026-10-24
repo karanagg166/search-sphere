@@ -42,6 +42,7 @@ wheels/
 *.egg
 
 # Testing, Linting & Type Checking
+*.db
 .pytest_cache/
 .coverage
 htmlcov/
