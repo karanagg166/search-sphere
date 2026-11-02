@@ -1,11 +1,9 @@
-import asyncio
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch, MagicMock
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from src.services.document_indexer import (
-    MAX_INDEXING_RETRIES,
-    STALE_PROCESSING_TIMEOUT_SECONDS,
     recover_stale_processing_documents,
     sync_unindexed_documents,
 )
@@ -17,12 +15,12 @@ async def test_recover_stale_processing_documents_requeues_within_limit():
     mock_doc1 = MagicMock()
     mock_doc1.id = "doc-1"
     mock_doc1.status = "processing:attempt:1"
-    mock_doc1.updated_at = datetime.now(timezone.utc) - timedelta(seconds=600)
+    mock_doc1.updated_at = datetime.now(UTC) - timedelta(seconds=600)
 
     mock_doc2 = MagicMock()
     mock_doc2.id = "doc-2"
     mock_doc2.status = "processing:attempt:3"
-    mock_doc2.updated_at = datetime.now(timezone.utc) - timedelta(seconds=600)
+    mock_doc2.updated_at = datetime.now(UTC) - timedelta(seconds=600)
 
     mock_session = AsyncMock()
     mock_result = MagicMock()

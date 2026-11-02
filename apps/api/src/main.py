@@ -12,7 +12,7 @@ from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.config import settings
-from src.db import AsyncSessionLocal, engine, init_db
+from src.db import AsyncSessionLocal, engine
 from src.routers.answer import router as answer_router
 from src.routers.auth import router as auth_router
 from src.routers.conversations import router as conversations_router

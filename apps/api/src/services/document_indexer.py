@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+
 import structlog
 from sqlalchemy import or_, select
 
@@ -189,7 +190,7 @@ async def recover_stale_processing_documents() -> list[str]:
     Recovers documents stranded in 'processing' status after a container restart, crash, or OOM.
     Requeues stranded documents if within retry limits, or marks them 'failed' if max retries exceeded.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=STALE_PROCESSING_TIMEOUT_SECONDS)
+    cutoff = datetime.now(UTC) - timedelta(seconds=STALE_PROCESSING_TIMEOUT_SECONDS)
     recovered_ids: list[str] = []
 
     try:
