@@ -53,12 +53,8 @@ logger = structlog.get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Initialize database tables
+    # Startup: Database schema is managed via Alembic migrations (no startup DDL)
     logger.info("Initializing Search Sphere application...")
-    try:
-        await init_db()
-    except Exception as e:
-        logger.error("Failed to run init_db on startup", error=str(e))
 
     # Auto-index any uploaded documents in background
     try:
@@ -200,8 +196,9 @@ async def health_check():
 async def readiness_check():
     """Readiness probe verifying critical infrastructure connectivity (database)."""
     try:
-        async with AsyncSessionLocal() as session:
-            await session.execute(text("SELECT 1"))
+        async with asyncio.timeout(5.0):
+            async with AsyncSessionLocal() as session:
+                await session.execute(text("SELECT 1"))
         return {
             "status": "ready",
             "database": "connected",

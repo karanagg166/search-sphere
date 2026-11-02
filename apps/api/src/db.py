@@ -1,3 +1,4 @@
+import os
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -12,6 +13,11 @@ engine = create_async_engine(
     echo=False,
     pool_pre_ping=True,
     pool_recycle=300,
+    pool_size=int(os.getenv("DB_POOL_SIZE", "5")),
+    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "5")),
+    connect_args={"timeout": 15.0, "command_timeout": 15.0}
+    if "asyncpg" in settings.DATABASE_URL
+    else {},
 )
 
 AsyncSessionLocal = async_sessionmaker(

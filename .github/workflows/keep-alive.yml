@@ -1,9 +1,11 @@
-name: Multi-Project Backend Health Monitor & Keep-Alive
+name: Multi-Project Backend Health Monitor & Database Activity Keep-Alive
 
 on:
   schedule:
-    # Offset 10-minute cron schedule to keep Render free services awake without colliding on the hour
-    - cron: "7,17,27,37,47,57 * * * *"
+    # Budgeted daily database activity check (runs twice daily at 06:00 and 18:00 UTC)
+    # Prevents Supabase 7-day inactivity pause while allowing Render free services to
+    # sleep naturally when idle, preserving the shared 750 instance-hours/month budget.
+    - cron: "0 6,18 * * *"
   workflow_dispatch:
     inputs:
       retries:

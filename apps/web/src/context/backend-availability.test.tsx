@@ -165,6 +165,50 @@ describe("BackendAvailabilityContext & Manager", () => {
     expect(screen.getByTestId("isDegraded").textContent).toBe("yes");
   });
 
+  it("automatically recovers to ready when transient 503 on /ready recovers to 200", async () => {
+    vi.spyOn(api, "fetchHealth").mockResolvedValue({
+      status: "ok",
+      service: "api",
+      version: "0.1.0",
+      environment: "production",
+    });
+
+    let attempts = 0;
+    vi.spyOn(api, "fetchReady").mockImplementation(async () => {
+      attempts++;
+      if (attempts === 1) {
+        throw {
+          response: {
+            status: 503,
+            data: { status: "not_ready", database: "disconnected" },
+          },
+        };
+      }
+      return {
+        status: "ready",
+        database: "connected",
+        environment: "production",
+      };
+    });
+
+    renderWithProviders();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+
+    expect(screen.getByTestId("status").textContent).toBe("degraded");
+    expect(screen.getByTestId("isDegraded").textContent).toBe("yes");
+
+    // Advance timers so backoff delay (~3000ms) elapses and second check executes
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(screen.getByTestId("status").textContent).toBe("ready");
+    expect(screen.getByTestId("isReady").textContent).toBe("yes");
+  });
+
   it("transitions to offline when total cold start deadline (120s) is exceeded", async () => {
     vi.spyOn(api, "fetchHealth").mockRejectedValue(
       new Error("Network Error (Connection Refused)")

@@ -13,6 +13,9 @@ from src.vector_store.qdrant_store import QdrantVectorStore
 
 logger = structlog.get_logger()
 
+# Track in-flight document indexing to prevent duplicate processing on restarts
+_active_indexing_ids: set[str] = set()
+
 
 async def index_document_pipeline(document_id: str) -> bool:
     """
@@ -140,28 +143,39 @@ async def index_document_pipeline(document_id: str) -> bool:
 async def sync_unindexed_documents() -> list[str]:
     """
     Scans PostgreSQL for any documents that are in 'uploaded' status
-    and triggers indexing for each.
+    and triggers indexing for each, preventing duplicate in-flight processing.
+    Does NOT auto-retry permanently failed documents on reboot.
     """
     logger.info("Scanning for unindexed uploaded documents...")
     unindexed_ids: list[str] = []
 
     try:
         async with AsyncSessionLocal() as session:
+            # Only scan for freshly 'uploaded' documents; avoid looping over 'failed' documents on restart
             result = await session.execute(
-                select(Document.id).where(Document.status.in_(["uploaded", "failed"]))
+                select(Document.id).where(Document.status == "uploaded")
             )
             unindexed_ids = [row[0] for row in result.fetchall()]
 
-        if not unindexed_ids:
+        # Filter out documents already being indexed in-process
+        pending_ids = [doc_id for doc_id in unindexed_ids if doc_id not in _active_indexing_ids]
+
+        if not pending_ids:
             logger.info("No unindexed documents found")
             return []
 
-        logger.info("Found unindexed documents to process", count=len(unindexed_ids), ids=unindexed_ids)
+        logger.info("Found unindexed documents to process", count=len(pending_ids), ids=pending_ids)
         successful_ids = []
-        for doc_id in unindexed_ids:
-            success = await index_document_pipeline(doc_id)
-            if success:
-                successful_ids.append(doc_id)
+        for doc_id in pending_ids:
+            if doc_id in _active_indexing_ids:
+                continue
+            _active_indexing_ids.add(doc_id)
+            try:
+                success = await index_document_pipeline(doc_id)
+                if success:
+                    successful_ids.append(doc_id)
+            finally:
+                _active_indexing_ids.discard(doc_id)
 
         return successful_ids
 
