@@ -150,3 +150,21 @@ def test_describe_device_cuda_fallback(sample_image_bytes: bytes) -> None:
             model="test/cuda-blip",
             device="cuda",
         )
+
+
+def test_describe_when_captioning_disabled_returns_empty_string(
+    sample_image_bytes: bytes,
+) -> None:
+    with patch("src.processing.extraction.image_captioner.settings.ENABLE_IMAGE_CAPTIONING", False):
+        captioner = ImageCaptioner(model_name="Salesforce/blip-image-captioning-base")
+        assert captioner.describe(sample_image_bytes) == ""
+
+
+def test_describe_when_model_is_disabled_returns_empty_string(
+    sample_image_bytes: bytes,
+) -> None:
+    captioner = ImageCaptioner(model_name="disabled")
+    assert captioner.describe(sample_image_bytes) == ""
+
+    captioner_none = ImageCaptioner(model_name="none")
+    assert captioner_none.describe(sample_image_bytes) == ""

@@ -87,6 +87,7 @@ class Settings(BaseSettings):
     # OCR & Image Processing
     TESSERACT_CMD: str | None = None
     IMAGE_CAPTION_MODEL: str = "Salesforce/blip-image-captioning-base"
+    ENABLE_IMAGE_CAPTIONING: bool = False
 
     # Chunking
     CHUNK_TARGET_TOKENS: int = 500

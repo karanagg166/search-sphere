@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import structlog
@@ -88,7 +89,7 @@ async def index_document_pipeline(document_id: str) -> bool:
 
         # 3. Multimodal extraction
         extractor = DocumentExtractor()
-        extracted_doc = extractor.extract(pdf_bytes)
+        extracted_doc = await asyncio.to_thread(extractor.extract, pdf_bytes)
         logger.info(
             "PDF text extraction completed",
             document_id=document_id,
@@ -102,7 +103,7 @@ async def index_document_pipeline(document_id: str) -> bool:
 
         # 5. Semantic chunking
         chunker = DocumentChunker()
-        chunked_doc = chunker.chunk_document(cleaned_doc)
+        chunked_doc = await asyncio.to_thread(chunker.chunk_document, cleaned_doc)
         chunk_count = len(chunked_doc.chunks)
         logger.info(
             "Document chunking completed",
@@ -113,11 +114,11 @@ async def index_document_pipeline(document_id: str) -> bool:
         if chunk_count > 0:
             # 6. Dense embeddings (FastEmbed / SentenceTransformers)
             embedder = DenseEmbedder()
-            embedded_doc = embedder.embed_document(chunked_doc)
+            embedded_doc = await asyncio.to_thread(embedder.embed_document, chunked_doc)
 
             # 7. Sparse lexical BM25 embeddings
             sparse_embedder = BM25Embedder()
-            sparse_vectors = sparse_embedder.embed_chunks(chunked_doc.chunks)
+            sparse_vectors = await asyncio.to_thread(sparse_embedder.embed_chunks, chunked_doc.chunks)
 
             # 8. Qdrant vector index synchronization
             vector_store = QdrantVectorStore(sparse_embedder=sparse_embedder)
@@ -248,6 +249,8 @@ async def sync_unindexed_documents() -> list[str]:
     2. Indexes documents in 'uploaded' or 'uploaded:retry:*' status.
     3. Prevents duplicate in-flight processing and enforces bounded retries.
     """
+    # Brief yield so Uvicorn completes port binding and answers initial health probes immediately
+    await asyncio.sleep(2.0)
     logger.info("Scanning for unindexed uploaded documents...")
 
     # 1. Recover any documents stranded from a previous crash/restart

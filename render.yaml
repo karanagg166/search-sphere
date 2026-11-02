@@ -35,6 +35,10 @@ services:
         value: https://search-sphere-rose.vercel.app/api/auth/callback/google
       - key: RATE_LIMIT_ENABLED
         value: "false"
+      - key: ENABLE_IMAGE_CAPTIONING
+        value: "false"
+      - key: IMAGE_CAPTION_MODEL
+        value: "disabled"
       - key: DATABASE_URL
         sync: false
       - key: DATABASE_URL_SYNC

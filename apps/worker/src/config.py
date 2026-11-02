@@ -40,6 +40,7 @@ class Settings(BaseSettings):
 
     # Vision / Image Captioning
     IMAGE_CAPTION_MODEL: str = "Salesforce/blip-image-captioning-base"
+    ENABLE_IMAGE_CAPTIONING: bool = True
 
     # ------------------------------------------------------------------
     # Chunking

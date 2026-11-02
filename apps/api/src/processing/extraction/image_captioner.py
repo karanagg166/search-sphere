@@ -46,6 +46,14 @@ class ImageCaptioner:
         """
         self._validate_image(image_bytes)
 
+        # In memory-constrained environments, disable heavyweight vision models to prevent OOM
+        if (
+            not getattr(settings, "ENABLE_IMAGE_CAPTIONING", True)
+            or not self.model_name
+            or self.model_name.lower() in ("none", "disabled", "false", "")
+        ) and self._pipeline is None:
+            return ""
+
         pipe = self._get_pipeline()
 
         try:
