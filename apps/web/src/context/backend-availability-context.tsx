@@ -196,12 +196,46 @@ export function BackendAvailabilityProvider({
           }
         } catch (readyErr: any) {
           if (readyErr?.response?.status === 503) {
-            // Backend process is up, but database is not ready yet
+            // Backend process is up, but database is still reconnecting / warming up
+            const currentElapsed = wakeStartTimeRef.current
+              ? Date.now() - wakeStartTimeRef.current
+              : 0;
+
+            if (currentElapsed >= AVAILABILITY_CONFIG.TOTAL_STARTUP_DEADLINE_MS) {
+              if (isMountedRef.current) {
+                setStatus("degraded");
+                setErrorMessage("Database connectivity unavailable after recovery timeout.");
+                setLastChecked(Date.now());
+                stopElapsedTracking();
+                clearTimers();
+              }
+              return false;
+            }
+
+            // Within startup deadline: report degraded/reconnecting state and schedule next retry
             if (isMountedRef.current) {
               setStatus("degraded");
-              setErrorMessage("Database connectivity unavailable.");
+              startElapsedTracking();
+              setErrorMessage("Database is reconnecting...");
               setLastChecked(Date.now());
-              stopElapsedTracking();
+            }
+
+            const nextAttempt = retryCountRef.current + 1;
+            setRetryCount(nextAttempt);
+
+            if (typeof document === "undefined" || document.visibilityState === "visible") {
+              const delay = calculateBackoffDelay(nextAttempt);
+              if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+              retryTimerRef.current = setTimeout(() => {
+                if (
+                  isMountedRef.current &&
+                  (statusRef.current === "waking" ||
+                    statusRef.current === "degraded" ||
+                    statusRef.current === "checking")
+                ) {
+                  triggerCheckRef.current(false);
+                }
+              }, delay);
             }
             return false;
           }
@@ -248,7 +282,12 @@ export function BackendAvailabilityProvider({
           const delay = calculateBackoffDelay(nextAttempt);
           if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
           retryTimerRef.current = setTimeout(() => {
-            if (isMountedRef.current && statusRef.current === "waking") {
+            if (
+              isMountedRef.current &&
+              (statusRef.current === "waking" ||
+                statusRef.current === "degraded" ||
+                statusRef.current === "checking")
+            ) {
               triggerCheckRef.current(false);
             }
           }, delay);
