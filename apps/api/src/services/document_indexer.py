@@ -1,5 +1,6 @@
+from datetime import datetime, timedelta, timezone
 import structlog
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from src.db import AsyncSessionLocal
 from src.models.document import Document
@@ -13,8 +14,11 @@ from src.vector_store.qdrant_store import QdrantVectorStore
 
 logger = structlog.get_logger()
 
-# Track in-flight document indexing to prevent duplicate processing on restarts
+# Track in-flight document indexing to prevent duplicate processing within the same process
 _active_indexing_ids: set[str] = set()
+
+MAX_INDEXING_RETRIES = 3
+STALE_PROCESSING_TIMEOUT_SECONDS = 300  # 5 minutes
 
 
 async def index_document_pipeline(document_id: str) -> bool:
@@ -24,10 +28,11 @@ async def index_document_pipeline(document_id: str) -> bool:
     Ensures that when background workers or RabbitMQ are unavailable
     (e.g., single-container web deployment on Render free tier), documents
     are fully extracted, cleaned, chunked, embedded, and indexed into Qdrant.
+    Uses bounded retries and safe atomic state transitions.
     """
     logger.info("Starting in-process document indexing", document_id=document_id)
 
-    # 1. Fetch document metadata from DB
+    # 1. Fetch document metadata and claim it with bounded retry tracking
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(Document).where(Document.id == document_id)
@@ -37,9 +42,32 @@ async def index_document_pipeline(document_id: str) -> bool:
             logger.error("Document not found for indexing", document_id=document_id)
             return False
 
+        if document.status == "indexed":
+            logger.info("Document already indexed, skipping", document_id=document_id)
+            return True
+
+        # Parse attempt count from status (e.g. "uploaded", "uploaded:retry:2", "processing:attempt:1")
+        attempt = 1
+        if ":retry:" in document.status:
+            try:
+                attempt = int(document.status.split(":")[-1])
+            except ValueError:
+                attempt = 1
+        elif ":attempt:" in document.status:
+            try:
+                attempt = int(document.status.split(":")[-1])
+            except ValueError:
+                attempt = 1
+
+        if attempt > MAX_INDEXING_RETRIES:
+            logger.warning("Document exceeded maximum retries", document_id=document_id, attempts=attempt)
+            document.status = "failed"
+            await session.commit()
+            return False
+
         storage_key = document.storage_key
-        # Mark as processing
-        document.status = "processing"
+        # Mark as processing with lease attempt
+        document.status = f"processing:attempt:{attempt}"
         await session.commit()
 
     storage = get_object_storage()
@@ -128,7 +156,23 @@ async def index_document_pipeline(document_id: str) -> bool:
             )
             doc = result.scalar_one_or_none()
             if doc:
-                doc.status = "failed"
+                if attempt >= MAX_INDEXING_RETRIES:
+                    doc.status = "failed"
+                    logger.error(
+                        "Document indexing permanently failed after max retries",
+                        document_id=document_id,
+                        attempts=attempt,
+                        error=str(exc),
+                    )
+                else:
+                    doc.status = f"uploaded:retry:{attempt + 1}"
+                    logger.warning(
+                        "Document indexing failed; bounded retry queued",
+                        document_id=document_id,
+                        next_attempt=attempt + 1,
+                        max_retries=MAX_INDEXING_RETRIES,
+                        error=str(exc),
+                    )
                 await session.commit()
         return False
 
@@ -140,31 +184,101 @@ async def index_document_pipeline(document_id: str) -> bool:
                 pass
 
 
-async def sync_unindexed_documents() -> list[str]:
+async def recover_stale_processing_documents() -> list[str]:
     """
-    Scans PostgreSQL for any documents that are in 'uploaded' status
-    and triggers indexing for each, preventing duplicate in-flight processing.
-    Does NOT auto-retry permanently failed documents on reboot.
+    Recovers documents stranded in 'processing' status after a container restart, crash, or OOM.
+    Requeues stranded documents if within retry limits, or marks them 'failed' if max retries exceeded.
     """
-    logger.info("Scanning for unindexed uploaded documents...")
-    unindexed_ids: list[str] = []
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=STALE_PROCESSING_TIMEOUT_SECONDS)
+    recovered_ids: list[str] = []
 
     try:
         async with AsyncSessionLocal() as session:
-            # Only scan for freshly 'uploaded' documents; avoid looping over 'failed' documents on restart
             result = await session.execute(
-                select(Document.id).where(Document.status == "uploaded")
+                select(Document).where(
+                    Document.status.like("processing%"),
+                    Document.updated_at < cutoff,
+                )
+            )
+            stale_docs = result.scalars().all()
+            for doc in stale_docs:
+                attempt = 1
+                if ":attempt:" in doc.status:
+                    try:
+                        attempt = int(doc.status.split(":")[-1])
+                    except ValueError:
+                        attempt = 1
+
+                if attempt >= MAX_INDEXING_RETRIES:
+                    doc.status = "failed"
+                    logger.error(
+                        "Stale document exceeded max processing retries across restarts; marked permanently failed",
+                        document_id=doc.id,
+                        attempts=attempt,
+                    )
+                else:
+                    next_attempt = attempt + 1
+                    doc.status = f"uploaded:retry:{next_attempt}"
+                    logger.warning(
+                        "Requeued stranded document for retry after restart/timeout",
+                        document_id=doc.id,
+                        next_attempt=next_attempt,
+                    )
+                    recovered_ids.append(doc.id)
+
+            if stale_docs:
+                await session.commit()
+                logger.info(
+                    "Processed stale in-flight documents",
+                    count=len(stale_docs),
+                    recovered=len(recovered_ids),
+                )
+
+    except Exception as exc:
+        logger.warning("Error recovering stale processing documents", error=str(exc))
+
+    return recovered_ids
+
+
+async def sync_unindexed_documents() -> list[str]:
+    """
+    Scans PostgreSQL for unindexed documents and triggers indexing for each.
+    1. Durably recovers any documents stranded in 'processing' state across restarts.
+    2. Indexes documents in 'uploaded' or 'uploaded:retry:*' status.
+    3. Prevents duplicate in-flight processing and enforces bounded retries.
+    """
+    logger.info("Scanning for unindexed uploaded documents...")
+
+    # 1. Recover any documents stranded from a previous crash/restart
+    await recover_stale_processing_documents()
+
+    unindexed_ids: list[str] = []
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(Document.id).where(
+                    or_(
+                        Document.status == "uploaded",
+                        Document.status.like("uploaded:retry:%"),
+                    )
+                )
             )
             unindexed_ids = [row[0] for row in result.fetchall()]
 
         # Filter out documents already being indexed in-process
-        pending_ids = [doc_id for doc_id in unindexed_ids if doc_id not in _active_indexing_ids]
+        pending_ids = [
+            doc_id for doc_id in unindexed_ids if doc_id not in _active_indexing_ids
+        ]
 
         if not pending_ids:
             logger.info("No unindexed documents found")
             return []
 
-        logger.info("Found unindexed documents to process", count=len(pending_ids), ids=pending_ids)
+        logger.info(
+            "Found unindexed documents to process",
+            count=len(pending_ids),
+            ids=pending_ids,
+        )
         successful_ids = []
         for doc_id in pending_ids:
             if doc_id in _active_indexing_ids:

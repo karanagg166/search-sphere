@@ -8,16 +8,22 @@ from src.config import settings
 logger = structlog.get_logger()
 
 # Use pool_pre_ping to automatically reconnect if dropped by Supabase/PgBouncer
+engine_kwargs = {
+    "echo": False,
+    "pool_pre_ping": True,
+}
+if "sqlite" not in settings.DATABASE_URL:
+    engine_kwargs.update({
+        "pool_recycle": 300,
+        "pool_size": int(os.getenv("DB_POOL_SIZE", "5")),
+        "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "5")),
+    })
+if "asyncpg" in settings.DATABASE_URL:
+    engine_kwargs["connect_args"] = {"timeout": 15.0, "command_timeout": 15.0}
+
 engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=False,
-    pool_pre_ping=True,
-    pool_recycle=300,
-    pool_size=int(os.getenv("DB_POOL_SIZE", "5")),
-    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "5")),
-    connect_args={"timeout": 15.0, "command_timeout": 15.0}
-    if "asyncpg" in settings.DATABASE_URL
-    else {},
+    **engine_kwargs,
 )
 
 AsyncSessionLocal = async_sessionmaker(
