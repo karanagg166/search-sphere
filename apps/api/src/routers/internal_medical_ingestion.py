@@ -161,7 +161,7 @@ async def ingest_medical_document(
         )
     if body.file_size > MAX_MEDICAL_DOC_SIZE_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"File exceeds maximum allowed size of {MAX_MEDICAL_DOC_SIZE_BYTES // (1024 * 1024)}MB.",
         )
 

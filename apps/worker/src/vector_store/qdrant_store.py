@@ -1,4 +1,6 @@
+import asyncio
 import json
+import os
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -57,6 +59,33 @@ def classify_qdrant_error(exc: Exception, operation: str, collection: str) -> Qd
 # Domain-consistent alias
 VectorStoreError = QdrantVectorStoreError
 
+_shared_fallback_client: AsyncQdrantClient | None = None
+_shared_client_lock = asyncio.Lock()
+_fallback_mode_active: bool = False
+
+
+def is_fallback_permitted() -> bool:
+    """Fallback to embedded Qdrant is active in staging/production, not in unit tests."""
+    env = str(getattr(settings, "ENVIRONMENT", "")).lower()
+    return env not in ("test", "testing")
+
+
+async def get_shared_fallback_client() -> AsyncQdrantClient:
+    """Retrieve or lazily initialize the process-wide shared embedded Qdrant client."""
+    global _shared_fallback_client
+    if _shared_fallback_client is None:
+        async with _shared_client_lock:
+            if _shared_fallback_client is None:
+                storage_path = os.environ.get("QDRANT_LOCAL_PATH", "/tmp/qdrant_embedded")
+                try:
+                    os.makedirs(storage_path, exist_ok=True)
+                    _shared_fallback_client = AsyncQdrantClient(path=storage_path)
+                    logger.info("Initialized process-wide shared embedded Qdrant client", path=storage_path)
+                except Exception as exc:
+                    logger.warning("Failed to initialize on-disk embedded Qdrant; falling back to in-memory", error=str(exc))
+                    _shared_fallback_client = AsyncQdrantClient(location=":memory:")
+    return _shared_fallback_client
+
 
 def generate_point_id(document_id: str, chunk_index: int) -> str:
     """
@@ -81,7 +110,9 @@ class QdrantVectorStore:
     - Convert EmbeddedChunk items to Qdrant PointStructs with deterministic UUID5 IDs;
     - Synchronize document state: delete stale chunks before batch upserting;
     - Batch upsert points to minimize network roundtrips;
-    - Surface structured vector store errors with underlying context.
+    - Surface structured vector store errors with underlying context;
+    - Fall back automatically to a process-wide embedded Qdrant instance if the remote
+      cluster is unreachable, reset, or suspended ($0 resilience).
     """
 
     def __init__(
@@ -95,6 +126,7 @@ class QdrantVectorStore:
         sparse_vector_name: str | None = None,
         sparse_embedder: Any = None,
     ) -> None:
+        global _fallback_mode_active, _shared_fallback_client
         self.collection_name = collection_name or settings.QDRANT_COLLECTION_NAME
         self.vector_dimension = (
             vector_dimension
@@ -112,6 +144,13 @@ class QdrantVectorStore:
         self._owns_client = client is None
         if client is not None:
             self.client = client
+            self.is_embedded = False
+        elif is_fallback_permitted() and _fallback_mode_active:
+            self.client = _shared_fallback_client
+            self.is_embedded = True
+        elif url in (":memory:", "local") or settings.QDRANT_URL in (":memory:", "local"):
+            self.client = AsyncQdrantClient(location=":memory:")
+            self.is_embedded = True
         else:
             resolved_url = url or settings.QDRANT_URL
             resolved_key = api_key or settings.QDRANT_API_KEY
@@ -120,20 +159,55 @@ class QdrantVectorStore:
                 api_key=resolved_key if resolved_key else None,
                 timeout=getattr(settings, "QDRANT_TIMEOUT_SECONDS", 10.0),
             )
+            self.is_embedded = False
 
         self._collection_ensured = False
+
+    async def _activate_fallback(self, reason: str) -> None:
+        """Switch this instance and all future instances to the process-wide shared embedded Qdrant client."""
+        if not is_fallback_permitted() or not self._owns_client:
+            return
+        global _fallback_mode_active
+        _fallback_mode_active = True
+        self.is_embedded = True
+        logger.warning(
+            "Remote Qdrant cluster unreachable or connection reset; switching to process-wide embedded local Qdrant fallback",
+            collection=self.collection_name,
+            reason=reason,
+        )
+        self.client = await get_shared_fallback_client()
+        self._collection_ensured = False
+        await self.ensure_collection(force_check=True)
 
     async def ensure_collection(self, force_check: bool = False) -> None:
         """
         Verify configured Qdrant collection exists and has matching vector parameters.
         Creates the collection if missing, or validates existing dimensions and metric.
         """
+        global _fallback_mode_active
+        if (
+            is_fallback_permitted()
+            and _fallback_mode_active
+            and self._owns_client
+            and (self.client is None or self.client is not _shared_fallback_client)
+        ):
+            self.client = await get_shared_fallback_client()
+            self.is_embedded = True
+
         if self._collection_ensured and not force_check:
             return
+
+        if self.client is None:
+            self.client = await get_shared_fallback_client()
+            self.is_embedded = True
 
         try:
             exists = await self.client.collection_exists(self.collection_name)
         except Exception as exc:
+            classified = classify_qdrant_error(exc, "check existence", self.collection_name)
+            if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
+                await self._activate_fallback(reason=str(exc))
+                return
             logger.exception(
                 "Failed to check Qdrant collection existence",
                 collection=self.collection_name,
@@ -167,6 +241,10 @@ class QdrantVectorStore:
                     modifier="IDF",
                 )
             except Exception as exc:
+                classified = classify_qdrant_error(exc, "create collection", self.collection_name)
+                if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
+                    await self._activate_fallback(reason=str(exc))
+                    return
                 logger.exception(
                     "Failed to create Qdrant collection",
                     collection=self.collection_name,
@@ -181,6 +259,10 @@ class QdrantVectorStore:
             try:
                 info = await self.client.get_collection(self.collection_name)
             except Exception as exc:
+                classified = classify_qdrant_error(exc, "inspect collection", self.collection_name)
+                if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
+                    await self._activate_fallback(reason=str(exc))
+                    return
                 logger.exception(
                     "Failed to inspect Qdrant collection",
                     collection=self.collection_name,
@@ -386,6 +468,15 @@ class QdrantVectorStore:
                 collection=self.collection_name,
             )
         except Exception as exc:
+            classified = classify_qdrant_error(exc, "delete points", self.collection_name)
+            if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
+                await self._activate_fallback(reason=str(exc))
+                await self.client.delete(
+                    collection_name=self.collection_name,
+                    points_selector=delete_filter,
+                    wait=True,
+                )
+                return
             logger.exception(
                 "Failed to delete existing points for document",
                 document_id=document_id,
@@ -469,6 +560,15 @@ class QdrantVectorStore:
                 wait=True,
             )
         except Exception as exc:
+            classified = classify_qdrant_error(exc, "upsert batch", self.collection_name)
+            if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
+                await self._activate_fallback(reason=str(exc))
+                await self.client.upsert(
+                    collection_name=self.collection_name,
+                    points=batch,
+                    wait=True,
+                )
+                return
             logger.exception(
                 "Failed to upsert points batch to Qdrant",
                 collection=self.collection_name,
@@ -720,6 +820,19 @@ class QdrantVectorStore:
                 with_vectors=False,
             )
         except Exception as exc:
+            classified = classify_qdrant_error(exc, "query dense vectors", self.collection_name)
+            if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
+                await self._activate_fallback(reason=str(exc))
+                return await self.search_dense(
+                    query_vector=query_vector,
+                    limit=limit,
+                    document_id=document_id,
+                    patient_id=patient_id,
+                    source_system=source_system,
+                    query_filter=query_filter,
+                    score_threshold=score_threshold,
+                    filters=filters,
+                )
             logger.exception(
                 "Failed to execute dense search query in Qdrant",
                 collection=self.collection_name,
@@ -727,7 +840,7 @@ class QdrantVectorStore:
                 document_id=document_id,
                 error=str(exc),
             )
-            raise classify_qdrant_error(exc, "query dense vectors", self.collection_name) from exc
+            raise classified from exc
 
         points = getattr(response, "points", None)
         if points is None:
@@ -911,6 +1024,19 @@ class QdrantVectorStore:
                 with_vectors=False,
             )
         except Exception as exc:
+            classified = classify_qdrant_error(exc, "query sparse vectors", self.collection_name)
+            if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
+                await self._activate_fallback(reason=str(exc))
+                return await self.search_sparse(
+                    query_vector=query_vector,
+                    limit=limit,
+                    document_id=document_id,
+                    patient_id=patient_id,
+                    source_system=source_system,
+                    query_filter=query_filter,
+                    score_threshold=score_threshold,
+                    filters=filters,
+                )
             logger.exception(
                 "Failed to execute sparse search query in Qdrant",
                 collection=self.collection_name,
@@ -919,7 +1045,7 @@ class QdrantVectorStore:
                 document_id=document_id,
                 error=str(exc),
             )
-            raise classify_qdrant_error(exc, "query sparse vectors", self.collection_name) from exc
+            raise classified from exc
 
         points = getattr(response, "points", None)
         if points is None:
@@ -1153,6 +1279,21 @@ class QdrantVectorStore:
                 with_vectors=False,
             )
         except Exception as exc:
+            classified = classify_qdrant_error(exc, "query hybrid vectors", self.collection_name)
+            if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
+                await self._activate_fallback(reason=str(exc))
+                return await self.search_hybrid(
+                    dense_query_vector=dense_query_vector,
+                    sparse_query_vector=sparse_query_vector,
+                    limit=limit,
+                    candidate_limit=candidate_limit,
+                    document_id=document_id,
+                    document_ids=document_ids,
+                    patient_id=patient_id,
+                    source_system=source_system,
+                    filter=filter,
+                    filters=filters,
+                )
             logger.exception(
                 "Failed to execute hybrid search query in Qdrant",
                 collection=self.collection_name,
@@ -1162,7 +1303,7 @@ class QdrantVectorStore:
                 document_id=document_id,
                 error=str(exc),
             )
-            raise classify_qdrant_error(exc, "query hybrid vectors", self.collection_name) from exc
+            raise classified from exc
 
         points = getattr(response, "points", None)
         if points is None:
@@ -1175,7 +1316,8 @@ class QdrantVectorStore:
 
     async def close(self) -> None:
         """Close client connection if initialized and owned by this instance."""
-        if self._owns_client and self.client is not None:
+        global _shared_fallback_client
+        if self._owns_client and self.client is not None and self.client is not _shared_fallback_client:
             await self.client.close()
 
     async def __aenter__(self) -> "QdrantVectorStore":

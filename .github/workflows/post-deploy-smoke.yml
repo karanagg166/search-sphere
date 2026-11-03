@@ -64,8 +64,10 @@ jobs:
         env:
           EXPECTED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
           PROD_SMOKE_BEARER_TOKEN: ${{ secrets.PROD_SMOKE_BEARER_TOKEN }}
+          PROD_SMOKE_USER_EMAIL: ${{ secrets.PROD_SMOKE_USER_EMAIL }}
+          PROD_SMOKE_USER_PASSWORD: ${{ secrets.PROD_SMOKE_USER_PASSWORD }}
           PROD_SMOKE_DOCUMENT_ID: ${{ secrets.PROD_SMOKE_DOCUMENT_ID }}
-          PROD_SMOKE_EXPECTED_MARKER: ${{ secrets.PROD_SMOKE_EXPECTED_MARKER }}
-          REQUIRE_RAG: ${{ inputs.require_rag || 'false' }}
-          RUN_LLM_ANSWER: ${{ inputs.run_answer || 'false' }}
+          PROD_SMOKE_EXPECTED_MARKER: ${{ secrets.PROD_SMOKE_EXPECTED_MARKER || 'SS-SYNTHETIC-SMOKE-42' }}
+          REQUIRE_RAG: ${{ inputs.require_rag || 'true' }}
+          RUN_LLM_ANSWER: ${{ inputs.run_answer || 'true' }}
         run: python3 scripts/ci_production_smoke.py

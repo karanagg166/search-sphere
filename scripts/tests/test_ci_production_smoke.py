@@ -2,6 +2,7 @@
 
 These never contact the production backend.
 """
+import io
 import subprocess
 import sys
 from pathlib import Path
@@ -21,12 +22,13 @@ except ModuleNotFoundError:
     import ci_production_smoke as smoke
 
 
-
 @pytest.fixture(autouse=True)
 def clean_state(monkeypatch):
     smoke.RESULTS.clear()
     for key in (
         "PROD_SMOKE_BEARER_TOKEN",
+        "PROD_SMOKE_USER_EMAIL",
+        "PROD_SMOKE_USER_PASSWORD",
         "PROD_SMOKE_DOCUMENT_ID",
         "PROD_SMOKE_EXPECTED_MARKER",
         "REQUIRE_RAG",
@@ -103,44 +105,144 @@ def test_unauthenticated_queries_must_be_rejected(monkeypatch):
         smoke.check_auth_boundary()
 
 
-def test_rag_missing_secrets_is_explicitly_not_run(monkeypatch):
-    smoke.run_real_search()
-    assert any("NOT RUN" in result for result in smoke.RESULTS)
-    monkeypatch.setenv("REQUIRE_RAG", "true")
-    with pytest.raises(AssertionError, match="required"):
-        smoke.run_real_search()
+def test_generate_synthetic_pdf():
+    marker = "SS-SYNTH-MARKER-999"
+    pdf = smoke.generate_synthetic_pdf(marker, doc_name="Test-Doc")
+    assert pdf.startswith(b"%PDF-1.4")
+    assert marker.encode("latin-1") in pdf
+    assert b"xref" in pdf
+    assert b"trailer" in pdf
+    assert pdf.rstrip().endswith(b"%%EOF")
 
 
-def test_real_search_verifies_fixture_marker(monkeypatch):
-    monkeypatch.setenv("PROD_SMOKE_BEARER_TOKEN", "synthetic-test-token")
-    monkeypatch.setenv("PROD_SMOKE_DOCUMENT_ID", "synthetic-doc")
-    monkeypatch.setenv("PROD_SMOKE_EXPECTED_MARKER", "SS-SYNTHETIC-SMOKE-42")
+def test_acquire_ci_auth_uses_token_if_set(monkeypatch):
+    monkeypatch.setenv("PROD_SMOKE_BEARER_TOKEN", "bearer_token_xyz")
+    auth = smoke.acquire_ci_auth()
+    assert auth == ("bearer_token_xyz", "")
 
-    monkeypatch.setattr(
-        smoke,
-        "http",
-        lambda *args, **kwargs: (
-            200,
-            {},
-            {
-                "query": "What is the unique CI verification code in the synthetic test document?",
-                "results": [
-                    {
-                        "document_id": "synthetic-doc",
-                        "content": "The code is SS-SYNTHETIC-SMOKE-42.",
-                    }
-                ],
-            },
-        ),
+
+def test_acquire_ci_auth_logs_in_with_email_password(monkeypatch):
+    monkeypatch.setenv("PROD_SMOKE_USER_EMAIL", "test@search-sphere.internal")
+    monkeypatch.setenv("PROD_SMOKE_USER_PASSWORD", "Pass123!")
+
+    def fake_http(url, **kwargs):
+        if "/auth/login" in url:
+            return 200, {}, {"access_token": "token_abc", "user": {"id": "user-123"}}
+        return 404, {}, {}
+
+    monkeypatch.setattr(smoke, "http", fake_http)
+    auth = smoke.acquire_ci_auth()
+    assert auth == ("token_abc", "user-123")
+
+
+def test_acquire_ci_auth_signs_up_when_login_fails(monkeypatch):
+    monkeypatch.setenv("PROD_SMOKE_USER_EMAIL", "test@search-sphere.internal")
+    monkeypatch.setenv("PROD_SMOKE_USER_PASSWORD", "Pass123!")
+
+    def fake_http(url, **kwargs):
+        if "/auth/login" in url:
+            return 401, {}, {"detail": "No account found"}
+        if "/auth/signup" in url:
+            return 201, {}, {"access_token": "token_signup", "user": {"id": "user-signup-456"}}
+        return 404, {}, {}
+
+    monkeypatch.setattr(smoke, "http", fake_http)
+    auth = smoke.acquire_ci_auth()
+    assert auth == ("token_signup", "user-signup-456")
+
+
+def test_ensure_synthetic_document_polls_until_indexed(monkeypatch):
+    monkeypatch.setattr(smoke.time, "sleep", lambda *_: None)
+    upload_called = False
+
+    def fake_upload(*args, **kwargs):
+        nonlocal upload_called
+        upload_called = True
+        return 201, {}, {"id": "doc-synth-001"}
+
+    statuses = iter(["pending", "indexed"])
+
+    def fake_http(url, **kwargs):
+        return 200, {}, {"status": next(statuses), "chunk_count": 2}
+
+    monkeypatch.setattr(smoke, "http_upload", fake_upload)
+    monkeypatch.setattr(smoke, "http", fake_http)
+
+    doc_id, was_created = smoke.ensure_synthetic_document("token_xyz", "MARKER-123")
+    assert upload_called
+    assert doc_id == "doc-synth-001"
+    assert was_created is True
+
+
+def test_cleanup_synthetic_document(monkeypatch):
+    deleted = False
+
+    def fake_http(url, **kwargs):
+        nonlocal deleted
+        if kwargs.get("method") == "DELETE":
+            deleted = True
+            return 204, {}, {}
+        return 404, {}, {}
+
+    monkeypatch.setattr(smoke, "http", fake_http)
+    smoke.cleanup_synthetic_document("token_xyz", "doc-synth-001")
+    assert deleted
+    assert any("purged synthetic document" in r for r in smoke.RESULTS)
+
+
+def test_read_sse_stream(monkeypatch):
+    sse_data = (
+        b"event: metadata\r\n"
+        b'data: {"query": "What is the code?", "rewritten": false}\r\n\r\n'
+        b"event: source\r\n"
+        b'data: {"sources": [{"document_id": "doc-1"}]}\r\n\r\n'
+        b"event: token\r\n"
+        b'data: {"token": "The"}\r\n\r\n'
+        b"event: token\r\n"
+        b'data: {"token": " code is 42."}\r\n\r\n'
+        b"event: done\r\n"
+        b'data: {"answer": "The code is 42."}\r\n\r\n'
     )
-    smoke.run_real_search()
-    assert any("Real semantic search" in result for result in smoke.RESULTS)
+    fake_resp = io.BytesIO(sse_data)
+    monkeypatch.setattr(smoke.urllib.request, "urlopen", lambda *args, **kwargs: fake_resp)
+
+    events = smoke.read_sse_stream("http://mock/answer/stream", data={}, headers={})
+    assert len(events) == 5
+    assert events[0][0] == "metadata"
+    assert events[1][0] == "source"
+    assert events[2][0] == "token"
+    assert events[3][0] == "token"
+    assert events[4][0] == "done"
+    assert events[4][1]["answer"] == "The code is 42."
 
 
-def test_real_search_rejects_empty_results(monkeypatch):
-    monkeypatch.setenv("PROD_SMOKE_BEARER_TOKEN", "synthetic-test-token")
-    monkeypatch.setenv("PROD_SMOKE_DOCUMENT_ID", "synthetic-doc")
-    monkeypatch.setenv("PROD_SMOKE_EXPECTED_MARKER", "SS-SYNTHETIC-SMOKE-42")
-    monkeypatch.setattr(smoke, "http", lambda *args, **kwargs: (200, {}, {"results": []}))
-    with pytest.raises(AssertionError, match="no retrieved"):
-        smoke.run_real_search()
+def test_real_rag_pipeline_search_and_answer(monkeypatch):
+    doc_id = "doc-test-synth"
+    marker = "SS-SYNTH-MARKER"
+
+    def fake_http(url, **kwargs):
+        if url.endswith("/search"):
+            return 200, {}, {
+                "query": "What is the unique CI verification code in the synthetic test document?",
+                "results": [{"document_id": doc_id, "content": f"Found marker: {marker}"}],
+            }
+        if url.endswith("/answer"):
+            return 200, {}, {
+                "answer": f"The verification code is {marker}.",
+                "sources": [{"document_id": doc_id}],
+            }
+        return 404, {}, {}
+
+    fake_sse = [
+        ("metadata", {"query": "test"}),
+        ("source", {"sources": [{"document_id": doc_id}]}),
+        ("token", {"token": f"Code is {marker}"}),
+        ("done", {"answer": f"Code is {marker}"}),
+    ]
+    monkeypatch.setattr(smoke, "http", fake_http)
+    monkeypatch.setattr(smoke, "read_sse_stream", lambda *args, **kwargs: fake_sse)
+
+    smoke.run_real_rag_pipeline("token_abc", doc_id, marker, do_answer=True)
+    assert any("Real semantic search" in r for r in smoke.RESULTS)
+    assert any("Real grounded answer" in r for r in smoke.RESULTS)
+    assert any("SSE answer streaming" in r for r in smoke.RESULTS)

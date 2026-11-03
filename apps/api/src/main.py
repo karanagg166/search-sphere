@@ -272,8 +272,10 @@ async def diagnostic_check():
     try:
         from src.vector_store.qdrant_store import QdrantVectorStore
         store = QdrantVectorStore()
+        await store.ensure_collection()
         info = await store.client.get_collection(store.collection_name)
-        res["qdrant"] = f"ok (collection '{store.collection_name}', {info.points_count} points)"
+        mode = "embedded" if getattr(store, "is_embedded", False) else "remote"
+        res["qdrant"] = f"ok ({mode}, collection '{store.collection_name}', {info.points_count} points)"
     except Exception as exc:
         res["qdrant"] = f"error: {exc}"
 
