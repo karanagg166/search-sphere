@@ -104,7 +104,21 @@ class MemoryGuard:
         if self._is_container_constrained and self._cgroup_version == 2:
             try:
                 with open("/sys/fs/cgroup/memory.current") as f:
-                    usage_mb = int(f.read().strip()) / (1024.0 * 1024.0)
+                    curr_bytes = int(f.read().strip())
+                # Deduct reclaimable inactive_file page cache from memory.stat to compute
+                # true container working set (matching Kubernetes container_memory_working_set_bytes)
+                # preventing disk-cached model weights from triggering false critical OOM alarms.
+                inactive_file_bytes = 0
+                try:
+                    with open("/sys/fs/cgroup/memory.stat") as sf:
+                        for line in sf:
+                            if line.startswith("inactive_file "):
+                                inactive_file_bytes = int(line.split()[1])
+                                break
+                except Exception:
+                    pass
+                working_set_bytes = max(0, curr_bytes - inactive_file_bytes)
+                usage_mb = working_set_bytes / (1024.0 * 1024.0)
             except Exception:
                 usage_mb = 0.0
 
@@ -112,7 +126,18 @@ class MemoryGuard:
         if usage_mb <= 0.0 and self._is_container_constrained and self._cgroup_version == 1:
             try:
                 with open("/sys/fs/cgroup/memory/memory.usage_in_bytes") as f:
-                    usage_mb = int(f.read().strip()) / (1024.0 * 1024.0)
+                    curr_bytes = int(f.read().strip())
+                inactive_file_bytes = 0
+                try:
+                    with open("/sys/fs/cgroup/memory/memory.stat") as sf:
+                        for line in sf:
+                            if line.startswith("total_inactive_file "):
+                                inactive_file_bytes = int(line.split()[1])
+                                break
+                except Exception:
+                    pass
+                working_set_bytes = max(0, curr_bytes - inactive_file_bytes)
+                usage_mb = working_set_bytes / (1024.0 * 1024.0)
             except Exception:
                 usage_mb = 0.0
 

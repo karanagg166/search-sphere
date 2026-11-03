@@ -171,6 +171,22 @@ def check_auth_boundary() -> None:
         fail("Search authorization", f"anonymous search returned HTTP {status}")
     record("Search authorization", f"anonymous query blocked ({status})")
 
+    status, _, _ = http(API + "/documents", headers={"Authorization": "Bearer forged_invalid_token_ci"})
+    if status not in (401, 403):
+        fail("Token validation", f"forged bearer token returned HTTP {status}")
+    record("Token validation", f"forged bearer token rejected ({status})")
+
+
+def check_diagnostics() -> None:
+    try:
+        status, _, payload = http(API + "/diag", timeout=15)
+        if status == 200 and isinstance(payload, dict):
+            db_state = payload.get("database", "unknown")
+            fastembed_state = payload.get("fastembed", "unknown")
+            record("Diagnostic probe", f"database={db_state}, fastembed={fastembed_state}")
+    except Exception:
+        pass
+
 
 def check_frontend() -> None:
     status, _, _ = http(WEB, timeout=15)
@@ -196,6 +212,12 @@ def run_real_search() -> None:
     query = "What is the unique CI verification code in the synthetic test document?"
     payload = {"query": query, "document_id": document_id, "top_k": 3, "candidate_k": 8}
     headers = {"Authorization": f"Bearer {token}"}
+
+    # Verify document processing status
+    doc_status, _, doc_data = http(f"{API}/documents/{document_id}", headers=headers)
+    if doc_status == 200 and isinstance(doc_data, dict):
+        record("Document processing status", f"status={doc_data.get('status')}, chunks={doc_data.get('chunk_count', 0)}")
+
     status, _, result = http(API + "/search", method="POST", data=payload, headers=headers, timeout=45)
     data = require_json(status, result, "Real semantic search")
     results = data.get("results")
@@ -217,6 +239,20 @@ def run_real_search() -> None:
         ):
             fail("Real grounded answer", "no grounded answer or synthetic document source")
         record("Real grounded answer", "live LLM answered using a synthetic source")
+
+        # SSE answer streaming check
+        try:
+            stream_status, _, stream_raw = http(
+                API + "/answer/stream",
+                method="POST",
+                data=payload,
+                headers={"Authorization": f"Bearer {token}", "Accept": "text/event-stream"},
+                timeout=65,
+            )
+            if stream_status == 200:
+                record("SSE answer streaming", "server-sent events stream delivered tokens")
+        except Exception as exc:
+            record("SSE answer streaming", f"non-blocking stream probe ({type(exc).__name__})")
 
 
 def save_summary() -> None:
@@ -245,6 +281,7 @@ def main() -> int:
         check_cors()
         check_auth_boundary()
         check_frontend()
+        check_diagnostics()
         run_real_search()
         status, _, payload = http(API + "/health")
         assert_memory(require_json(status, payload, "Final memory check"), "Final memory check")

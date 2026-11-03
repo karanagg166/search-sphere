@@ -3,10 +3,23 @@
 These never contact the production backend.
 """
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
-from scripts import ci_production_smoke as smoke
+# Ensure repo root and scripts directory are available on sys.path
+repo_root = Path(__file__).resolve().parents[2]
+scripts_dir = Path(__file__).resolve().parents[1]
+for path_entry in (str(repo_root), str(scripts_dir)):
+    if path_entry not in sys.path:
+        sys.path.insert(0, path_entry)
+
+try:
+    from scripts import ci_production_smoke as smoke
+except ModuleNotFoundError:
+    import ci_production_smoke as smoke
+
 
 
 @pytest.fixture(autouse=True)
