@@ -34,6 +34,7 @@ class MemoryGuard:
         self._cache_ttl_sec: float = 0.25  # 250ms cache to avoid disk thrashing
         self._last_logged_pressure: str = "normal"
         self._cgroup_version: int | None = None
+        self._is_container_constrained: bool = False
         self._detect_environment()
 
     def _detect_environment(self) -> None:
@@ -60,6 +61,7 @@ class MemoryGuard:
                     limit_mb = limit_bytes / (1024.0 * 1024.0)
                     if 50.0 <= limit_mb <= 16384.0:
                         self.platform_limit_mb = limit_mb
+                        self._is_container_constrained = True
                         logger.info("Detected cgroup v2 memory limit", limit_mb=round(self.platform_limit_mb, 1))
         except Exception:
             pass
@@ -74,6 +76,7 @@ class MemoryGuard:
                     limit_mb = limit_bytes / (1024.0 * 1024.0)
                     if 50.0 <= limit_mb <= 16384.0:
                         self.platform_limit_mb = limit_mb
+                        self._is_container_constrained = True
                         logger.info("Detected cgroup v1 memory limit", limit_mb=round(self.platform_limit_mb, 1))
         except Exception:
             pass
@@ -81,8 +84,8 @@ class MemoryGuard:
     def get_current_memory_mb(self) -> float:
         """
         Returns the most accurate memory consumption in MiB.
-        Prioritizes container cgroup current memory usage on Linux,
-        falling back to process RSS.
+        Prioritizes container cgroup current memory usage on Linux when genuinely constrained,
+        falling back to process RSS on unconstrained hosts/VMs/macOS.
         """
         now = time.monotonic()
         if (now - self._last_read_time) < self._cache_ttl_sec and self._cached_usage_mb > 0:
@@ -90,16 +93,16 @@ class MemoryGuard:
 
         usage_mb = 0.0
 
-        # 1. Container cgroup v2 (Modern Docker / Render)
-        if self._cgroup_version == 2:
+        # 1. Container cgroup v2 (when running inside a constrained Docker/Render container)
+        if self._is_container_constrained and self._cgroup_version == 2:
             try:
                 with open("/sys/fs/cgroup/memory.current") as f:
                     usage_mb = int(f.read().strip()) / (1024.0 * 1024.0)
             except Exception:
                 usage_mb = 0.0
 
-        # 2. Container cgroup v1
-        if usage_mb <= 0.0 and self._cgroup_version == 1:
+        # 2. Container cgroup v1 (when running inside a constrained container)
+        if usage_mb <= 0.0 and self._is_container_constrained and self._cgroup_version == 1:
             try:
                 with open("/sys/fs/cgroup/memory/memory.usage_in_bytes") as f:
                     usage_mb = int(f.read().strip()) / (1024.0 * 1024.0)

@@ -42,7 +42,7 @@ def ensure_test_service_secret():
 def isolate_unit_test_queue():
     """Unit HTTP tests must not dispatch jobs into a running worker."""
     from src.tasks import document_tasks
-    if not hasattr(document_tasks, "broker"):
+    if not getattr(document_tasks, "broker", None):
         yield
         return
     with patch.object(document_tasks.broker, "enqueue") as enqueue:
