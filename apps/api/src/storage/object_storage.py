@@ -236,6 +236,9 @@ def get_object_storage() -> ObjectStorage:
     backend = settings.STORAGE_BACKEND.lower()
     if backend == "supabase":
         if not settings.NEXT_PUBLIC_SUPABASE_URL or "your-project" in settings.NEXT_PUBLIC_SUPABASE_URL:
+            if settings.ENVIRONMENT.lower() != "production":
+                logger.info("Supabase URL not configured in non-production environment; falling back to LocalStorage.")
+                return LocalStorage()
             raise RuntimeError("NEXT_PUBLIC_SUPABASE_URL is not configured for Supabase storage backend.")
         return SupabaseStorage()
 

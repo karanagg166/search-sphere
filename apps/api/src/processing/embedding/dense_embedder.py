@@ -1,5 +1,4 @@
 import math
-import os
 from typing import Any
 
 import structlog
@@ -255,7 +254,7 @@ class DenseEmbedder:
         return raw_vectors
 
     def _get_model(self) -> Any:
-        """Lazily load and cache embedding model (prefers FastEmbed ONNX Runtime for low memory)."""
+        """Lazily load and cache embedding model via centralized ModelManager."""
         if self._model is not None:
             return self._model
 
@@ -266,35 +265,18 @@ class DenseEmbedder:
             self._model = DenseEmbedder._cached_model
             return self._model
 
-        # 1. Prefer FastEmbed (ONNX Runtime) to avoid PyTorch OOM on memory-constrained servers (e.g. Render free tier 512MB)
+        # 1. Prefer centralized ModelManager (FastEmbed ONNX Runtime with threads=1)
         try:
-            from fastembed import TextEmbedding
+            from src.services.model_manager import model_manager
 
-            fastembed_model_name = self.model_name
-            if not fastembed_model_name.startswith("sentence-transformers/") and fastembed_model_name == "all-MiniLM-L6-v2":
-                fastembed_model_name = "sentence-transformers/all-MiniLM-L6-v2"
-
-            cache_path = getattr(settings, "FASTEMBED_CACHE_PATH", None) or os.getenv("FASTEMBED_CACHE_PATH")
-            logger.info(
-                "Loading FastEmbed TextEmbedding model (ONNX Runtime)",
-                model_name=fastembed_model_name,
-                cache_path=cache_path,
-            )
-            loaded_model = TextEmbedding(
-                model_name=fastembed_model_name,
-                cache_dir=cache_path,
-            )
+            loaded_model = model_manager.get_dense_embedder(self.model_name)
             DenseEmbedder._cached_model = loaded_model
             DenseEmbedder._cached_model_name = self.model_name
             self._model = loaded_model
-            logger.info(
-                "FastEmbed model loaded and cached successfully",
-                model_name=fastembed_model_name,
-            )
             return self._model
         except Exception as fastembed_exc:
             logger.warning(
-                "FastEmbed unavailable or failed to initialize",
+                "ModelManager FastEmbed unavailable or failed to initialize",
                 model_name=self.model_name,
                 error=str(fastembed_exc),
             )
@@ -305,7 +287,7 @@ class DenseEmbedder:
 
         # 2. Fallback to SentenceTransformer
         logger.info(
-            "Loading sentence-transformer embedding model",
+            "Loading sentence-transformer embedding model fallback",
             model_name=self.model_name,
             device=self.device,
         )
@@ -317,12 +299,6 @@ class DenseEmbedder:
             DenseEmbedder._cached_model = loaded_model
             DenseEmbedder._cached_model_name = self.model_name
             self._model = loaded_model
-
-            logger.info(
-                "Dense embedding model loaded and cached",
-                model_name=self.model_name,
-                device=self.device,
-            )
             return self._model
 
         except Exception as exc:
@@ -340,3 +316,9 @@ class DenseEmbedder:
         """Clear cached model in memory (useful for testing)."""
         cls._cached_model = None
         cls._cached_model_name = None
+        try:
+            from src.services.model_manager import model_manager
+
+            model_manager.unload_model("dense")
+        except Exception:
+            pass

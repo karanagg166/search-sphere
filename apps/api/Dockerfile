@@ -7,7 +7,14 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DEFAULT_TIMEOUT=1000 \
     FASTEMBED_CACHE_PATH=/app/.fastembed_cache \
     STORAGE_BACKEND=supabase \
-    SUPABASE_STORAGE_BUCKET=documents
+    SUPABASE_STORAGE_BUCKET=documents \
+    OMP_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    VECLIB_MAXIMUM_THREADS=1 \
+    NUMEXPR_NUM_THREADS=1 \
+    UVICORN_WORKERS=1 \
+    WEB_CONCURRENCY=1
 
 WORKDIR /app
 
@@ -39,4 +46,4 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "alembic upgrade head && uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "alembic upgrade head && uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]

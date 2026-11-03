@@ -109,14 +109,19 @@ class DocumentService:
                 detail="Failed to save document metadata in database.",
             ) from exc
 
-        # 5. Push document to worker queue for background processing (or fallback to in-process task)
+        # 5. Push document to worker queue for background processing (or fallback to durable processor)
         enqueued = enqueue_document(document_id)
         if not enqueued:
             logger.info(
-                "Worker queue unavailable; launching in-process background indexing task",
+                "Worker queue unavailable; queuing with durable document processor",
                 document_id=document_id,
             )
-            asyncio.create_task(index_document_pipeline(document_id))
+            try:
+                from src.services.durable_processor import durable_processor
+
+                durable_processor.notify_new_job()
+            except Exception:
+                asyncio.create_task(index_document_pipeline(document_id))
 
         logger.info(
             "Document uploaded successfully",

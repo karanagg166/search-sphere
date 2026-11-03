@@ -62,7 +62,7 @@ class BM25Embedder:
         self._model = model
 
     def _get_model(self) -> Any:
-        """Lazily load and cache the SparseTextEmbedding model instance."""
+        """Lazily load and cache the SparseTextEmbedding model instance via ModelManager."""
         if self._model is not None:
             return self._model
 
@@ -73,18 +73,12 @@ class BM25Embedder:
             return BM25Embedder._cached_model
 
         try:
-            logger.info(
-                "Loading BM25 sparse embedding model", model_name=self.model_name
-            )
-            from fastembed import SparseTextEmbedding
+            from src.services.model_manager import model_manager
 
-            cache_path = getattr(settings, "FASTEMBED_CACHE_PATH", None)
-            loaded_model = SparseTextEmbedding(
-                model_name=self.model_name,
-                cache_dir=cache_path,
-            )
+            loaded_model = model_manager.get_sparse_embedder(self.model_name)
             BM25Embedder._cached_model = loaded_model
             BM25Embedder._cached_model_name = self.model_name
+            self._model = loaded_model
             return loaded_model
         except Exception as exc:
             logger.exception(

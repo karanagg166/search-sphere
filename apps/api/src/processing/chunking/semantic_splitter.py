@@ -1,5 +1,4 @@
 import math
-import os
 import re
 from typing import Any
 
@@ -182,7 +181,7 @@ class SemanticEmbedder:
         return list(results)
 
     def _get_model(self) -> Any:
-        """Lazily load and cache the embedding model on CPU (prefers FastEmbed ONNX Runtime)."""
+        """Lazily load and cache the embedding model via centralized ModelManager."""
         if self._model is not None:
             return self._model
 
@@ -193,32 +192,24 @@ class SemanticEmbedder:
             self._model = SemanticEmbedder._cached_model
             return self._model
 
-        # 1. Prefer FastEmbed (ONNX Runtime) for lightweight CPU execution
+        # 1. Prefer centralized ModelManager singleton (shares memory with DenseEmbedder)
         try:
-            from fastembed import TextEmbedding
+            from src.services.model_manager import model_manager
 
-            fastembed_model_name = self.model_name
-            if not fastembed_model_name.startswith("sentence-transformers/") and fastembed_model_name == "all-MiniLM-L6-v2":
-                fastembed_model_name = "sentence-transformers/all-MiniLM-L6-v2"
-
-            logger.info(
-                "Loading FastEmbed model for semantic chunking",
-                model_name=fastembed_model_name,
-            )
-            loaded_model = TextEmbedding(model_name=fastembed_model_name, cache_dir=getattr(settings, "FASTEMBED_CACHE_PATH", None) or os.getenv("FASTEMBED_CACHE_PATH"))
+            loaded_model = model_manager.get_dense_embedder(self.model_name)
             SemanticEmbedder._cached_model = loaded_model
             SemanticEmbedder._cached_model_name = self.model_name
             self._model = loaded_model
             return self._model
         except Exception as fe_exc:
             logger.warning(
-                "FastEmbed not available for semantic chunking; trying SentenceTransformer",
+                "ModelManager FastEmbed unavailable for semantic chunking; trying SentenceTransformer",
                 error=str(fe_exc),
             )
 
         # 2. Fallback to SentenceTransformer
         logger.info(
-            "Loading semantic chunking sentence-transformer model",
+            "Loading semantic chunking sentence-transformer model fallback",
             model_name=self.model_name,
         )
 

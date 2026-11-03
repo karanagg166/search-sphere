@@ -56,17 +56,31 @@ async def lifespan(app: FastAPI):
     # Startup: Database schema is managed via Alembic migrations (no startup DDL)
     logger.info("Initializing Search Sphere application...")
 
-    # Auto-index any uploaded documents in background
+    # Start durable document processor background worker
     try:
-        from src.services.document_indexer import sync_unindexed_documents
+        from src.services.durable_processor import durable_processor
 
-        asyncio.create_task(sync_unindexed_documents())
+        durable_processor.start()
     except Exception as e:
-        logger.warning("Could not launch sync_unindexed_documents on startup", error=str(e))
+        logger.warning("Could not start durable_processor on startup", error=str(e))
 
     yield
-    # Shutdown: Dispose database connections gracefully
+    # Shutdown: Terminate background workers and dispose database connections gracefully
     logger.info("Shutting down Search Sphere application...")
+    try:
+        from src.services.durable_processor import durable_processor
+
+        await durable_processor.stop()
+    except Exception as e:
+        logger.warning("Error stopping durable processor", error=str(e))
+
+    try:
+        from src.services.model_manager import model_manager
+
+        model_manager.unload_all()
+    except Exception:
+        pass
+
     try:
         await engine.dispose()
         logger.info("Database connection pool disposed gracefully.")
@@ -183,12 +197,34 @@ app.include_router(v1_answers_router)
 @app.get("/health", tags=["Health"])
 async def health_check():
     """Basic health check endpoint to confirm the backend process is running."""
+    from src.services.memory_guard import memory_guard
+
+    metrics = memory_guard.get_metrics()
     return {
         "status": "ok",
         "service": "api",
         "version": "0.1.0",
         "environment": settings.ENVIRONMENT,
         "git_commit": os.getenv("RENDER_GIT_COMMIT", os.getenv("GIT_COMMIT", "dev")),
+        "memory_mb": metrics["current_mb"],
+        "pressure_level": metrics["pressure_level"],
+    }
+
+
+@app.get("/health/memory", tags=["Health"])
+async def memory_health_check():
+    """Detailed memory metrics, concurrency bounds, and model cache status."""
+    from src.services.model_manager import model_manager
+    from src.services.workload_scheduler import workload_scheduler
+
+    scheduler_status = workload_scheduler.get_status()
+    models_info = model_manager.get_loaded_models_info()
+    pressure = scheduler_status.get("memory", {}).get("pressure_level", "normal")
+    status_str = "under_pressure" if pressure in ("high", "critical") else "ok"
+    return {
+        "status": status_str,
+        "scheduler": scheduler_status,
+        "models": models_info,
     }
 
 
@@ -221,12 +257,13 @@ async def readiness_check():
 async def diagnostic_check():
     """Diagnostic check of FastEmbed models and Qdrant connectivity."""
     import time
+
+    from src.services.model_manager import model_manager
+
     res: dict = {"database": "ok", "fastembed": "unknown", "qdrant": "unknown"}
     try:
         t0 = time.perf_counter()
-        from fastembed import TextEmbedding
-        cache_path = getattr(settings, "FASTEMBED_CACHE_PATH", None)
-        emb = TextEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2", cache_dir=cache_path)
+        emb = model_manager.get_dense_embedder()
         vecs = list(emb.embed(["ping"]))
         res["fastembed"] = f"ok ({len(vecs[0])} dims, {(time.perf_counter() - t0)*1000:.1f}ms)"
     except Exception as exc:
