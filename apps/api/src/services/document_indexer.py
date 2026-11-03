@@ -7,8 +7,10 @@ from sqlalchemy import or_, select
 from src.db import AsyncSessionLocal
 from src.models.document import Document
 from src.services.durable_processor import (
-    MAX_INDEXING_RETRIES,
     LEASE_TIMEOUT_SECONDS as STALE_PROCESSING_TIMEOUT_SECONDS,
+)
+from src.services.durable_processor import (
+    MAX_INDEXING_RETRIES,
     durable_processor,
 )
 

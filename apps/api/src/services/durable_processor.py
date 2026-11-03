@@ -1,5 +1,4 @@
 import asyncio
-import os
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -33,7 +32,7 @@ POLL_INTERVAL_SECONDS = 4.0
 class DurableDocumentProcessor:
     """
     $0-Infrastructure Durable Document Queue & Processor.
-    
+
     Operates over PostgreSQL without requiring a paid RabbitMQ/Redis broker.
     Enforces atomic job leases, bounded retries, dead-letter failure states,
     and single-job concurrency under 512 MiB memory limits.
@@ -98,7 +97,7 @@ class DurableDocumentProcessor:
                     # No pending jobs: wait on wake event or poll timeout
                     try:
                         await asyncio.wait_for(self._wake_event.wait(), timeout=POLL_INTERVAL_SECONDS)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         pass
                     self._wake_event.clear()
 

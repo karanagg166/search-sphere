@@ -5,6 +5,7 @@ from src.config import settings
 logger = structlog.get_logger()
 
 # Setup RabbitMQ broker for the API producer if dramatiq is available
+broker = None
 process_document_task = None
 process_medical_document_task = None
 process_generic_document_task = None

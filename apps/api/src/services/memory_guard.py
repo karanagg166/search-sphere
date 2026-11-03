@@ -1,5 +1,3 @@
-import ctypes
-import gc
 import os
 import resource
 import subprocess
@@ -22,7 +20,7 @@ CRITICAL_THRESHOLD_MB = 465.0
 class MemoryGuard:
     """
     Proactive Memory Guardrail and Metrics Provider.
-    
+
     Inspects process RSS and Linux container cgroup memory limits.
     Classifies memory pressure states and provides backpressure signals
     to prevent container out-of-memory (OOM) termination on Render.
@@ -55,7 +53,7 @@ class MemoryGuard:
     def _detect_cgroup_v2_limit(self) -> None:
         """Reads cgroup v2 memory.max limit if configured."""
         try:
-            with open("/sys/fs/cgroup/memory.max", "r") as f:
+            with open("/sys/fs/cgroup/memory.max") as f:
                 val = f.read().strip()
                 if val and val != "max":
                     limit_bytes = int(val)
@@ -69,7 +67,7 @@ class MemoryGuard:
     def _detect_cgroup_v1_limit(self) -> None:
         """Reads cgroup v1 memory.limit_in_bytes if configured."""
         try:
-            with open("/sys/fs/cgroup/memory/memory.limit_in_bytes", "r") as f:
+            with open("/sys/fs/cgroup/memory/memory.limit_in_bytes") as f:
                 val = f.read().strip()
                 if val:
                     limit_bytes = int(val)
@@ -95,7 +93,7 @@ class MemoryGuard:
         # 1. Container cgroup v2 (Modern Docker / Render)
         if self._cgroup_version == 2:
             try:
-                with open("/sys/fs/cgroup/memory.current", "r") as f:
+                with open("/sys/fs/cgroup/memory.current") as f:
                     usage_mb = int(f.read().strip()) / (1024.0 * 1024.0)
             except Exception:
                 usage_mb = 0.0
@@ -103,7 +101,7 @@ class MemoryGuard:
         # 2. Container cgroup v1
         if usage_mb <= 0.0 and self._cgroup_version == 1:
             try:
-                with open("/sys/fs/cgroup/memory/memory.usage_in_bytes", "r") as f:
+                with open("/sys/fs/cgroup/memory/memory.usage_in_bytes") as f:
                     usage_mb = int(f.read().strip()) / (1024.0 * 1024.0)
             except Exception:
                 usage_mb = 0.0
@@ -111,7 +109,7 @@ class MemoryGuard:
         # 3. Process RSS via /proc/self/statm (Linux host / container fallback)
         if usage_mb <= 0.0 and sys.platform.startswith("linux"):
             try:
-                with open("/proc/self/statm", "r") as f:
+                with open("/proc/self/statm") as f:
                     rss_pages = int(f.read().split()[1])
                 page_size = os.sysconf("SC_PAGE_SIZE")
                 usage_mb = (rss_pages * page_size) / (1024.0 * 1024.0)

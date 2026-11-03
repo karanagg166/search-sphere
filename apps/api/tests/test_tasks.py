@@ -1,11 +1,18 @@
 from unittest.mock import patch
+
 import pytest
 
-dramatiq = pytest.importorskip("dramatiq")
-from dramatiq.brokers.rabbitmq import RabbitmqBroker
+try:
+    import dramatiq
+    from dramatiq.brokers.rabbitmq import RabbitmqBroker
+except ImportError:
+    dramatiq = None
+    RabbitmqBroker = None
 
 from src.config import settings
 from src.tasks.document_tasks import broker, enqueue_document, process_document_task
+
+pytestmark = pytest.mark.skipif(dramatiq is None, reason="dramatiq is not installed")
 
 
 def test_rabbitmq_broker_configuration():

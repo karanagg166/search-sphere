@@ -1,7 +1,8 @@
 import asyncio
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from typing import Any
 
 import structlog
 from fastapi import HTTPException, status
@@ -33,7 +34,7 @@ class WorkloadOverloadError(HTTPException):
 class WorkloadScheduler:
     """
     Centralized Memory-Aware Admission Controller and Concurrency Limiter.
-    
+
     Prevents simultaneous execution of memory-heavy tasks (e.g. PDF parsing + RAG answering),
     bounds concurrent thread/async task creation, and sheds excess traffic with
     clean HTTP 429 backpressure and Retry-After headers instead of OOM crashing.
@@ -91,7 +92,7 @@ class WorkloadScheduler:
         # 2. Acquire concurrency slot with bounded timeout
         try:
             await asyncio.wait_for(self._rag_semaphore.acquire(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._total_rejected += 1
             logger.warning(
                 "Rejected interactive RAG query due to concurrency queue timeout",
@@ -101,7 +102,7 @@ class WorkloadScheduler:
             raise WorkloadOverloadError(
                 detail="Search service is currently at maximum capacity. Please retry in a few seconds.",
                 retry_after=3,
-            )
+            ) from None
 
         self._active_rag_queries += 1
         t0 = time.perf_counter()
@@ -149,14 +150,14 @@ class WorkloadScheduler:
         # 2. Acquire concurrency slot (max 1 heavy job at a time)
         try:
             await asyncio.wait_for(self._heavy_semaphore.acquire(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._total_rejected += 1
             logger.warning("Heavy job concurrency queue timeout", timeout=timeout)
             raise WorkloadOverloadError(
                 detail="Another document is currently being indexed. Your request has been queued.",
                 retry_after=10,
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
+            ) from None
 
         self._active_heavy_jobs += 1
         t0 = time.perf_counter()

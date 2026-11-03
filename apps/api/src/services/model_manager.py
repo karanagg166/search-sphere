@@ -34,7 +34,7 @@ MAX_INFERENCE_BATCH_SIZE = 16
 class ModelManager:
     """
     Centralized, thread-safe model lifecycle manager.
-    
+
     Prevents duplicate model loading, manages native thread pools,
     enforces bounded inference batch sizes, and provides controlled
     memory unloading for memory-constrained environments (512 MiB RAM limit).

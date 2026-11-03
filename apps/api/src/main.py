@@ -257,6 +257,7 @@ async def readiness_check():
 async def diagnostic_check():
     """Diagnostic check of FastEmbed models and Qdrant connectivity."""
     import time
+
     from src.services.model_manager import model_manager
 
     res: dict = {"database": "ok", "fastembed": "unknown", "qdrant": "unknown"}

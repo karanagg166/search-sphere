@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -6,10 +5,13 @@ from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 
 from src.main import app
-from src.services.durable_processor import DurableDocumentProcessor, get_durable_processor
+from src.services.durable_processor import (
+    DurableDocumentProcessor,
+    get_durable_processor,
+)
 from src.services.memory_guard import MemoryGuard, memory_guard
-from src.services.model_manager import ModelManager, model_manager
-from src.services.workload_scheduler import WorkloadOverloadError, WorkloadScheduler, workload_scheduler
+from src.services.model_manager import model_manager
+from src.services.workload_scheduler import WorkloadScheduler
 
 
 class TestModelManager:
@@ -33,7 +35,7 @@ class TestModelManager:
 
     def test_embed_dense_bounded(self):
         texts = [f"Sample sentence number {i} for bounded embedding test." for i in range(25)]
-        
+
         # Test bounded batch execution with batch_size=8
         embeddings = model_manager.embed_dense_bounded(texts, batch_size=8)
         assert len(embeddings) == 25
@@ -41,7 +43,7 @@ class TestModelManager:
 
     def test_embed_sparse_bounded(self):
         texts = [f"Sample query text {i} for sparse BM25 test." for i in range(10)]
-        
+
         sparse_vectors = model_manager.embed_sparse_bounded(texts, batch_size=4)
         assert len(sparse_vectors) == 10
         assert hasattr(sparse_vectors[0], "indices")
