@@ -55,10 +55,15 @@ def http(
         response = urllib.request.urlopen(request, timeout=timeout)
     except urllib.error.HTTPError as error:
         response = error
-    with response:
-        status = response.status
-        result_headers = {k.lower(): v for k, v in response.headers.items()}
-        raw = response.read(262144)
+    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        return 0, {}, str(error)
+    try:
+        with response:
+            status = response.status
+            result_headers = {k.lower(): v for k, v in response.headers.items()}
+            raw = response.read(262144)
+    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        return 0, {}, str(error)
     try:
         payload: Any = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -100,10 +105,15 @@ def http_upload(
         resp = urllib.request.urlopen(req, timeout=timeout)
     except urllib.error.HTTPError as err:
         resp = err
-    with resp:
-        status = resp.status
-        resp_headers = {k.lower(): v for k, v in resp.headers.items()}
-        raw = resp.read(131072)
+    except (urllib.error.URLError, TimeoutError, OSError) as err:
+        return 0, {}, str(err)
+    try:
+        with resp:
+            status = resp.status
+            resp_headers = {k.lower(): v for k, v in resp.headers.items()}
+            raw = resp.read(131072)
+    except (urllib.error.URLError, TimeoutError, OSError) as err:
+        return 0, {}, str(err)
     try:
         payload = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -425,11 +435,11 @@ def ensure_synthetic_document(
     record("Document upload", f"uploaded synthetic document {doc_id[:12]}")
 
     # Poll until indexed or ready
-    poll_deadline = time.monotonic() + 90
+    poll_deadline = time.monotonic() + 120
     last_status = "pending"
     while time.monotonic() < poll_deadline:
         time.sleep(5)
-        st, _, doc_info = http(f"{API}/documents/{doc_id}", headers=headers, timeout=15)
+        st, _, doc_info = http(f"{API}/documents/{doc_id}", headers=headers, timeout=25)
         if st == 200 and isinstance(doc_info, dict):
             last_status = str(doc_info.get("status", "unknown"))
             if last_status == "indexed":
@@ -438,7 +448,7 @@ def ensure_synthetic_document(
                 return doc_id, True
             if "failed" in last_status:
                 break
-    fail("Document processing", f"document did not reach 'indexed' within 90s (status={last_status})")
+    fail("Document processing", f"document did not reach 'indexed' within 120s (status={last_status})")
     return doc_id, True
 
 

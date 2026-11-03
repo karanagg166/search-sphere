@@ -44,14 +44,25 @@ class QdrantSchemaError(QdrantVectorStoreError):
 
 def classify_qdrant_error(exc: Exception, operation: str, collection: str) -> QdrantVectorStoreError:
     """Classify low-level network/protocol exceptions into structured domain errors."""
-    err_str = str(exc).lower()
-    type_name = type(exc).__name__.lower()
-    msg = f"Failed to {operation} from collection '{collection}': {exc}"
-    if any(k in err_str or k in type_name for k in ["connection reset", "connecterror", "connection refused", "failed to establish a new connection", "errno 54", "errno 111", "recv failure", "remoteprotocolerror", "unreachable"]):
+    causes = [exc, getattr(exc, "source", None), getattr(exc, "__cause__", None), getattr(exc, "__context__", None)]
+    tokens = []
+    for c in causes:
+        if c is not None:
+            tokens.extend([str(c).lower(), repr(c).lower(), type(c).__name__.lower()])
+    err_text = " ".join(tokens)
+    msg = f"Failed to {operation} from collection '{collection}': {str(exc) or repr(exc)}"
+    if any(k in err_text for k in [
+        "connection reset", "connecterror", "connection refused", "failed to establish a new connection",
+        "errno 54", "errno 111", "recv failure", "remoteprotocolerror", "unreachable",
+        "responsehandlingexception", "transport", "network", "socket", "peer", "broken pipe",
+        "remote disconnected", "connection error"
+    ]):
         return QdrantConnectionError(msg)
-    if any(k in err_str or k in type_name for k in ["timeout", "timed out", "timeoutexception", "deadline exceeded"]):
+    if any(k in err_text for k in [
+        "timeout", "timed out", "timeoutexception", "deadline exceeded", "readtimeout", "connecttimeout"
+    ]):
         return QdrantTimeoutError(msg)
-    if any(k in err_str or k in type_name for k in ["wrong vector size", "vector param", "does not exist", "schema", "not found"]):
+    if any(k in err_text for k in ["wrong vector size", "vector param", "does not exist", "schema", "not found"]):
         return QdrantSchemaError(msg)
     return QdrantVectorStoreError(msg)
 
@@ -205,8 +216,8 @@ class QdrantVectorStore:
             exists = await self.client.collection_exists(self.collection_name)
         except Exception as exc:
             classified = classify_qdrant_error(exc, "check existence", self.collection_name)
-            if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
-                await self._activate_fallback(reason=str(exc))
+            if is_fallback_permitted() and self._owns_client and not self.is_embedded and not isinstance(classified, QdrantSchemaError):
+                await self._activate_fallback(reason=str(exc) or repr(exc))
                 return
             logger.exception(
                 "Failed to check Qdrant collection existence",
@@ -215,7 +226,7 @@ class QdrantVectorStore:
             )
             raise QdrantVectorStoreError(
                 f"Failed to check existence of collection "
-                f"'{self.collection_name}': {exc}"
+                f"'{self.collection_name}': {str(exc) or repr(exc)}"
             ) from exc
 
         if not exists:
@@ -242,8 +253,8 @@ class QdrantVectorStore:
                 )
             except Exception as exc:
                 classified = classify_qdrant_error(exc, "create collection", self.collection_name)
-                if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
-                    await self._activate_fallback(reason=str(exc))
+                if is_fallback_permitted() and self._owns_client and not self.is_embedded and not isinstance(classified, QdrantSchemaError):
+                    await self._activate_fallback(reason=str(exc) or repr(exc))
                     return
                 logger.exception(
                     "Failed to create Qdrant collection",
@@ -251,7 +262,7 @@ class QdrantVectorStore:
                     error=str(exc),
                 )
                 raise QdrantVectorStoreError(
-                    f"Failed to create collection '{self.collection_name}': {exc}"
+                    f"Failed to create collection '{self.collection_name}': {str(exc) or repr(exc)}"
                 ) from exc
 
             await self._ensure_payload_indexes()
@@ -260,8 +271,8 @@ class QdrantVectorStore:
                 info = await self.client.get_collection(self.collection_name)
             except Exception as exc:
                 classified = classify_qdrant_error(exc, "inspect collection", self.collection_name)
-                if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
-                    await self._activate_fallback(reason=str(exc))
+                if is_fallback_permitted() and self._owns_client and not self.is_embedded and not isinstance(classified, QdrantSchemaError):
+                    await self._activate_fallback(reason=str(exc) or repr(exc))
                     return
                 logger.exception(
                     "Failed to inspect Qdrant collection",
@@ -269,7 +280,7 @@ class QdrantVectorStore:
                     error=str(exc),
                 )
                 raise QdrantVectorStoreError(
-                    f"Failed to inspect collection '{self.collection_name}': {exc}"
+                    f"Failed to inspect collection '{self.collection_name}': {str(exc) or repr(exc)}"
                 ) from exc
 
             self._validate_collection_vectors(info)
@@ -469,8 +480,8 @@ class QdrantVectorStore:
             )
         except Exception as exc:
             classified = classify_qdrant_error(exc, "delete points", self.collection_name)
-            if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
-                await self._activate_fallback(reason=str(exc))
+            if is_fallback_permitted() and self._owns_client and not self.is_embedded and not isinstance(classified, QdrantSchemaError):
+                await self._activate_fallback(reason=str(exc) or repr(exc))
                 await self.client.delete(
                     collection_name=self.collection_name,
                     points_selector=delete_filter,
@@ -561,8 +572,8 @@ class QdrantVectorStore:
             )
         except Exception as exc:
             classified = classify_qdrant_error(exc, "upsert batch", self.collection_name)
-            if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
-                await self._activate_fallback(reason=str(exc))
+            if is_fallback_permitted() and self._owns_client and not self.is_embedded and not isinstance(classified, QdrantSchemaError):
+                await self._activate_fallback(reason=str(exc) or repr(exc))
                 await self.client.upsert(
                     collection_name=self.collection_name,
                     points=batch,
@@ -758,6 +769,13 @@ class QdrantVectorStore:
             QdrantVectorStoreError: If parameters are invalid, the search request fails,
                                     or result payloads are missing/malformed.
         """
+        if is_fallback_permitted() and _fallback_mode_active and self._owns_client and not self.is_embedded:
+            self.client = await get_shared_fallback_client()
+            self.is_embedded = True
+        if self.client is None:
+            self.client = await get_shared_fallback_client()
+            self.is_embedded = True
+
         if not query_vector:
             raise QdrantVectorStoreError("query_vector must not be empty.")
 
@@ -821,8 +839,8 @@ class QdrantVectorStore:
             )
         except Exception as exc:
             classified = classify_qdrant_error(exc, "query dense vectors", self.collection_name)
-            if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
-                await self._activate_fallback(reason=str(exc))
+            if is_fallback_permitted() and self._owns_client and not self.is_embedded and not isinstance(classified, QdrantSchemaError):
+                await self._activate_fallback(reason=str(exc) or repr(exc))
                 return await self.search_dense(
                     query_vector=query_vector,
                     limit=limit,
@@ -956,6 +974,13 @@ class QdrantVectorStore:
             QdrantVectorStoreError: If parameters are invalid, the search request fails,
                                     or result payloads are missing/malformed.
         """
+        if is_fallback_permitted() and _fallback_mode_active and self._owns_client and not self.is_embedded:
+            self.client = await get_shared_fallback_client()
+            self.is_embedded = True
+        if self.client is None:
+            self.client = await get_shared_fallback_client()
+            self.is_embedded = True
+
         if query_vector is None:
             raise QdrantVectorStoreError("query_vector must not be None.")
 
@@ -1025,8 +1050,8 @@ class QdrantVectorStore:
             )
         except Exception as exc:
             classified = classify_qdrant_error(exc, "query sparse vectors", self.collection_name)
-            if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
-                await self._activate_fallback(reason=str(exc))
+            if is_fallback_permitted() and self._owns_client and not self.is_embedded and not isinstance(classified, QdrantSchemaError):
+                await self._activate_fallback(reason=str(exc) or repr(exc))
                 return await self.search_sparse(
                     query_vector=query_vector,
                     limit=limit,
@@ -1174,6 +1199,13 @@ class QdrantVectorStore:
             QdrantVectorStoreError: If parameters are invalid, search request fails,
                                     or result payloads are missing/malformed.
         """
+        if is_fallback_permitted() and _fallback_mode_active and self._owns_client and not self.is_embedded:
+            self.client = await get_shared_fallback_client()
+            self.is_embedded = True
+        if self.client is None:
+            self.client = await get_shared_fallback_client()
+            self.is_embedded = True
+
         if not dense_query_vector:
             raise QdrantVectorStoreError("dense_query_vector must not be empty.")
 
@@ -1280,8 +1312,8 @@ class QdrantVectorStore:
             )
         except Exception as exc:
             classified = classify_qdrant_error(exc, "query hybrid vectors", self.collection_name)
-            if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
-                await self._activate_fallback(reason=str(exc))
+            if is_fallback_permitted() and self._owns_client and not self.is_embedded and not isinstance(classified, QdrantSchemaError):
+                await self._activate_fallback(reason=str(exc) or repr(exc))
                 return await self.search_hybrid(
                     dense_query_vector=dense_query_vector,
                     sparse_query_vector=sparse_query_vector,
