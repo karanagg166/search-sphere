@@ -84,7 +84,7 @@ jobs:
 
       - name: Run Monitor & Keep-Alive Safety Suite
         run: |
-          pytest scripts/tests/test_monitor.py -v
+          pytest scripts/tests/test_monitor.py scripts/tests/test_ci_production_smoke.py -v
 
   worker-test:
     name: Worker Ingestion & Extraction Tests
