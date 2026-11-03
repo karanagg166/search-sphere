@@ -132,7 +132,7 @@ class GenericDocumentService:
 
         if len(file_bytes) > MAX_GENERIC_DOC_SIZE_BYTES:
             raise HTTPException(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail=f"File exceeds maximum allowed size of {MAX_GENERIC_DOC_SIZE_BYTES // (1024 * 1024)}MB.",
             )
 
