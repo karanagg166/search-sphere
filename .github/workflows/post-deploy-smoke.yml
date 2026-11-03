@@ -1,0 +1,71 @@
+name: Search Sphere Post-Deployment Live Smoke
+
+on:
+  workflow_run:
+    workflows: ["Search Sphere CI"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      require_rag:
+        description: "Require live authenticated semantic search (needs dedicated synthetic fixture secrets)"
+        type: boolean
+        required: false
+        default: false
+      run_answer:
+        description: "Also call real /answer with synthetic data (may consume LLM API quota)"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: search-sphere-production-smoke
+  cancel-in-progress: true
+
+jobs:
+  production-smoke:
+    name: Real Render + Vercel API Contracts
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out the release commit (not PR code)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine whether this main commit affects a deployed app
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif git rev-parse HEAD^ >/dev/null 2>&1 && \
+               git diff --quiet HEAD^ HEAD -- apps/api apps/web render.yaml; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No deployed app changes: skip quota-sensitive live probes." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Probe live production (real responses, real DB, CORS, memory, optional RAG)
+        if: steps.scope.outputs.run == 'true'
+        env:
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          PROD_SMOKE_BEARER_TOKEN: ${{ secrets.PROD_SMOKE_BEARER_TOKEN }}
+          PROD_SMOKE_DOCUMENT_ID: ${{ secrets.PROD_SMOKE_DOCUMENT_ID }}
+          PROD_SMOKE_EXPECTED_MARKER: ${{ secrets.PROD_SMOKE_EXPECTED_MARKER }}
+          REQUIRE_RAG: ${{ inputs.require_rag || 'false' }}
+          RUN_LLM_ANSWER: ${{ inputs.run_answer || 'false' }}
+        run: python3 scripts/ci_production_smoke.py
