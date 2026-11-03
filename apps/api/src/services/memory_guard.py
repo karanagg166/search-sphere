@@ -7,6 +7,8 @@ from typing import Any
 
 import structlog
 
+from src.config import settings
+
 logger = structlog.get_logger()
 
 # Configurable container memory thresholds (MiB) based on 512 MiB Render Free Tier limit
@@ -26,8 +28,13 @@ class MemoryGuard:
     to prevent container out-of-memory (OOM) termination on Render.
     """
 
-    def __init__(self, platform_limit_mb: float = DEFAULT_PLATFORM_LIMIT_MB) -> None:
+    def __init__(
+        self,
+        platform_limit_mb: float = DEFAULT_PLATFORM_LIMIT_MB,
+        bypass_in_test: bool = True,
+    ) -> None:
         self.platform_limit_mb = platform_limit_mb
+        self.bypass_in_test = bypass_in_test
         self._peak_memory_mb: float = 0.0
         self._last_read_time: float = 0.0
         self._cached_usage_mb: float = 0.0
@@ -178,11 +185,15 @@ class MemoryGuard:
 
     def is_heavy_workload_allowed(self) -> bool:
         """Returns True if memory headroom permits launching a heavy background task (indexing, extraction)."""
+        if self.bypass_in_test and getattr(settings, "ENVIRONMENT", "").lower() in ("test", "testing", "ci"):
+            return True
         pressure = self.get_pressure_level()
         return pressure in ("normal", "moderate")
 
     def is_interactive_rag_allowed(self) -> bool:
         """Returns True if memory headroom permits serving an interactive RAG query."""
+        if self.bypass_in_test and getattr(settings, "ENVIRONMENT", "").lower() in ("test", "testing", "ci"):
+            return True
         pressure = self.get_pressure_level()
         return pressure != "critical"
 

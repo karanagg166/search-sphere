@@ -81,7 +81,7 @@ class TestMemoryGuard:
         ],
     )
     def test_watermark_thresholds(self, simulated_mb, expected_pressure, can_rag, can_heavy):
-        guard = MemoryGuard(platform_limit_mb=512.0)
+        guard = MemoryGuard(platform_limit_mb=512.0, bypass_in_test=False)
 
         with patch.object(guard, "get_current_memory_mb", return_value=simulated_mb):
             pressure = guard.get_pressure_level()
