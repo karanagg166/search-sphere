@@ -1,5 +1,7 @@
 from unittest.mock import patch
+import pytest
 
+dramatiq = pytest.importorskip("dramatiq")
 from dramatiq.brokers.rabbitmq import RabbitmqBroker
 
 from src.config import settings

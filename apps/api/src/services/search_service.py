@@ -19,6 +19,7 @@ from src.schemas.search import (
     SearchResultResponse,
 )
 from src.services.query_rewriter import QueryRewriter, get_query_rewriter
+from src.services.workload_scheduler import workload_scheduler
 
 logger = structlog.get_logger()
 
@@ -117,79 +118,80 @@ class SearchService:
                 )
             target_document_ids = user_doc_ids
 
-        # 2. Query Reformulation (standalone query generation before retrieval)
-        rewrite_result = await self.query_rewriter.rewrite(
-            query=request.query,
-            conversation_context=request.conversation_context,
-        )
-        retrieval_query = rewrite_result.retrieval_query
+        # 2. Query Reformulation & Retrieval under interactive RAG guardrails
+        async with workload_scheduler.interactive_rag_scope():
+            rewrite_result = await self.query_rewriter.rewrite(
+                query=request.query,
+                conversation_context=request.conversation_context,
+            )
+            retrieval_query = rewrite_result.retrieval_query
 
-        # 3. Execute two-stage reranked retrieval pipeline
-        try:
-            raw_results = await self.retriever.search(
-                query=retrieval_query,
-                top_k=request.top_k,
-                candidate_k=request.candidate_k,
-                document_id=target_document_id,
-                document_ids=target_document_ids,
-                score_threshold=request.score_threshold,
-            )
-        except (RerankedQueryValidationError, HybridQueryValidationError) as exc:
-            logger.warning(
-                "Search query validation failed",
-                user_id=user.id,
-                error=str(exc),
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(exc),
-            ) from exc
-        except (RerankedRetrievalError, HybridRetrievalError) as exc:
-            logger.error(
-                "Reranked retrieval error during search",
-                user_id=user.id,
-                error=str(exc),
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Search service encountered an internal retrieval error.",
-            ) from exc
-        except Exception as exc:
-            logger.exception(
-                "Unexpected error during search execution",
-                user_id=user.id,
-                error=str(exc),
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="An unexpected error occurred during search.",
-            ) from exc
+            # 3. Execute two-stage reranked retrieval pipeline
+            try:
+                raw_results = await self.retriever.search(
+                    query=retrieval_query,
+                    top_k=request.top_k,
+                    candidate_k=request.candidate_k,
+                    document_id=target_document_id,
+                    document_ids=target_document_ids,
+                    score_threshold=request.score_threshold,
+                )
+            except (RerankedQueryValidationError, HybridQueryValidationError) as exc:
+                logger.warning(
+                    "Search query validation failed",
+                    user_id=user.id,
+                    error=str(exc),
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(exc),
+                ) from exc
+            except (RerankedRetrievalError, HybridRetrievalError) as exc:
+                logger.error(
+                    "Reranked retrieval error during search",
+                    user_id=user.id,
+                    error=str(exc),
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Search service encountered an internal retrieval error.",
+                ) from exc
+            except Exception as exc:
+                logger.exception(
+                    "Unexpected error during search execution",
+                    user_id=user.id,
+                    error=str(exc),
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="An unexpected error occurred during search.",
+                ) from exc
 
-        # 4. Defense-in-depth isolation check: ensure no unauthorized documents leak
-        if target_document_id is not None:
-            filtered_results = [
-                r for r in raw_results if r.document_id == target_document_id
+            # 4. Defense-in-depth isolation check: ensure no unauthorized documents leak
+            if target_document_id is not None:
+                filtered_results = [
+                    r for r in raw_results if r.document_id == target_document_id
+                ]
+            else:
+                allowed_ids = set(target_document_ids) if target_document_ids else set()
+                filtered_results = [r for r in raw_results if r.document_id in allowed_ids]
+
+            # 5. Map domain results to API response schema
+            result_responses = [
+                SearchResultResponse(
+                    document_id=r.document_id,
+                    chunk_index=r.chunk_index,
+                    content=r.content,
+                    start_page=r.start_page,
+                    end_page=r.end_page,
+                    page_numbers=list(r.page_numbers),
+                    block_types=list(r.block_types),
+                    rrf_score=r.rrf_score,
+                    rerank_score=r.rerank_score,
+                    rank=idx + 1,
+                )
+                for idx, r in enumerate(filtered_results)
             ]
-        else:
-            allowed_ids = set(target_document_ids) if target_document_ids else set()
-            filtered_results = [r for r in raw_results if r.document_id in allowed_ids]
-
-        # 5. Map domain results to API response schema
-        result_responses = [
-            SearchResultResponse(
-                document_id=r.document_id,
-                chunk_index=r.chunk_index,
-                content=r.content,
-                start_page=r.start_page,
-                end_page=r.end_page,
-                page_numbers=list(r.page_numbers),
-                block_types=list(r.block_types),
-                rrf_score=r.rrf_score,
-                rerank_score=r.rerank_score,
-                rank=idx + 1,
-            )
-            for idx, r in enumerate(filtered_results)
-        ]
 
         logger.info(
             "Semantic search completed successfully",

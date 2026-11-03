@@ -579,7 +579,7 @@ class CrossEncoderReranker:
         return converted_scores
 
     def _get_model(self) -> Any:
-        """Lazily load and cache the CrossEncoder model (prefers FastEmbed ONNX Runtime for memory safety)."""
+        """Lazily load and cache the CrossEncoder model via ModelManager."""
         if self._model is not None:
             return self._model
 
@@ -590,22 +590,18 @@ class CrossEncoderReranker:
             self._model = CrossEncoderReranker._cached_model
             return self._model
 
-        # 1. Prefer FastEmbed TextCrossEncoder (ONNX Runtime) to avoid PyTorch memory exhaustion
+        # 1. Prefer FastEmbed TextCrossEncoder via centralized ModelManager (threads=1)
         try:
-            from fastembed.rerank.cross_encoder import TextCrossEncoder
+            from src.services.model_manager import model_manager
 
-            fastembed_model = "Xenova/ms-marco-MiniLM-L-6-v2"
-            cache_path = getattr(settings, "FASTEMBED_CACHE_PATH", None) or os.getenv("FASTEMBED_CACHE_PATH")
-            logger.info("Loading FastEmbed TextCrossEncoder", model_name=fastembed_model, cache_path=cache_path)
-            loaded_model = TextCrossEncoder(model_name=fastembed_model, cache_dir=cache_path)
+            loaded_model = model_manager.get_reranker(self.model_name)
             CrossEncoderReranker._cached_model = loaded_model
             CrossEncoderReranker._cached_model_name = self.model_name
             self._model = loaded_model
-            logger.info("FastEmbed TextCrossEncoder loaded and cached", model_name=fastembed_model)
             return self._model
         except Exception as fe_exc:
             logger.warning(
-                "FastEmbed TextCrossEncoder unavailable or failed to load",
+                "ModelManager FastEmbed TextCrossEncoder unavailable or failed to load",
                 error=str(fe_exc),
             )
             if getattr(settings, "ENVIRONMENT", "").lower() == "production":
@@ -615,7 +611,7 @@ class CrossEncoderReranker:
 
         # 2. Fallback to SentenceTransformer CrossEncoder
         logger.info(
-            "Loading sentence-transformer cross-encoder model",
+            "Loading sentence-transformer cross-encoder model fallback",
             model_name=self.model_name,
             device=self.device,
         )

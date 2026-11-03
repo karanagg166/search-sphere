@@ -29,6 +29,7 @@ from src.services.answer_generator import (
     extract_citation_numbers,
     sanitize_citations,
 )
+from src.services.workload_scheduler import workload_scheduler
 
 logger = structlog.get_logger()
 
@@ -143,51 +144,52 @@ class GenericRagService:
             metadata_filters=request.metadata_filters,
         )
 
-        try:
-            raw_chunks = await self.retriever.search(
-                query=clean_query,
-                top_k=resolved_limit,
-                candidate_k=candidate_k,
-                filters=filters,
-            )
-        except Exception as exc:
-            logger.exception("Generic retrieval failed", error=str(exc))
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Retrieval is temporarily unavailable.",
-            ) from exc
-
-        verified_pairs = await self._verify_and_enrich_chunks(context, raw_chunks)
-
-        results: list[SearchChunkResult] = []
-        for idx, (chunk, doc) in enumerate(verified_pairs, start=1):
-            chunk_id = getattr(chunk, "point_id", getattr(chunk, "id", f"chunk_{idx}"))
-            results.append(
-                SearchChunkResult(
-                    chunk_id=chunk_id,
-                    document_id=doc.external_document_id,
-                    text=chunk.content,
-                    score=round(float(chunk.score), 4),
-                    rank=idx,
-                    start_page=chunk.start_page,
-                    end_page=chunk.end_page,
-                    block_types=chunk.block_types or [],
-                    client_id=doc.client_id,
-                    tenant_id=doc.tenant_id,
-                    collection_id=doc.collection_id,
-                    owner_subject_id=doc.owner_subject_id,
-                    document_type=doc.document_type,
-                    file_name=doc.file_name,
+        async with workload_scheduler.interactive_rag_scope():
+            try:
+                raw_chunks = await self.retriever.search(
+                    query=clean_query,
+                    top_k=resolved_limit,
+                    candidate_k=candidate_k,
+                    filters=filters,
                 )
-            )
+            except Exception as exc:
+                logger.exception("Generic retrieval failed", error=str(exc))
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Retrieval is temporarily unavailable.",
+                ) from exc
 
-        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-        return SearchResponse(
-            query=clean_query,
-            total=len(results),
-            results=results,
-            duration_ms=duration_ms,
-        )
+            verified_pairs = await self._verify_and_enrich_chunks(context, raw_chunks)
+
+            results: list[SearchChunkResult] = []
+            for idx, (chunk, doc) in enumerate(verified_pairs, start=1):
+                chunk_id = getattr(chunk, "point_id", getattr(chunk, "id", f"chunk_{idx}"))
+                results.append(
+                    SearchChunkResult(
+                        chunk_id=chunk_id,
+                        document_id=doc.external_document_id,
+                        text=chunk.content,
+                        score=round(float(chunk.score), 4),
+                        rank=idx,
+                        start_page=chunk.start_page,
+                        end_page=chunk.end_page,
+                        block_types=chunk.block_types or [],
+                        client_id=doc.client_id,
+                        tenant_id=doc.tenant_id,
+                        collection_id=doc.collection_id,
+                        owner_subject_id=doc.owner_subject_id,
+                        document_type=doc.document_type,
+                        file_name=doc.file_name,
+                    )
+                )
+
+            duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            return SearchResponse(
+                query=clean_query,
+                total=len(results),
+                results=results,
+                duration_ms=duration_ms,
+            )
 
     async def answer(
         self,
@@ -215,85 +217,86 @@ class GenericRagService:
             metadata_filters=request.metadata_filters,
         )
 
-        try:
-            raw_chunks = await self.retriever.search(
-                query=clean_query,
-                top_k=resolved_limit,
-                candidate_k=candidate_k,
-                filters=filters,
-            )
-        except Exception as exc:
-            logger.exception("Retrieval failed during answer generation", error=str(exc))
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Retrieval is temporarily unavailable.",
-            ) from exc
+        async with workload_scheduler.interactive_rag_scope():
+            try:
+                raw_chunks = await self.retriever.search(
+                    query=clean_query,
+                    top_k=resolved_limit,
+                    candidate_k=candidate_k,
+                    filters=filters,
+                )
+            except Exception as exc:
+                logger.exception("Retrieval failed during answer generation", error=str(exc))
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Retrieval is temporarily unavailable.",
+                ) from exc
 
-        verified_pairs = await self._verify_and_enrich_chunks(context, raw_chunks)
-        verified_chunks = [pair[0] for pair in verified_pairs]
-        doc_lookup = {getattr(pair[0], "point_id", getattr(pair[0], "id", None)): pair[1] for pair in verified_pairs}
+            verified_pairs = await self._verify_and_enrich_chunks(context, raw_chunks)
+            verified_chunks = [pair[0] for pair in verified_pairs]
+            doc_lookup = {getattr(pair[0], "point_id", getattr(pair[0], "id", None)): pair[1] for pair in verified_pairs}
 
-        if not verified_chunks:
+            if not verified_chunks:
+                duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                return AnswerResponse(
+                    answer=NO_RESULTS_ANSWER,
+                    citations=[],
+                    retrieved_chunk_count=0,
+                    duration_ms=duration_ms,
+                )
+
+            conversation_context: list[ConversationMessage] | None = None
+            if request.conversation_history:
+                conversation_context = [
+                    ConversationMessage(role=m.role, content=m.content)
+                    for m in request.conversation_history
+                ]
+
+            preamble = request.system_prompt or ANSWER_SYSTEM_PREAMBLE
+
+            try:
+                answer_text, verified_chunks = await self.answer_generator.generate_answer(
+                    query=clean_query,
+                    chunks=verified_chunks,
+                    conversation_context=conversation_context,
+                    preamble=preamble,
+                    no_results_answer=NO_RESULTS_ANSWER,
+                )
+            except Exception as exc:
+                logger.error("Answer generation LLM failed", error=str(exc))
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Answer generation is temporarily unavailable.",
+                ) from exc
+
+            answer_text = sanitize_citations(answer_text, len(verified_chunks))
+            # Extract citation numbers and build citation list
+            cited_numbers = extract_citation_numbers(answer_text, len(verified_chunks))
+            citations: list[AnswerCitation] = []
+            for num in cited_numbers:
+                chunk = verified_chunks[num - 1]
+                chunk_pid = getattr(chunk, "point_id", getattr(chunk, "id", None))
+                doc = doc_lookup.get(chunk_pid)
+                citations.append(
+                    AnswerCitation(
+                        citation_number=num,
+                        chunk_id=chunk_pid or str(num),
+                        document_id=doc.external_document_id if doc else chunk.document_id,
+                        file_name=doc.file_name if doc else None,
+                        page_number=chunk.start_page,
+                        text_snippet=chunk.content[:200],
+                        collection_id=doc.collection_id if doc else None,
+                        owner_subject_id=doc.owner_subject_id if doc else None,
+                    )
+                )
+
             duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
             return AnswerResponse(
-                answer=NO_RESULTS_ANSWER,
-                citations=[],
-                retrieved_chunk_count=0,
+                answer=answer_text,
+                citations=citations,
+                retrieved_chunk_count=len(verified_chunks),
                 duration_ms=duration_ms,
             )
-
-        conversation_context: list[ConversationMessage] | None = None
-        if request.conversation_history:
-            conversation_context = [
-                ConversationMessage(role=m.role, content=m.content)
-                for m in request.conversation_history
-            ]
-
-        preamble = request.system_prompt or ANSWER_SYSTEM_PREAMBLE
-
-        try:
-            answer_text, verified_chunks = await self.answer_generator.generate_answer(
-                query=clean_query,
-                chunks=verified_chunks,
-                conversation_context=conversation_context,
-                preamble=preamble,
-                no_results_answer=NO_RESULTS_ANSWER,
-            )
-        except Exception as exc:
-            logger.error("Answer generation LLM failed", error=str(exc))
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Answer generation is temporarily unavailable.",
-            ) from exc
-
-        answer_text = sanitize_citations(answer_text, len(verified_chunks))
-        # Extract citation numbers and build citation list
-        cited_numbers = extract_citation_numbers(answer_text, len(verified_chunks))
-        citations: list[AnswerCitation] = []
-        for num in cited_numbers:
-            chunk = verified_chunks[num - 1]
-            chunk_pid = getattr(chunk, "point_id", getattr(chunk, "id", None))
-            doc = doc_lookup.get(chunk_pid)
-            citations.append(
-                AnswerCitation(
-                    citation_number=num,
-                    chunk_id=chunk_pid or str(num),
-                    document_id=doc.external_document_id if doc else chunk.document_id,
-                    file_name=doc.file_name if doc else None,
-                    page_number=chunk.start_page,
-                    text_snippet=chunk.content[:200],
-                    collection_id=doc.collection_id if doc else None,
-                    owner_subject_id=doc.owner_subject_id if doc else None,
-                )
-            )
-
-        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-        return AnswerResponse(
-            answer=answer_text,
-            citations=citations,
-            retrieved_chunk_count=len(verified_chunks),
-            duration_ms=duration_ms,
-        )
 
     async def answer_stream(
         self,

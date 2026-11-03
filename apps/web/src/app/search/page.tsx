@@ -418,18 +418,30 @@ export default function SearchPage() {
           refetchConversations();
           return;
         } catch (directErr: any) {
+          const status = directErr?.response?.status;
+          const retryAfter = directErr?.response?.headers?.["retry-after"] || 5;
+          const isOverloaded = status === 429 || (status === 503 && directErr?.response?.data?.detail?.includes("memory"));
           const isNetworkOrCors =
             directErr?.code === "ERR_NETWORK" ||
             directErr?.message === "Network Error" ||
             directErr?.message?.includes("CORS") ||
             directErr?.message?.includes("preflight");
 
-          const finalErrMsg = isNetworkOrCors
-            ? "Backend is currently waking up or unreachable. Render free-tier services take ~30–45 seconds to spin up on cold start. Please wait a moment and try again."
-            : directErr?.response?.data?.detail ||
+          let finalErrMsg: string;
+          if (isOverloaded) {
+            finalErrMsg =
+              directErr?.response?.data?.detail ||
+              `Backend is currently handling heavy processing. Please retry in ${retryAfter} seconds.`;
+          } else if (isNetworkOrCors) {
+            finalErrMsg =
+              "Backend is currently waking up or unreachable. Render free-tier services take ~30–45 seconds to spin up on cold start. Please wait a moment and try again.";
+          } else {
+            finalErrMsg =
+              directErr?.response?.data?.detail ||
               streamError ||
               directErr?.message ||
               "Unable to generate answer. Please try again.";
+          }
 
           setTurns((prev) =>
             prev.map((t) =>
@@ -445,17 +457,29 @@ export default function SearchPage() {
         }
       }
     } catch (err: any) {
+      const status = err?.response?.status;
+      const retryAfter = err?.response?.headers?.["retry-after"] || 5;
+      const isOverloaded = status === 429 || (status === 503 && err?.response?.data?.detail?.includes("memory"));
       const isNetworkOrCors =
         err?.code === "ERR_NETWORK" ||
         err?.message === "Network Error" ||
         err?.message?.includes("CORS") ||
         err?.message?.includes("preflight");
 
-      const backendMessage = isNetworkOrCors
-        ? "Backend is currently waking up or unreachable. Render free-tier services take ~30–45 seconds to spin up on cold start. Please wait a moment and try again."
-        : err?.response?.data?.detail ||
+      let backendMessage: string;
+      if (isOverloaded) {
+        backendMessage =
+          err?.response?.data?.detail ||
+          `Backend is currently managing heavy capacity. Please wait ${retryAfter} seconds and try again.`;
+      } else if (isNetworkOrCors) {
+        backendMessage =
+          "Backend is currently waking up or unreachable. Render free-tier services take ~30–45 seconds to spin up on cold start. Please wait a moment and try again.";
+      } else {
+        backendMessage =
+          err?.response?.data?.detail ||
           err?.message ||
           "Unable to generate answer. Please try again.";
+      }
 
       setTurns((prev) =>
         prev.map((t) =>

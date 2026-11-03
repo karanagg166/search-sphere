@@ -58,7 +58,18 @@ export async function streamAnswer(
       } catch {
         // keep raw error text
       }
-      handlers.onError?.(detail || `HTTP Error ${response.status}`);
+      const retryAfter = response.headers?.get ? response.headers.get("Retry-After") : null;
+      if (response.status === 429) {
+        handlers.onError?.(
+          detail || `Search capacity is currently limited. Please retry in ${retryAfter || 5} seconds.`
+        );
+      } else if (response.status === 503) {
+        handlers.onError?.(
+          detail || `Service is temporarily busy. Please retry in ${retryAfter || 5} seconds.`
+        );
+      } else {
+        handlers.onError?.(detail || `HTTP Error ${response.status}`);
+      }
       return;
     }
 
