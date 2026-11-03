@@ -64,6 +64,12 @@ _shared_client_lock = asyncio.Lock()
 _fallback_mode_active: bool = False
 
 
+def is_fallback_permitted() -> bool:
+    """Fallback to embedded Qdrant is active in staging/production, not in unit tests."""
+    env = str(getattr(settings, "ENVIRONMENT", "")).lower()
+    return env not in ("test", "testing")
+
+
 async def get_shared_fallback_client() -> AsyncQdrantClient:
     """Retrieve or lazily initialize the process-wide shared embedded Qdrant client."""
     global _shared_fallback_client
@@ -139,8 +145,11 @@ class QdrantVectorStore:
         if client is not None:
             self.client = client
             self.is_embedded = False
-        elif _fallback_mode_active or url in (":memory:", "local") or settings.QDRANT_URL in (":memory:", "local"):
+        elif is_fallback_permitted() and _fallback_mode_active:
             self.client = _shared_fallback_client
+            self.is_embedded = True
+        elif url in (":memory:", "local") or settings.QDRANT_URL in (":memory:", "local"):
+            self.client = AsyncQdrantClient(location=":memory:")
             self.is_embedded = True
         else:
             resolved_url = url or settings.QDRANT_URL
@@ -156,6 +165,8 @@ class QdrantVectorStore:
 
     async def _activate_fallback(self, reason: str) -> None:
         """Switch this instance and all future instances to the process-wide shared embedded Qdrant client."""
+        if not is_fallback_permitted() or not self._owns_client:
+            return
         global _fallback_mode_active
         _fallback_mode_active = True
         self.is_embedded = True
@@ -174,7 +185,12 @@ class QdrantVectorStore:
         Creates the collection if missing, or validates existing dimensions and metric.
         """
         global _fallback_mode_active
-        if _fallback_mode_active and (self.client is None or self.client is not _shared_fallback_client):
+        if (
+            is_fallback_permitted()
+            and _fallback_mode_active
+            and self._owns_client
+            and (self.client is None or self.client is not _shared_fallback_client)
+        ):
             self.client = await get_shared_fallback_client()
             self.is_embedded = True
 
@@ -189,7 +205,7 @@ class QdrantVectorStore:
             exists = await self.client.collection_exists(self.collection_name)
         except Exception as exc:
             classified = classify_qdrant_error(exc, "check existence", self.collection_name)
-            if isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
+            if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
                 await self._activate_fallback(reason=str(exc))
                 return
             logger.exception(
@@ -226,7 +242,7 @@ class QdrantVectorStore:
                 )
             except Exception as exc:
                 classified = classify_qdrant_error(exc, "create collection", self.collection_name)
-                if isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
+                if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
                     await self._activate_fallback(reason=str(exc))
                     return
                 logger.exception(
@@ -244,7 +260,7 @@ class QdrantVectorStore:
                 info = await self.client.get_collection(self.collection_name)
             except Exception as exc:
                 classified = classify_qdrant_error(exc, "inspect collection", self.collection_name)
-                if isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
+                if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
                     await self._activate_fallback(reason=str(exc))
                     return
                 logger.exception(
@@ -453,7 +469,7 @@ class QdrantVectorStore:
             )
         except Exception as exc:
             classified = classify_qdrant_error(exc, "delete points", self.collection_name)
-            if isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
+            if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
                 await self._activate_fallback(reason=str(exc))
                 await self.client.delete(
                     collection_name=self.collection_name,
@@ -545,7 +561,7 @@ class QdrantVectorStore:
             )
         except Exception as exc:
             classified = classify_qdrant_error(exc, "upsert batch", self.collection_name)
-            if isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
+            if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
                 await self._activate_fallback(reason=str(exc))
                 await self.client.upsert(
                     collection_name=self.collection_name,
@@ -793,7 +809,6 @@ class QdrantVectorStore:
 
         effective_filter = models.Filter(must=must_conditions) if must_conditions else (query_filter or None)
 
-        await self.ensure_collection()
         try:
             response = await self.client.query_points(
                 collection_name=self.collection_name,
@@ -806,7 +821,7 @@ class QdrantVectorStore:
             )
         except Exception as exc:
             classified = classify_qdrant_error(exc, "query dense vectors", self.collection_name)
-            if isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
+            if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
                 await self._activate_fallback(reason=str(exc))
                 return await self.search_dense(
                     query_vector=query_vector,
@@ -997,7 +1012,6 @@ class QdrantVectorStore:
 
         effective_filter = models.Filter(must=must_conditions) if must_conditions else (query_filter or None)
 
-        await self.ensure_collection()
         try:
             response = await self.client.query_points(
                 collection_name=self.collection_name,
@@ -1011,7 +1025,7 @@ class QdrantVectorStore:
             )
         except Exception as exc:
             classified = classify_qdrant_error(exc, "query sparse vectors", self.collection_name)
-            if isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
+            if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
                 await self._activate_fallback(reason=str(exc))
                 return await self.search_sparse(
                     query_vector=query_vector,
@@ -1242,7 +1256,6 @@ class QdrantVectorStore:
 
         query_filter = models.Filter(must=must_conditions) if must_conditions else (filter or None)
 
-        await self.ensure_collection()
         dense_prefetch = models.Prefetch(
             query=dense_query_vector,
             limit=candidate_limit,
@@ -1267,7 +1280,7 @@ class QdrantVectorStore:
             )
         except Exception as exc:
             classified = classify_qdrant_error(exc, "query hybrid vectors", self.collection_name)
-            if isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
+            if is_fallback_permitted() and self._owns_client and isinstance(classified, (QdrantConnectionError, QdrantTimeoutError)) and not self.is_embedded:
                 await self._activate_fallback(reason=str(exc))
                 return await self.search_hybrid(
                     dense_query_vector=dense_query_vector,
