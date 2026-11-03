@@ -83,8 +83,10 @@ jobs:
           pytest apps/api/tests -v
 
       - name: Run Monitor & Keep-Alive Safety Suite
+        env:
+          PYTHONPATH: "."
         run: |
-          pytest scripts/tests/test_monitor.py -v
+          pytest scripts/tests/test_monitor.py scripts/tests/test_ci_production_smoke.py -v
 
   worker-test:
     name: Worker Ingestion & Extraction Tests
