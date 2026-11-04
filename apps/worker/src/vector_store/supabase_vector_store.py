@@ -59,11 +59,14 @@ class SupabaseVectorStore:
         vector_dimension: int | None = None,
         batch_size: int | None = None,
         session_factory: Any | None = None,
+        sparse_embedder: Any | None = None,
+        **kwargs: Any,
     ) -> None:
         self.collection_name = collection_name or getattr(settings, "QDRANT_COLLECTION_NAME", "documents")
         self.vector_dimension = vector_dimension or 384
         self.batch_size = batch_size or getattr(settings, "QDRANT_UPSERT_BATCH_SIZE", 100)
         self.session_factory = session_factory or AsyncSessionLocal
+        self.sparse_embedder = sparse_embedder
         self.is_embedded = False
 
     async def ensure_collection(self, force_check: bool = False) -> None:
