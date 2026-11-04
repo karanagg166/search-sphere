@@ -386,7 +386,7 @@ class CrossEncoderReranker:
                     elif isinstance(item, dict) and "score" in item:
                         raw_scores.append(float(item["score"]))
                     elif hasattr(item, "score"):
-                        raw_scores.append(float(getattr(item, "score")))
+                        raw_scores.append(float(item.score))
                     else:
                         raw_scores.append(float(item))
             elif callable(model):
