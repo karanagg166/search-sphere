@@ -31,7 +31,7 @@ from src.processing.sparse_embedding import (
 )
 from src.services.document_fetcher import DocumentFetcher
 from src.storage.object_storage import ObjectStorage, get_object_storage
-from src.vector_store import QdrantVectorStore
+from src.vector_store import QdrantVectorStore, get_vector_store
 
 logger = structlog.get_logger()
 
@@ -250,7 +250,7 @@ async def _process_document(
     doc_chunker = chunker or DocumentChunker()
     doc_embedder = embedder or DenseEmbedder()
     doc_sparse_embedder = sparse_embedder or BM25Embedder()
-    doc_vector_store = vector_store or QdrantVectorStore(sparse_embedder=doc_sparse_embedder)
+    doc_vector_store = vector_store or get_vector_store(sparse_embedder=doc_sparse_embedder)
 
     try:
         fetched_document = await doc_fetcher.fetch(document_id)
@@ -352,7 +352,7 @@ async def _process_generic_document(
     doc_chunker = chunker or DocumentChunker()
     doc_embedder = embedder or DenseEmbedder()
     doc_sparse_embedder = sparse_embedder or BM25Embedder()
-    doc_vector_store = vector_store or QdrantVectorStore(sparse_embedder=doc_sparse_embedder)
+    doc_vector_store = vector_store or get_vector_store(sparse_embedder=doc_sparse_embedder)
 
     try:
         content = await doc_storage.download(storage_path)

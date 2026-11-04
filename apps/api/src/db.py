@@ -55,10 +55,17 @@ async def get_db():
 async def init_db():
     """Creates database tables if they do not already exist."""
     # Ensure all ORM models are registered on Base.metadata before creating tables
+    from sqlalchemy import text
+
     import src.models  # noqa: F401
 
     try:
         async with engine.begin() as conn:
+            if "postgresql" in engine.dialect.name.lower():
+                try:
+                    await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+                except Exception as ext_err:
+                    logger.warning("Could not create vector extension in init_db", error=str(ext_err))
             await conn.run_sync(Base.metadata.create_all)
         logger.info("Database tables initialized successfully")
     except Exception as e:

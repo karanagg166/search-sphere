@@ -13,9 +13,10 @@ from src.processing.sparse_embedding.bm25_embedder import (
     BM25Embedder,
     SparseEmbeddingError,
 )
-from src.vector_store.qdrant_store import (
-    QdrantVectorStore,
+from src.vector_store import (
     QdrantVectorStoreError,
+    SupabaseVectorStore,
+    get_vector_store,
 )
 
 logger = structlog.get_logger()
@@ -51,14 +52,14 @@ class HybridRetriever:
         self,
         dense_embedder: DenseEmbedder | None = None,
         sparse_embedder: BM25Embedder | None = None,
-        vector_store: QdrantVectorStore | None = None,
+        vector_store: Any | None = None,
         default_top_k: int | None = None,
         default_candidate_k: int | None = None,
         max_top_k: int | None = None,
     ) -> None:
         self.dense_embedder = dense_embedder or DenseEmbedder()
         self.sparse_embedder = sparse_embedder or BM25Embedder()
-        self.vector_store = vector_store or QdrantVectorStore()
+        self.vector_store = vector_store or get_vector_store()
         self.default_top_k = (
             default_top_k
             if default_top_k is not None
@@ -241,6 +242,8 @@ class HybridRetriever:
                 "candidate_limit": resolved_candidate_k,
                 "document_id": resolved_doc_id,
             }
+            if isinstance(self.vector_store, SupabaseVectorStore):
+                search_kwargs["query_text"] = clean_query
             if resolved_doc_ids is not None:
                 search_kwargs["document_ids"] = resolved_doc_ids
             if filters is not None:

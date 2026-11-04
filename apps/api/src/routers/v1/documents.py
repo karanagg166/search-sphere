@@ -25,7 +25,11 @@ from src.security.service_auth import get_service_context
 from src.security.service_context import ServiceContext
 from src.services.generic_document_service import GenericDocumentService
 from src.storage.object_storage import ObjectStorage, get_object_storage
-from src.vector_store.qdrant_store import QdrantVectorStore
+from src.vector_store import get_vector_store
+
+# Vector store provider; defaults to get_vector_store factory,
+# exposed as QdrantVectorStore for backward compatibility with existing tests.
+QdrantVectorStore = get_vector_store
 
 logger = structlog.get_logger()
 

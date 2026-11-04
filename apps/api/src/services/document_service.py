@@ -183,8 +183,8 @@ class DocumentService:
         v_store = self.vector_store
         if v_store is None:
             try:
-                from src.vector_store.qdrant_store import QdrantVectorStore
-                v_store = QdrantVectorStore()
+                from src.vector_store import get_vector_store
+                v_store = get_vector_store()
             except Exception as exc:
                 logger.warning("Could not initialize vector store for point deletion", error=str(exc))
                 v_store = None

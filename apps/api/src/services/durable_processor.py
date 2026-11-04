@@ -20,7 +20,7 @@ from src.services.memory_guard import memory_guard
 from src.services.model_manager import model_manager
 from src.services.workload_scheduler import workload_scheduler
 from src.storage.object_storage import get_object_storage
-from src.vector_store.qdrant_store import QdrantVectorStore
+from src.vector_store import get_vector_store
 
 logger = structlog.get_logger()
 
@@ -245,15 +245,15 @@ class DurableDocumentProcessor:
                     sparse_embedder = BM25Embedder()
                     sparse_vectors = await asyncio.to_thread(sparse_embedder.embed_chunks, chunked_doc.chunks)
 
-                    # Step 7: Qdrant vector index synchronization
-                    vector_store = QdrantVectorStore(sparse_embedder=sparse_embedder)
+                    # Step 7: Vector index synchronization
+                    vector_store = get_vector_store(sparse_embedder=sparse_embedder)
                     points_written = await vector_store.index_document(
                         document_id=document_id,
                         document=embedded_doc,
                         sparse_vectors=sparse_vectors,
                     )
                     logger.info(
-                        "Document successfully indexed into Qdrant",
+                        "Document successfully indexed into vector store",
                         document_id=document_id,
                         points=points_written,
                     )

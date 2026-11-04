@@ -9,9 +9,9 @@ from src.processing.embedding.dense_embedder import (
     DenseEmbeddingError,
 )
 from src.processing.models.search import DenseSearchResult
-from src.vector_store.qdrant_store import (
-    QdrantVectorStore,
+from src.vector_store import (
     QdrantVectorStoreError,
+    get_vector_store,
 )
 
 logger = structlog.get_logger()
@@ -48,12 +48,12 @@ class DenseRetriever:
     def __init__(
         self,
         embedder: DenseEmbedder | None = None,
-        vector_store: QdrantVectorStore | None = None,
+        vector_store: Any | None = None,
         default_top_k: int | None = None,
         max_top_k: int | None = None,
     ) -> None:
         self.embedder = embedder or DenseEmbedder()
-        self.vector_store = vector_store or QdrantVectorStore()
+        self.vector_store = vector_store or get_vector_store()
         self.default_top_k = (
             default_top_k
             if default_top_k is not None
