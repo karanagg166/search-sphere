@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, BigInteger, DateTime, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db import Base
@@ -107,6 +107,11 @@ class ExternalDocument(Base):
         nullable=False,
         default="QUEUED",
         index=True,
+    )
+    chunk_count: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        default=None,
     )
 
     processing_error: Mapped[str | None] = mapped_column(

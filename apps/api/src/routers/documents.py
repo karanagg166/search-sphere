@@ -7,6 +7,7 @@ from src.schemas.document import DocumentListResponse, DocumentResponse
 from src.security.jwt import get_current_user
 from src.security.rate_limiter import rate_limiter
 from src.services.document_indexer import (
+    audit_and_recover_missing_vectors,
     index_document_pipeline,
     sync_unindexed_documents,
 )
@@ -69,7 +70,13 @@ async def sync_all_unindexed(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     indexed = await sync_unindexed_documents()
-    return {"message": "Sync completed", "indexed_count": len(indexed), "indexed_ids": indexed}
+    recovery = await audit_and_recover_missing_vectors(batch_size=10)
+    return {
+        "message": "Sync completed",
+        "indexed_count": len(indexed),
+        "indexed_ids": indexed,
+        "recovery": recovery,
+    }
 
 
 @router.get(

@@ -355,17 +355,32 @@ def check_auth_boundary(auth_token: str | None = None) -> None:
 
 def check_diagnostics() -> None:
     try:
-        status, _, payload = http(API + "/diag", timeout=20)
+        status, _, payload = http(API + "/diag", timeout=25)
         if status == 200 and isinstance(payload, dict):
-            db_state = payload.get("database", "unknown")
-            fastembed_state = payload.get("fastembed", "unknown")
-            qdrant_state = payload.get("qdrant", "unknown")
+            db_state = str(payload.get("database", "unknown"))
+            fastembed_state = str(payload.get("fastembed", "unknown"))
+            qdrant_state = str(payload.get("qdrant", "unknown"))
+            cross_encoder_state = str(payload.get("cross_encoder", "unknown"))
+            if "embedded" in qdrant_state.lower():
+                fail(
+                    "Diagnostic probe",
+                    f"production vector store is running in ephemeral embedded fallback mode: {qdrant_state}",
+                )
+            if "error" in qdrant_state.lower():
+                fail("Diagnostic probe", f"vector store error: {qdrant_state}")
+            if "error" in cross_encoder_state.lower():
+                fail(
+                    "Diagnostic probe",
+                    f"cross-encoder reranker error: {cross_encoder_state}",
+                )
             record(
                 "Diagnostic probe",
-                f"db={db_state}, fastembed={fastembed_state}, qdrant={qdrant_state}",
+                f"db={db_state}, fastembed={fastembed_state}, qdrant={qdrant_state}, cross_encoder={cross_encoder_state}",
             )
+        else:
+            fail("Diagnostic probe", f"diagnostic endpoint returned HTTP {status}")
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        record("Diagnostic probe", f"diagnostic endpoint responded ({type(exc).__name__})")
+        fail("Diagnostic probe", f"diagnostic probe failed ({type(exc).__name__})")
 
 
 def check_frontend() -> None:
@@ -443,7 +458,11 @@ def ensure_synthetic_document(
         if st == 200 and isinstance(doc_info, dict):
             last_status = str(doc_info.get("status", "unknown"))
             if last_status == "indexed":
-                chunks = doc_info.get("chunk_count", 0)
+                chunks = doc_info.get("chunk_count")
+                if chunks is None:
+                    fail("Document processing", "document indexed but chunk_count is missing (expected positive integer)")
+                if not isinstance(chunks, int) or chunks <= 0:
+                    fail("Document processing", f"document indexed but chunk_count={chunks} (expected positive integer > 0)")
                 record("Document processing", f"status=indexed ({chunks} chunks indexed)")
                 return doc_id, True
             if "failed" in last_status:
@@ -452,14 +471,30 @@ def ensure_synthetic_document(
     return doc_id, True
 
 
-def cleanup_synthetic_document(token: str, document_id: str) -> None:
-    """Safely delete synthetic document after test run to leave zero clutter."""
+def cleanup_synthetic_document(token: str, document_id: str, marker: str | None = None) -> None:
+    """Safely delete synthetic document after test run to leave zero clutter and verify vector purge."""
     headers = {"Authorization": f"Bearer {token}"}
     status, _, _ = http(f"{API}/documents/{document_id}", method="DELETE", headers=headers, timeout=20)
     if status in (200, 204, 404):
         record("Synthetic document cleanup", f"purged synthetic document {document_id[:12]}")
     else:
         print(f"::warning::Failed to clean up synthetic document {document_id}: HTTP {status}")
+
+    # Verify vector purge: search scoped to the deleted document must return 0 results
+    if marker:
+        time.sleep(1)
+        st, _, res = http(
+            f"{API}/search",
+            method="POST",
+            data={"query": f"Verification Marker: {marker}", "document_id": document_id},
+            headers=headers,
+            timeout=20,
+        )
+        if st == 200 and isinstance(res, dict):
+            remaining = res.get("results", [])
+            if len(remaining) > 0:
+                fail("Vector deletion verification", f"deleted document vectors still retrieved ({len(remaining)} points found)")
+        record("Vector deletion verification", "purged document vectors are no longer retrievable in search")
 
 
 def run_real_rag_pipeline(
@@ -487,6 +522,12 @@ def run_real_rag_pipeline(
     if not marker_found:
         fail("Real semantic search", f"expected marker '{marker}' missing from retrieved chunks")
     record("Real semantic search", f"retrieved {len(results)} chunks matching synthetic marker")
+
+    # Verify cross-encoder rerank score exists on results
+    reranked = [r for r in results if isinstance(r, dict) and r.get("rerank_score") is not None]
+    if not reranked:
+        fail("Cross-encoder reranking verification", "no rerank_score found on search results")
+    record("Cross-encoder reranking verification", f"retrieved chunk rerank_score={reranked[0].get('rerank_score')}")
 
     # 2. Grounded LLM Answer (when enabled)
     if do_answer:
@@ -537,7 +578,7 @@ def run_rag_suite() -> None:
         run_real_rag_pipeline(token, doc_id, marker, do_answer=do_answer)
     finally:
         if created_id:
-            cleanup_synthetic_document(token, created_id)
+            cleanup_synthetic_document(token, created_id, marker=marker)
 
 
 def save_summary() -> None:

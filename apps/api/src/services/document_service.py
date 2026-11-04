@@ -23,10 +23,17 @@ PDF_MAGIC_BYTES = b"%PDF-"
 class DocumentService:
     """Application service coordinating document validation, storage, metadata persistence, and queueing."""
 
-    def __init__(self, db: AsyncSession, storage: ObjectStorage):
+    def __init__(
+        self,
+        db: AsyncSession,
+        storage: ObjectStorage,
+        repository: DocumentRepository | None = None,
+        vector_store: Any | None = None,
+    ):
         self.db = db
         self.storage = storage
-        self.repository = DocumentRepository(db)
+        self.repository = repository or DocumentRepository(db)
+        self.vector_store = vector_store
 
     def validate_file_content(self, content: bytes, filename: str) -> None:
         """Strictly validates file size and binary header signature."""
@@ -141,17 +148,29 @@ class DocumentService:
         return documents, total
 
     async def get_user_document(self, document_id: str, user_id: str) -> Document:
-        """Retrieves single document metadata verifying user ownership."""
+        """Retrieves single document metadata verifying user ownership and lazy chunk_count backfill."""
         document = await self.repository.get_by_id(document_id, user_id)
         if not document:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Document not found.",
             )
+        if document.status == "indexed" and getattr(document, "chunk_count", None) is None:
+            try:
+                v_store = self.vector_store
+                if v_store is None:
+                    from src.vector_store.qdrant_store import QdrantVectorStore
+                    v_store = QdrantVectorStore()
+                pts = await v_store.count_document_points(document.id)
+                if pts > 0:
+                    document.chunk_count = pts
+                    await self.repository.update(document, chunk_count=pts)
+            except Exception:
+                pass
         return document
 
     async def delete_user_document(self, document_id: str, user_id: str) -> None:
-        """Deletes document from both Object Storage and PostgreSQL."""
+        """Deletes document points from Qdrant vector store, file from Object Storage, and PostgreSQL metadata."""
         document = await self.repository.get_by_id(document_id, user_id)
         if not document:
             raise HTTPException(
@@ -159,9 +178,37 @@ class DocumentService:
                 detail="Document not found.",
             )
 
-        # Remove from Object Storage
-        await self.storage.delete(document.storage_key)
+        # 1. Purge points from Qdrant vector store
+        v_store = self.vector_store
+        if v_store is None:
+            try:
+                from src.vector_store.qdrant_store import QdrantVectorStore
+                v_store = QdrantVectorStore()
+            except Exception as exc:
+                logger.warning("Could not initialize vector store for point deletion", error=str(exc))
+                v_store = None
 
-        # Remove from Database
+        if v_store is not None:
+            try:
+                await v_store.delete_document_points(document_id=document.id)
+                logger.info("Deleted Qdrant vector points for document", document_id=document_id, user_id=user_id)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to delete Qdrant points during document deletion (proceeding with storage and DB cleanup)",
+                    document_id=document_id,
+                    error=str(exc),
+                )
+
+        # 2. Remove from Object Storage
+        try:
+            await self.storage.delete(document.storage_key)
+        except Exception as exc:
+            logger.warning(
+                "Failed to delete file from object storage (proceeding with DB cleanup)",
+                storage_key=document.storage_key,
+                error=str(exc),
+            )
+
+        # 3. Remove from Database
         await self.repository.delete(document)
-        logger.info("Document deleted", document_id=document_id, user_id=user_id)
+        logger.info("Document deleted successfully", document_id=document_id, user_id=user_id)

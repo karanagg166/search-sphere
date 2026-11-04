@@ -56,9 +56,12 @@ class CrossEncoderReranker:
         deduplicate: bool | None = None,
         similarity_threshold: float | None = None,
     ) -> None:
-        self.model_name = model_name or getattr(
-            settings, "RERANKER_MODEL_NAME", "cross-encoder/ms-marco-MiniLM-L-6-v2"
+        from src.services.model_manager import RERANKER_MODEL_ALIASES
+
+        raw_name = model_name or getattr(
+            settings, "RERANKER_MODEL_NAME", "Xenova/ms-marco-MiniLM-L-6-v2"
         )
+        self.model_name = RERANKER_MODEL_ALIASES.get(raw_name, raw_name)
         self.batch_size = (
             batch_size
             if batch_size is not None
@@ -175,6 +178,13 @@ class CrossEncoderReranker:
         try:
             scores = self._score_pairs(pairs)
             score_duration_ms = (time.perf_counter() - start_score) * 1000
+            logger.info(
+                "Cross-encoder reranking completed successfully",
+                query=clean_query,
+                candidate_count=len(candidates),
+                duration_ms=round(score_duration_ms, 2),
+                model_name=self.model_name,
+            )
 
             # 6. Sort descending by rerank score
             scored_candidates = list(zip(candidates, scores, strict=True))
@@ -511,7 +521,17 @@ class CrossEncoderReranker:
             elif hasattr(model, "rerank"):
                 query = pairs[0][0]
                 documents = [p[1] for p in pairs]
-                raw_scores = list(model.rerank(query, documents))
+                raw_items = list(model.rerank(query, documents))
+                raw_scores = []
+                for item in raw_items:
+                    if isinstance(item, (int, float)):
+                        raw_scores.append(float(item))
+                    elif isinstance(item, dict) and "score" in item:
+                        raw_scores.append(float(item["score"]))
+                    elif hasattr(item, "score"):
+                        raw_scores.append(float(getattr(item, "score")))
+                    else:
+                        raw_scores.append(float(item))
             elif callable(model):
                 raw_scores = model(pairs)
             else:

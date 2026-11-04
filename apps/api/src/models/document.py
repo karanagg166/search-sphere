@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db import Base
@@ -54,6 +54,11 @@ class Document(Base):
         default="uploaded",
         nullable=False,
         index=True,
+    )
+    chunk_count: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        default=None,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

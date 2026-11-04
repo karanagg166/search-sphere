@@ -340,9 +340,16 @@ class GenericDocumentService:
         doc = await self.get_document(context, doc_id_or_external_id)
 
         # External IDs can collide across clients; every mutation uses the scope.
-        if vector_store:
+        v_store = vector_store
+        if v_store is None:
             try:
-                await vector_store.delete_document_points(doc.external_document_id, filters={
+                v_store = QdrantVectorStore()
+            except Exception as exc:
+                logger.warning("Could not instantiate vector store for external document deletion", error=str(exc))
+                v_store = None
+        if v_store is not None:
+            try:
+                await v_store.delete_document_points(doc.external_document_id, filters={
                     "client_id": doc.client_id, "tenant_id": doc.tenant_id,
                 })
             except Exception as exc:

@@ -75,3 +75,10 @@ class DocumentRepository:
     async def delete(self, document: Document) -> None:
         await self.db.delete(document)
         await self.db.commit()
+
+    async def update(self, document: Document, **kwargs) -> Document:
+        for k, v in kwargs.items():
+            setattr(document, k, v)
+        await self.db.commit()
+        await self.db.refresh(document)
+        return document
