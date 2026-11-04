@@ -506,22 +506,25 @@ class QdrantVectorStore:
 
     async def count_document_points(
         self,
-        document_id: str,
+        document_id: str | None = None,
         filters: dict[str, Any] | None = None,
     ) -> int:
-        """Count the number of points indexed for a specific document_id."""
+        """Count the number of points indexed for a specific document_id or entire collection."""
         await self.ensure_collection()
-        scope = dict(filters or {})
-        scope["document_id"] = document_id
-        count_filter = models.Filter(must=[
-            models.FieldCondition(key=key, match=models.MatchValue(value=value))
-            for key, value in scope.items() if value is not None
-        ])
-        if not filters:
-            count_filter.must.extend([
-                models.IsEmptyCondition(is_empty=models.PayloadField(key="client_id")),
-                models.IsEmptyCondition(is_empty=models.PayloadField(key="source_system")),
+        must_conditions: list[Any] = []
+        if filters:
+            must_conditions.extend([
+                models.FieldCondition(key=key, match=models.MatchValue(value=value))
+                for key, value in filters.items() if value is not None
             ])
+        if document_id is not None:
+            must_conditions.append(models.FieldCondition(key="document_id", match=models.MatchValue(value=document_id)))
+            if not filters:
+                must_conditions.extend([
+                    models.IsEmptyCondition(is_empty=models.PayloadField(key="client_id")),
+                    models.IsEmptyCondition(is_empty=models.PayloadField(key="source_system")),
+                ])
+        count_filter = models.Filter(must=must_conditions) if must_conditions else None
         try:
             res = await self.client.count(
                 collection_name=self.collection_name,

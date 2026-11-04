@@ -224,18 +224,20 @@ class SupabaseVectorStore:
 
     async def count_document_points(
         self,
-        document_id: str,
+        document_id: str | None = None,
         filters: dict[str, Any] | None = None,
     ) -> int:
-        """Count the number of chunks indexed for a specific document_id."""
+        """Count the number of chunks indexed (overall or for a specific document_id)."""
         try:
             async with self.session_factory() as session:
-                stmt = select(func.count(DocumentChunk.id)).where(DocumentChunk.document_id == document_id)
+                stmt = select(func.count(DocumentChunk.id))
+                if document_id is not None:
+                    stmt = stmt.where(DocumentChunk.document_id == document_id)
                 if filters:
                     for k, v in filters.items():
                         if hasattr(DocumentChunk, k) and v is not None:
                             stmt = stmt.where(getattr(DocumentChunk, k) == v)
-                else:
+                elif document_id is not None:
                     stmt = stmt.where(
                         DocumentChunk.client_id.is_(None),
                         DocumentChunk.source_system.is_(None),
@@ -245,7 +247,7 @@ class SupabaseVectorStore:
                 return int(result.scalar_one() or 0)
 
         except Exception as exc:
-            logger.warning("Failed to count chunks for document", document_id=document_id, error=str(exc))
+            logger.warning("Failed to count chunks", document_id=document_id, error=str(exc))
             raise SupabaseVectorStoreError(
                 f"Failed to count chunks for document '{document_id}': {exc}"
             ) from exc
