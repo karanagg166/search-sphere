@@ -52,11 +52,13 @@ class EndpointConfig:
     expected_status: int = 200
     status_field: str = "status"
     allowed_status_values: tuple[str, ...] = ("ok", "ready")
-    check_type: str = "liveness"  # "liveness", "readiness", "worker_heartbeat"
+    check_type: str = "liveness"  # "liveness", "readiness", "worker_heartbeat", "infrastructure"
     sha_field: str | None = None
     expected_sha_env: str | None = None
     failure_category: str = "service"  # "infrastructure", "service"
     is_critical: bool = True
+    auth_header_name: str | None = None
+    auth_header_env: str | None = None
 
 
 @dataclass
@@ -173,6 +175,26 @@ DEFAULT_TARGETS: list[ServiceTarget] = [
             ),
         ],
     ),
+    ServiceTarget(
+        name="Search-Sphere Qdrant Vector Store (Qdrant Cloud)",
+        env_var="QDRANT_URL",
+        default_url="https://05eee4ff-130e-4b32-985a-8edd76b5d445.us-east-1-1.aws.cloud.qdrant.io",
+        enabled_env_var="MONITOR_QDRANT",
+        default_enabled=True,
+        endpoints=[
+            EndpointConfig(
+                path="/collections",
+                expected_status=200,
+                status_field="status",
+                allowed_status_values=("ok",),
+                check_type="infrastructure",
+                failure_category="infrastructure",
+                auth_header_name="api-key",
+                auth_header_env="QDRANT_API_KEY",
+                is_critical=False,
+            ),
+        ],
+    ),
 ]
 
 
@@ -240,12 +262,18 @@ def probe_endpoint(
 
     for attempt in range(1, max_retries + 1):
         start_time = time.monotonic()
+        headers = {
+            "User-Agent": "ReliabilityKeepAliveBot/2.0 (+https://github.com/karanagg166)",
+            "Accept": "application/json",
+        }
+        if endpoint_config.auth_header_name and endpoint_config.auth_header_env:
+            auth_val = os.getenv(endpoint_config.auth_header_env, "").strip()
+            if auth_val:
+                headers[endpoint_config.auth_header_name] = auth_val
+
         req = urllib.request.Request(
             full_url,
-            headers={
-                "User-Agent": "ReliabilityKeepAliveBot/2.0 (+https://github.com/karanagg166)",
-                "Accept": "application/json",
-            },
+            headers=headers,
             method="GET",
         )
 
@@ -333,10 +361,16 @@ def probe_endpoint(
             elapsed = time.monotonic() - start_time
             is_cold_start = True  # Network delay or container spin-up
             is_network_err = True
-            last_error = str(exc)
+            if "connection reset" in str(exc).lower() and "qdrant" in full_url.lower():
+                last_error = (
+                    "Qdrant Cloud cluster is SUSPENDED or unreachable (Connection reset by peer). "
+                    "Free-tier 7-day inactivity limit reached. Resume in https://cloud.qdrant.io."
+                )
+            else:
+                last_error = str(exc)
             logger.warning(
                 f"{YELLOW}[Attempt {attempt}/{max_retries}]{RESET} {target_name} ({full_url}) "
-                f"encountered transient error in {elapsed:.2f}s: {exc}"
+                f"encountered transient error in {elapsed:.2f}s: {last_error}"
             )
             if attempt < max_retries:
                 logger.info(f"Backing off {backoff_seconds}s for cold start completion...")
