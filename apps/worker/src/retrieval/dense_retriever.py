@@ -10,7 +10,6 @@ from src.processing.embedding.dense_embedder import (
 )
 from src.processing.models.search import DenseSearchResult
 from src.vector_store import (
-    QdrantVectorStore,
     QdrantVectorStoreError,
     get_vector_store,
 )

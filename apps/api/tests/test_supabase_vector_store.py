@@ -1,10 +1,10 @@
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from src.processing.models.document import EmbeddedChunk, EmbeddedDocument
 from src.processing.models.sparse_vector import SparseVector
 from src.retrieval.hybrid_retriever import HybridRetriever
-from src.retrieval.reranked_retriever import RerankedHybridRetriever
 from src.services.document_indexer import audit_and_recover_missing_vectors
 from src.vector_store import get_vector_store
 from src.vector_store.supabase_vector_store import SupabaseVectorStore

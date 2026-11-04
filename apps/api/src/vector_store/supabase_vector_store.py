@@ -1,11 +1,9 @@
 import json
 import math
-import uuid
 from typing import Any
 
 import structlog
 from sqlalchemy import delete, func, select, text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
 from src.db import AsyncSessionLocal, engine
@@ -19,7 +17,6 @@ from src.processing.models.search import (
 )
 from src.processing.models.sparse_vector import SparseVector
 from src.vector_store.qdrant_store import (
-    QDRANT_POINT_NAMESPACE,
     QdrantVectorStoreError,
     generate_point_id,
 )
@@ -35,7 +32,7 @@ def _cosine_similarity(v1: list[float], v2: list[float]) -> float:
     """Calculate cosine similarity between two float vectors in Python."""
     if len(v1) != len(v2) or not v1:
         return 0.0
-    dot = sum(a * b for a, b in zip(v1, v2))
+    dot = sum(a * b for a, b in zip(v1, v2, strict=True))
     norm1 = math.sqrt(sum(a * a for a in v1))
     norm2 = math.sqrt(sum(b * b for b in v2))
     if norm1 == 0.0 or norm2 == 0.0:
@@ -125,7 +122,7 @@ class SupabaseVectorStore:
             identity = json.dumps([extra_payload["client_id"], extra_payload.get("tenant_id"), document_id], separators=(",", ":"))
 
         chunks_to_insert: list[DocumentChunk] = []
-        for idx, chunk in enumerate(document.chunks):
+        for chunk in document.chunks:
             point_id = generate_point_id(identity, chunk.chunk_index)
 
             # Metadata extraction
@@ -312,7 +309,7 @@ class SupabaseVectorStore:
                         params["threshold"] = float(score_threshold)
 
                     sql = text(f"""
-                        SELECT 
+                        SELECT
                             id, point_id, document_id, chunk_index, content, token_count,
                             start_page, end_page, page_numbers, block_types,
                             client_id, tenant_id, collection_id, owner_subject_id, patient_id,
@@ -460,7 +457,7 @@ class SupabaseVectorStore:
                         params["source_system"] = resolved_source
 
                     sql = text(f"""
-                        SELECT 
+                        SELECT
                             id, point_id, document_id, chunk_index, content, token_count,
                             start_page, end_page, page_numbers, block_types,
                             client_id, tenant_id, collection_id, owner_subject_id, patient_id,
@@ -576,8 +573,6 @@ class SupabaseVectorStore:
             raise SupabaseVectorStoreError(f"candidate_limit ({candidate_limit}) must be >= limit ({limit}).")
 
         # Fallback to dual retrieval + Python RRF if SQLite or text search not directly executed in SQL
-        is_postgres = "postgresql" in engine.dialect.name.lower()
-
         # Retrieve dense candidates
         dense_candidates = await self.search_dense(
             query_vector=dense_query_vector,

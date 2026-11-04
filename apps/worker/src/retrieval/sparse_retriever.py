@@ -10,7 +10,6 @@ from src.processing.sparse_embedding.bm25_embedder import (
     SparseEmbeddingError,
 )
 from src.vector_store import (
-    QdrantVectorStore,
     QdrantVectorStoreError,
     SupabaseVectorStore,
     get_vector_store,
