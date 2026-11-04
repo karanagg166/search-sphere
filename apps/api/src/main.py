@@ -290,13 +290,17 @@ async def diagnostic_check():
         res["cross_encoder"] = f"error: {exc}"
 
     try:
-        from src.vector_store.qdrant_store import QdrantVectorStore
-        store = QdrantVectorStore()
+        from src.config import settings
+        from src.vector_store import get_vector_store
+        store = get_vector_store()
         await store.ensure_collection()
-        info = await store.client.get_collection(store.collection_name)
-        mode = "embedded" if getattr(store, "is_embedded", False) else "remote"
-        res["qdrant"] = f"ok ({mode}, collection '{store.collection_name}', {info.points_count} points)"
+        backend_name = getattr(settings, "VECTOR_STORE_BACKEND", "supabase")
+        count = await store.count_document_points()
+        status_msg = f"ok ({backend_name}, {count} chunks)"
+        res["vector_store"] = status_msg
+        res["qdrant"] = status_msg
     except Exception as exc:
+        res["vector_store"] = f"error: {exc}"
         res["qdrant"] = f"error: {exc}"
 
     return res
