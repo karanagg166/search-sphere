@@ -232,3 +232,39 @@ class TestRunMonitorOrchestration:
         exit_code = run_monitor([test_target])
         assert exit_code == 0
         mock_probe.assert_not_called()
+
+    def test_qdrant_target_configured_in_default_targets(self):
+        from monitor_backends import DEFAULT_TARGETS
+        qdrant_target = next((t for t in DEFAULT_TARGETS if "qdrant" in t.name.lower()), None)
+        assert qdrant_target is not None
+        assert qdrant_target.env_var == "QDRANT_URL"
+        assert qdrant_target.endpoints[0].auth_header_name == "api-key"
+        assert qdrant_target.endpoints[0].auth_header_env == "QDRANT_API_KEY"
+
+    @patch("urllib.request.urlopen")
+    def test_auth_header_injected_when_configured(self, mock_urlopen, monkeypatch):
+        monkeypatch.setenv("TEST_QDRANT_KEY", "secret-test-key")
+        mock_resp = MagicMock()
+        mock_resp.getcode.return_value = 200
+        mock_resp.read.return_value = b'{"status": "ok"}'
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.__exit__.return_value = None
+        mock_urlopen.return_value = mock_resp
+
+        cfg = EndpointConfig(
+            path="/collections",
+            auth_header_name="api-key",
+            auth_header_env="TEST_QDRANT_KEY",
+        )
+        res = probe_endpoint("Test Qdrant", "https://qdrant.example.com/collections", cfg, max_retries=1)
+        assert res.success is True
+        call_req = mock_urlopen.call_args[0][0]
+        assert call_req.headers.get("Api-key") == "secret-test-key"
+
+    @patch("urllib.request.urlopen")
+    def test_connection_reset_detects_qdrant_suspension(self, mock_urlopen):
+        mock_urlopen.side_effect = OSError("[Errno 54] Connection reset by peer")
+        cfg = EndpointConfig(path="/collections")
+        res = probe_endpoint("Qdrant Cloud", "https://05eee.aws.cloud.qdrant.io/collections", cfg, max_retries=1)
+        assert res.success is False
+        assert "SUSPENDED" in res.message
