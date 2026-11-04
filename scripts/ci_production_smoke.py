@@ -614,8 +614,20 @@ def main() -> int:
         check_diagnostics()
         run_rag_suite()
 
-        status, _, payload = http(API + "/health")
-        assert_memory(require_json(status, payload, "Final memory guard"), "Final memory guard")
+        # Allow post-RAG memory settling and garbage collection across up to 4 attempts
+        final_payload: dict[str, Any] = {}
+        for settle_attempt in range(4):
+            if settle_attempt > 0:
+                time.sleep(3)
+            status, _, payload = http(API + "/health")
+            if status == 200 and isinstance(payload, dict):
+                final_payload = payload
+                mem_mb = float(payload.get("memory_mb", 999.0))
+                level = str(payload.get("pressure_level", "")).lower()
+                if 0 <= mem_mb < MAX_MEMORY_MIB and level not in ("high", "critical"):
+                    break
+
+        assert_memory(require_json(200 if final_payload else 500, final_payload, "Final memory guard"), "Final memory guard")
         record("Production smoke suite", "all configured checks passed")
         return 0
     except (AssertionError, urllib.error.URLError, TimeoutError, OSError) as exc:

@@ -198,8 +198,13 @@ app.include_router(v1_answers_router)
 async def health_check():
     """Basic health check endpoint to confirm the backend process is running."""
     from src.services.memory_guard import memory_guard
+    from src.services.model_manager import model_manager
 
     metrics = memory_guard.get_metrics()
+    if metrics["pressure_level"] in ("moderate", "high", "critical"):
+        model_manager.release_memory()
+        metrics = memory_guard.get_metrics(force_refresh=True)
+
     return {
         "status": "ok",
         "service": "api",

@@ -370,6 +370,12 @@ class ModelManager:
                     libc.malloc_trim(0)
             except Exception:
                 pass
+        try:
+            from src.services.memory_guard import memory_guard
+
+            memory_guard.invalidate_cache()
+        except Exception:
+            pass
         return collected
 
     def get_loaded_models_info(self) -> dict[str, Any]:
