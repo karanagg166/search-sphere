@@ -1,5 +1,6 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import structlog
 from sqlalchemy import or_, select
@@ -192,3 +193,68 @@ async def sync_unindexed_documents() -> list[str]:
     except Exception as exc:
         logger.warning("Error while syncing unindexed documents", error=str(exc))
         return []
+
+
+async def audit_and_recover_missing_vectors(batch_size: int = 10) -> dict[str, Any]:
+    """
+    Audits PostgreSQL documents against Qdrant vector store.
+    Identifies documents marked 'indexed' but missing actual vector points (e.g. from historical
+    ephemeral restarts or connection resets).
+    Safely reindexes them from durable object storage with bounded concurrency.
+    """
+    from src.vector_store.qdrant_store import QdrantVectorStore
+
+    try:
+        vector_store = QdrantVectorStore()
+        await vector_store.ensure_collection()
+    except Exception as exc:
+        logger.warning("Vector store unreachable; skipping missing vector recovery audit", error=str(exc))
+        return {"status": "skipped", "reason": f"Vector store unavailable: {exc}"}
+
+    reindexed: list[str] = []
+    backfilled: list[str] = []
+    audited = 0
+
+    try:
+        async with AsyncSessionLocal() as session:
+            # Check documents marked indexed
+            result = await session.execute(
+                select(Document).where(Document.status == "indexed").order_by(Document.created_at.desc())
+            )
+            indexed_docs = result.scalars().all()
+            audited = len(indexed_docs)
+
+            for doc in indexed_docs:
+                if len(reindexed) >= batch_size:
+                    break
+                try:
+                    points = await vector_store.count_document_points(doc.id)
+                    if points == 0:
+                        logger.info("Identified indexed document missing vectors; recovering from object storage", document_id=doc.id)
+                        # Reindex document from durable object storage
+                        success = await durable_processor.process_job(
+                            document_id=doc.id,
+                            storage_key=doc.storage_key,
+                            attempt=1,
+                        )
+                        if success:
+                            reindexed.append(doc.id)
+                    elif getattr(doc, "chunk_count", None) is None:
+                        doc.chunk_count = points
+                        backfilled.append(doc.id)
+                except Exception as doc_err:
+                    logger.warning("Error auditing document vector points", document_id=doc.id, error=str(doc_err))
+
+            if backfilled:
+                await session.commit()
+
+        return {
+            "status": "completed",
+            "audited": audited,
+            "reindexed_count": len(reindexed),
+            "reindexed_ids": reindexed,
+            "backfilled_count": len(backfilled),
+        }
+    except Exception as exc:
+        logger.warning("Error during missing vector recovery audit", error=str(exc))
+        return {"status": "error", "error": str(exc)}

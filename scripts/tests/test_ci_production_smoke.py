@@ -224,7 +224,13 @@ def test_real_rag_pipeline_search_and_answer(monkeypatch):
         if url.endswith("/search"):
             return 200, {}, {
                 "query": "What is the unique CI verification code in the synthetic test document?",
-                "results": [{"document_id": doc_id, "content": f"Found marker: {marker}"}],
+                "results": [
+                    {
+                        "document_id": doc_id,
+                        "content": f"Found marker: {marker}",
+                        "rerank_score": 0.854,
+                    }
+                ],
             }
         if url.endswith("/answer"):
             return 200, {}, {
@@ -246,3 +252,90 @@ def test_real_rag_pipeline_search_and_answer(monkeypatch):
     assert any("Real semantic search" in r for r in smoke.RESULTS)
     assert any("Real grounded answer" in r for r in smoke.RESULTS)
     assert any("SSE answer streaming" in r for r in smoke.RESULTS)
+    assert any("Cross-encoder reranking verification" in r for r in smoke.RESULTS)
+
+
+def test_check_diagnostics_detects_remote_qdrant_and_healthy_models(monkeypatch):
+    monkeypatch.setattr(
+        smoke,
+        "http",
+        lambda *args, **kwargs: (
+            200,
+            {},
+            {
+                "database": "ok",
+                "fastembed": "ok (384 dims, 4.2ms)",
+                "cross_encoder": "ok (TextCrossEncoder, score=0.8921, 8.1ms)",
+                "qdrant": "ok (remote, collection 'documents', 12 points)",
+            },
+        ),
+    )
+    smoke.check_diagnostics()
+    assert any("Diagnostic probe" in r and "remote" in r for r in smoke.RESULTS)
+
+
+def test_check_diagnostics_fails_on_embedded_fallback(monkeypatch):
+    monkeypatch.setattr(
+        smoke,
+        "http",
+        lambda *args, **kwargs: (
+            200,
+            {},
+            {
+                "database": "ok",
+                "fastembed": "ok",
+                "cross_encoder": "ok",
+                "qdrant": "ok (embedded, collection 'documents', 0 points)",
+            },
+        ),
+    )
+    with pytest.raises(AssertionError, match="ephemeral embedded fallback mode"):
+        smoke.check_diagnostics()
+
+
+def test_check_diagnostics_fails_on_cross_encoder_error(monkeypatch):
+    monkeypatch.setattr(
+        smoke,
+        "http",
+        lambda *args, **kwargs: (
+            200,
+            {},
+            {
+                "database": "ok",
+                "fastembed": "ok",
+                "cross_encoder": "error: Model cross-encoder/ms-marco-MiniLM-L-6-v2 is not supported",
+                "qdrant": "ok (remote, collection 'documents', 12 points)",
+            },
+        ),
+    )
+    with pytest.raises(AssertionError, match="cross-encoder reranker error"):
+        smoke.check_diagnostics()
+
+
+def test_ensure_synthetic_document_rejects_zero_or_missing_chunk_count(monkeypatch):
+    monkeypatch.setattr(smoke.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(smoke, "http_upload", lambda *args, **kwargs: (201, {}, {"id": "doc-001"}))
+
+    # Test chunk_count = 0
+    monkeypatch.setattr(smoke, "http", lambda *args, **kwargs: (200, {}, {"status": "indexed", "chunk_count": 0}))
+    with pytest.raises(AssertionError, match="chunk_count=0"):
+        smoke.ensure_synthetic_document("token_xyz", "MARKER")
+
+    # Test missing chunk_count
+    monkeypatch.setattr(smoke, "http", lambda *args, **kwargs: (200, {}, {"status": "indexed"}))
+    with pytest.raises(AssertionError, match="chunk_count is missing"):
+        smoke.ensure_synthetic_document("token_xyz", "MARKER")
+
+
+def test_cleanup_synthetic_document_checks_vector_purge(monkeypatch):
+    def fake_http(url, **kwargs):
+        if kwargs.get("method") == "DELETE":
+            return 204, {}, {}
+        if url.endswith("/search"):
+            return 200, {}, {"results": []}
+        return 404, {}, {}
+
+    monkeypatch.setattr(smoke, "http", fake_http)
+    smoke.cleanup_synthetic_document("token_xyz", "doc-001", marker="MARKER-123")
+    assert any("purged synthetic document" in r for r in smoke.RESULTS)
+    assert any("Vector deletion verification" in r for r in smoke.RESULTS)

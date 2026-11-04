@@ -80,6 +80,7 @@ class DocumentResponse(BaseModel):
     document_type: str
     storage_path: str
     status: str
+    chunk_count: int | None = None
     processing_error: str | None = None
     metadata_json: dict[str, Any] | None = Field(None, serialization_alias="metadata")
     created_at: datetime

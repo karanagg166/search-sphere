@@ -260,7 +260,12 @@ async def diagnostic_check():
 
     from src.services.model_manager import model_manager
 
-    res: dict = {"database": "ok", "fastembed": "unknown", "qdrant": "unknown"}
+    res: dict = {
+        "database": "ok",
+        "fastembed": "unknown",
+        "cross_encoder": "unknown",
+        "qdrant": "unknown",
+    }
     try:
         t0 = time.perf_counter()
         emb = model_manager.get_dense_embedder()
@@ -268,6 +273,21 @@ async def diagnostic_check():
         res["fastembed"] = f"ok ({len(vecs[0])} dims, {(time.perf_counter() - t0)*1000:.1f}ms)"
     except Exception as exc:
         res["fastembed"] = f"error: {exc}"
+
+    try:
+        t0 = time.perf_counter()
+        reranker = model_manager.get_reranker()
+        if hasattr(reranker, "rerank"):
+            scores = list(reranker.rerank("ping", ["pong"]))
+            score_val = float(scores[0]) if scores else 0.0
+        elif hasattr(reranker, "predict"):
+            scores = reranker.predict([("ping", "pong")])
+            score_val = float(scores[0]) if len(scores) > 0 else 0.0
+        else:
+            score_val = 0.0
+        res["cross_encoder"] = f"ok ({type(reranker).__name__}, score={score_val:.4f}, {(time.perf_counter() - t0)*1000:.1f}ms)"
+    except Exception as exc:
+        res["cross_encoder"] = f"error: {exc}"
 
     try:
         from src.vector_store.qdrant_store import QdrantVectorStore

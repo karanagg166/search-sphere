@@ -53,9 +53,15 @@ class CrossEncoderReranker:
         default_top_k: int | None = None,
         max_top_k: int | None = None,
     ) -> None:
-        self.model_name = model_name or getattr(
-            settings, "RERANKER_MODEL_NAME", "cross-encoder/ms-marco-MiniLM-L-6-v2"
+        raw_name = model_name or getattr(
+            settings, "RERANKER_MODEL_NAME", "Xenova/ms-marco-MiniLM-L-6-v2"
         )
+        aliases = {
+            "cross-encoder/ms-marco-MiniLM-L-6-v2": "Xenova/ms-marco-MiniLM-L-6-v2",
+            "ms-marco-MiniLM-L-6-v2": "Xenova/ms-marco-MiniLM-L-6-v2",
+            "Xenova/ms-marco-MiniLM-L-6-v2": "Xenova/ms-marco-MiniLM-L-6-v2",
+        }
+        self.model_name = aliases.get(raw_name, raw_name)
         self.batch_size = (
             batch_size
             if batch_size is not None
@@ -372,7 +378,17 @@ class CrossEncoderReranker:
             elif hasattr(model, "rerank"):
                 query = pairs[0][0]
                 documents = [p[1] for p in pairs]
-                raw_scores = list(model.rerank(query, documents))
+                raw_items = list(model.rerank(query, documents))
+                raw_scores = []
+                for item in raw_items:
+                    if isinstance(item, (int, float)):
+                        raw_scores.append(float(item))
+                    elif isinstance(item, dict) and "score" in item:
+                        raw_scores.append(float(item["score"]))
+                    elif hasattr(item, "score"):
+                        raw_scores.append(float(item.score))
+                    else:
+                        raw_scores.append(float(item))
             elif callable(model):
                 raw_scores = model(pairs)
             else:

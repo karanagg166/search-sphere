@@ -263,7 +263,11 @@ class DurableDocumentProcessor:
                     await session.execute(
                         update(Document)
                         .where(Document.id == document_id)
-                        .values(status="indexed", updated_at=datetime.now(UTC))
+                        .values(
+                            status="indexed",
+                            chunk_count=chunk_count,
+                            updated_at=datetime.now(UTC),
+                        )
                     )
                     await session.commit()
 

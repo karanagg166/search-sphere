@@ -30,6 +30,14 @@ DEFAULT_SPARSE_MODEL = "Qdrant/bm25"
 DEFAULT_RERANKER_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2"
 MAX_INFERENCE_BATCH_SIZE = 16
 
+RERANKER_MODEL_ALIASES: dict[str, str] = {
+    "cross-encoder/ms-marco-MiniLM-L-6-v2": "Xenova/ms-marco-MiniLM-L-6-v2",
+    "ms-marco-MiniLM-L-6-v2": "Xenova/ms-marco-MiniLM-L-6-v2",
+    "Xenova/ms-marco-MiniLM-L-6-v2": "Xenova/ms-marco-MiniLM-L-6-v2",
+    "bge-reranker-base": "BAAI/bge-reranker-base",
+    "BAAI/bge-reranker-base": "BAAI/bge-reranker-base",
+}
+
 
 class ModelManager:
     """
@@ -182,7 +190,8 @@ class ModelManager:
         """
         Lazily loads and returns the FastEmbed TextCrossEncoder reranker singleton.
         """
-        resolved_name = model_name or DEFAULT_RERANKER_MODEL
+        raw_name = model_name or getattr(settings, "RERANKER_MODEL_NAME", DEFAULT_RERANKER_MODEL)
+        resolved_name = RERANKER_MODEL_ALIASES.get(raw_name, raw_name)
         key = f"reranker:{resolved_name}"
         if key in self._models:
             return self._models[key]
@@ -220,6 +229,43 @@ class ModelManager:
             except Exception as exc:
                 logger.exception("Failed to load FastEmbed TextCrossEncoder", error=str(exc))
                 raise
+
+    def rerank_bounded(
+        self,
+        query: str,
+        documents: list[str],
+        model_name: str | None = None,
+        batch_size: int = MAX_INFERENCE_BATCH_SIZE,
+    ) -> list[float]:
+        """
+        Reranks query-document pairs in bounded batches using shared TextCrossEncoder singleton.
+        """
+        if not documents:
+            return []
+        reranker = self.get_reranker(model_name)
+        scores: list[float] = []
+        for i in range(0, len(documents), batch_size):
+            batch_docs = documents[i : i + batch_size]
+            if hasattr(reranker, "rerank"):
+                batch_scores = list(reranker.rerank(query, batch_docs))
+                scores.extend([float(s) for s in batch_scores])
+            elif hasattr(reranker, "predict"):
+                pairs = [(query, d) for d in batch_docs]
+                batch_scores = reranker.predict(pairs, batch_size=batch_size, show_progress_bar=False)
+                if hasattr(batch_scores, "tolist"):
+                    scores.extend(batch_scores.tolist())
+                else:
+                    scores.extend([float(s) for s in batch_scores])
+            elif callable(reranker):
+                pairs = [(query, d) for d in batch_docs]
+                batch_scores = reranker(pairs)
+                scores.extend([float(s) for s in batch_scores])
+        raw_name = model_name or getattr(settings, "RERANKER_MODEL_NAME", DEFAULT_RERANKER_MODEL)
+        resolved_name = RERANKER_MODEL_ALIASES.get(raw_name, raw_name)
+        key = f"reranker:{resolved_name}"
+        if key in self._total_inferences:
+            self._total_inferences[key] += len(documents)
+        return scores
 
     # -------------------------------------------------------------------------
     # Bounded Inference Helpers

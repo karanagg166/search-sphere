@@ -99,7 +99,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Cross-Encoder Reranking
     # ------------------------------------------------------------------
-    RERANKER_MODEL_NAME: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    RERANKER_MODEL_NAME: str = "Xenova/ms-marco-MiniLM-L-6-v2"
     RERANKER_BATCH_SIZE: int = 32
     RERANKER_TOP_K: int = 5
     RERANKER_MAX_TOP_K: int = 100

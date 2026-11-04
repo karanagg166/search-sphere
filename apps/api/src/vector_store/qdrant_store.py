@@ -76,9 +76,17 @@ _fallback_mode_active: bool = False
 
 
 def is_fallback_permitted() -> bool:
-    """Fallback to embedded Qdrant is active in staging/production, not in unit tests."""
+    """
+    Fallback to embedded Qdrant is strictly prohibited in production and staging.
+    Production must never silently downgrade to ephemeral /tmp storage and lose vector durability.
+    Only permitted in local development or offline test modes when explicitly configured.
+    """
     env = str(getattr(settings, "ENVIRONMENT", "")).lower()
-    return env not in ("test", "testing")
+    if env in ("production", "prod", "staging"):
+        return False
+    if str(os.environ.get("ALLOW_EMBEDDED_QDRANT_FALLBACK", "false")).lower() in ("true", "1", "yes"):
+        return True
+    return env in ("development", "dev", "local", "test", "testing")
 
 
 async def get_shared_fallback_client() -> AsyncQdrantClient:
@@ -494,10 +502,45 @@ class QdrantVectorStore:
                 collection=self.collection_name,
                 error=str(exc),
             )
-            raise QdrantVectorStoreError(
-                f"Failed to delete points for document '{document_id}' from "
-                f"collection '{self.collection_name}': {exc}"
-            ) from exc
+            raise classified from exc
+
+    async def count_document_points(
+        self,
+        document_id: str,
+        filters: dict[str, Any] | None = None,
+    ) -> int:
+        """Count the number of points indexed for a specific document_id."""
+        await self.ensure_collection()
+        scope = dict(filters or {})
+        scope["document_id"] = document_id
+        count_filter = models.Filter(must=[
+            models.FieldCondition(key=key, match=models.MatchValue(value=value))
+            for key, value in scope.items() if value is not None
+        ])
+        if not filters:
+            count_filter.must.extend([
+                models.IsEmptyCondition(is_empty=models.PayloadField(key="client_id")),
+                models.IsEmptyCondition(is_empty=models.PayloadField(key="source_system")),
+            ])
+        try:
+            res = await self.client.count(
+                collection_name=self.collection_name,
+                count_filter=count_filter,
+                exact=True,
+            )
+            return int(res.count)
+        except Exception as exc:
+            classified = classify_qdrant_error(exc, "count document points", self.collection_name)
+            if is_fallback_permitted() and self._owns_client and not self.is_embedded and not isinstance(classified, QdrantSchemaError):
+                await self._activate_fallback(reason=str(exc) or repr(exc))
+                res = await self.client.count(
+                    collection_name=self.collection_name,
+                    count_filter=count_filter,
+                    exact=True,
+                )
+                return int(res.count)
+            logger.warning("Failed to count Qdrant points for document", document_id=document_id, error=str(exc))
+            raise classified from exc
 
     def convert_to_points(
         self,

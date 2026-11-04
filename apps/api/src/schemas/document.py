@@ -12,6 +12,7 @@ class DocumentResponse(BaseModel):
     file_size: int
     mime_type: str
     status: str
+    chunk_count: int | None = None
     created_at: datetime
     updated_at: datetime
 
