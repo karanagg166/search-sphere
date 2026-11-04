@@ -36,7 +36,11 @@ from src.security.medical_context import (
 )
 from src.security.service_context import ServiceContext
 from src.tasks.document_tasks import enqueue_medical_document
-from src.vector_store import QdrantVectorStore
+from src.vector_store import get_vector_store
+
+# Vector store provider; defaults to get_vector_store factory,
+# exposed as QdrantVectorStore for backward compatibility with existing tests.
+QdrantVectorStore = get_vector_store
 
 logger = structlog.get_logger()
 

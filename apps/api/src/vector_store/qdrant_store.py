@@ -791,6 +791,8 @@ class QdrantVectorStore:
         query_filter: models.Filter | None = None,
         score_threshold: float | None = None,
         filters: dict[str, Any] | None = None,
+        query_text: str | None = None,
+        **kwargs: Any,
     ) -> list[DenseSearchResult]:
         """
         Execute approximate nearest neighbor (ANN) search on dense vectors in Qdrant.
@@ -996,6 +998,8 @@ class QdrantVectorStore:
         query_filter: models.Filter | None = None,
         score_threshold: float | None = None,
         filters: dict[str, Any] | None = None,
+        query_text: str | None = None,
+        **kwargs: Any,
     ) -> list[SparseSearchResult]:
         """
         Execute sparse lexical search on named BM25 vectors in Qdrant.
@@ -1211,6 +1215,8 @@ class QdrantVectorStore:
         source_system: str | None = None,
         filter: models.Filter | None = None,
         filters: dict[str, Any] | None = None,
+        query_text: str | None = None,
+        **kwargs: Any,
     ) -> list[HybridSearchResult]:
         """
         Execute hybrid search combining dense semantic retrieval and sparse BM25

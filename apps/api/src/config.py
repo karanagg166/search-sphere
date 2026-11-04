@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     # Frontend URL (for OAuth callbacks & CORS)
     FRONTEND_URL: str = "http://localhost:3000"
 
+    # Vector Database Backend ("supabase" | "pgvector" | "qdrant")
+    VECTOR_STORE_BACKEND: str = "supabase"
+
     # Qdrant Vector Database
     QDRANT_URL: str = "http://qdrant:6333"
     QDRANT_API_KEY: str | None = None

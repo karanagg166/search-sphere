@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     FASTEMBED_CACHE_PATH: str | None = None
 
     # ------------------------------------------------------------------
+    # Vector Database Backend ("supabase" | "pgvector" | "qdrant")
+    # ------------------------------------------------------------------
+    VECTOR_STORE_BACKEND: str = "supabase"
+
+    # ------------------------------------------------------------------
     # Qdrant Vector Database
     # ------------------------------------------------------------------
     QDRANT_URL: str = "http://qdrant:6333"

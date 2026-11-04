@@ -202,10 +202,10 @@ async def audit_and_recover_missing_vectors(batch_size: int = 10) -> dict[str, A
     ephemeral restarts or connection resets).
     Safely reindexes them from durable object storage with bounded concurrency.
     """
-    from src.vector_store.qdrant_store import QdrantVectorStore
+    from src.vector_store import get_vector_store
 
     try:
-        vector_store = QdrantVectorStore()
+        vector_store = get_vector_store()
         await vector_store.ensure_collection()
     except Exception as exc:
         logger.warning("Vector store unreachable; skipping missing vector recovery audit", error=str(exc))

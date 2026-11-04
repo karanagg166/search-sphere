@@ -9,9 +9,11 @@ from src.processing.sparse_embedding.bm25_embedder import (
     BM25Embedder,
     SparseEmbeddingError,
 )
-from src.vector_store.qdrant_store import (
+from src.vector_store import (
     QdrantVectorStore,
     QdrantVectorStoreError,
+    SupabaseVectorStore,
+    get_vector_store,
 )
 
 logger = structlog.get_logger()
@@ -45,12 +47,12 @@ class SparseRetriever:
     def __init__(
         self,
         embedder: BM25Embedder | None = None,
-        vector_store: QdrantVectorStore | None = None,
+        vector_store: Any | None = None,
         default_top_k: int | None = None,
         max_top_k: int | None = None,
     ) -> None:
         self.embedder = embedder or BM25Embedder()
-        self.vector_store = vector_store or QdrantVectorStore()
+        self.vector_store = vector_store or get_vector_store()
         self.default_top_k = (
             default_top_k
             if default_top_k is not None
@@ -160,6 +162,8 @@ class SparseRetriever:
                 "document_id": resolved_doc_id,
                 "score_threshold": score_threshold,
             }
+            if isinstance(self.vector_store, SupabaseVectorStore):
+                search_kwargs["query_text"] = clean_query
             if filters is not None:
                 search_kwargs["filters"] = filters
             results = await self.vector_store.search_sparse(**search_kwargs)
