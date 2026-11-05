@@ -205,7 +205,7 @@ class DurableDocumentProcessor:
                 )
                 res = await session.execute(stmt)
                 await session.commit()
-                if res.rowcount == 1:
+                if res.rowcount != 0:
                     logger.info("Document successfully marked as indexed", document_id=document_id)
                     return True
                 logger.warning(
@@ -235,7 +235,7 @@ class DurableDocumentProcessor:
                 )
                 res = await session.execute(stmt)
                 await session.commit()
-                if res.rowcount == 1:
+                if res.rowcount != 0:
                     return new_lease
                 logger.warning(
                     "Heartbeat lease extension failed: lease no longer held",
@@ -510,9 +510,16 @@ class DurableDocumentProcessor:
                             attempt = int(parts[2])
                         if not force_all:
                             is_expired = ((now_epoch - created_epoch) >= LEASE_TIMEOUT_SECONDS)
-                    elif doc.status.startswith("processing"):
+                    else:
+                        # Legacy arbitrary token or processing%
+                        if len(parts) >= 2 and parts[-1].isdigit():
+                            attempt = int(parts[-1])
                         if not force_all:
-                            is_expired = (doc.updated_at < cutoff)
+                            doc_updated_at = getattr(doc, "updated_at", None)
+                            if isinstance(doc_updated_at, datetime):
+                                is_expired = (doc_updated_at < cutoff)
+                            else:
+                                is_expired = True
 
                     if not is_expired:
                         continue
@@ -530,7 +537,8 @@ class DurableDocumentProcessor:
                         .values(status=next_status, updated_at=datetime.now(UTC))
                     )
                     update_res = await session.execute(update_stmt)
-                    if update_res.rowcount == 1:
+                    if update_res.rowcount != 0:
+                        doc.status = next_status
                         if next_status != "failed:max_retries_exceeded":
                             recovered_ids.append(doc.id)
                             logger.warning(
