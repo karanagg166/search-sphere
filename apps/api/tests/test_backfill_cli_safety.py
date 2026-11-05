@@ -1,10 +1,22 @@
 from __future__ import annotations
 
 import logging
+import sys
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from scripts.backfill_pgvector_chunks import BackfillStats, build_parser, main
+
+# Ensure repository root is on sys.path so scripts can be imported under CI where PYTHONPATH=apps/api
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.backfill_pgvector_chunks import (  # noqa: E402
+    BackfillStats,
+    build_parser,
+    main,
+)
 
 
 def test_build_parser_defaults() -> None:
