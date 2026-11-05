@@ -6,6 +6,7 @@ from src.models.user import User
 from src.schemas.document import DocumentListResponse, DocumentResponse
 from src.security.jwt import get_current_user
 from src.security.rate_limiter import rate_limiter
+from src.services.document_access import private_document_response
 from src.services.document_indexer import (
     audit_and_recover_missing_vectors,
     index_document_pipeline,
@@ -33,7 +34,7 @@ async def upload_document(
 ) -> DocumentResponse:
     service = DocumentService(db=db, storage=storage)
     document = await service.upload_document(file=file, user=current_user)
-    return DocumentResponse.model_validate(document)
+    return await private_document_response(document, storage)
 
 
 @router.get(
@@ -56,7 +57,7 @@ async def list_documents(
     )
     return DocumentListResponse(
         total=total,
-        documents=[DocumentResponse.model_validate(doc) for doc in documents],
+        documents=[await private_document_response(doc, storage) for doc in documents],
     )
 
 
@@ -96,7 +97,7 @@ async def get_document(
     document = await service.get_user_document(
         document_id=document_id, user_id=current_user.id
     )
-    return DocumentResponse.model_validate(document)
+    return await private_document_response(document, storage)
 
 
 @router.delete(
@@ -132,4 +133,4 @@ async def reindex_document(
     doc = await service.get_user_document(document_id=document_id, user_id=current_user.id)
     await index_document_pipeline(document_id=doc.id)
     updated_doc = await service.get_user_document(document_id=document_id, user_id=current_user.id)
-    return DocumentResponse.model_validate(updated_doc)
+    return await private_document_response(updated_doc, storage)

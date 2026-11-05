@@ -68,6 +68,7 @@ async def test_pdf_upload_and_lifecycle(mock_storage):
             assert doc_data["status"] == "uploaded"
             assert "documents/" in doc_data["storage_key"]
             assert doc_data["file_url"] is not None
+            assert "token=" in doc_data["file_url"]
             document_id = doc_data["id"]
 
             # Verify file exists in object storage
@@ -79,6 +80,7 @@ async def test_pdf_upload_and_lifecycle(mock_storage):
             )
             assert get_resp.status_code == 200
             assert get_resp.json()["id"] == document_id
+            assert "token=" in get_resp.json()["file_url"]
 
             # 4. List user documents
             list_resp = await client.get("/documents", headers=auth_headers)
