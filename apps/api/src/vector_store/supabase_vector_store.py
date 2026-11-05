@@ -28,6 +28,130 @@ class SupabaseVectorStoreError(QdrantVectorStoreError):
     """Raised when an operation against Supabase pgvector store fails."""
 
 
+ALLOWED_CHUNK_FILTER_COLUMNS: frozenset[str] = frozenset({
+    "document_id",
+    "client_id",
+    "tenant_id",
+    "patient_id",
+    "collection_id",
+    "owner_subject_id",
+    "source_system",
+    "document_type",
+    "file_name",
+})
+
+
+def _build_sql_filters(
+    document_id: str | None = None,
+    document_ids: list[str] | None = None,
+    patient_id: str | None = None,
+    source_system: str | None = None,
+    filters: dict[str, Any] | None = None,
+) -> tuple[list[str], dict[str, Any]]:
+    """
+    Builds parameterized SQL WHERE clauses strictly validating filter keys against ALLOWED_CHUNK_FILTER_COLUMNS.
+    Never interpolates raw caller values or unallowlisted column names.
+    """
+    where_clauses: list[str] = []
+    params: dict[str, Any] = {}
+
+    if document_id is not None:
+        where_clauses.append("document_id = :doc_id")
+        params["doc_id"] = str(document_id).strip()
+
+    if document_ids is not None:
+        cleaned_ids = [str(did).strip() for did in document_ids if str(did).strip()]
+        if not cleaned_ids:
+            where_clauses.append("1 = 0")
+        else:
+            where_clauses.append("document_id = ANY(:allowed_doc_ids)")
+            params["allowed_doc_ids"] = cleaned_ids
+
+    resolved_patient = patient_id or (filters.get("patient_id") if filters else None)
+    if resolved_patient is not None:
+        where_clauses.append("patient_id = :filter_patient_id")
+        params["filter_patient_id"] = str(resolved_patient).strip()
+
+    resolved_source = source_system or (filters.get("source_system") if filters else None)
+    if resolved_source is not None:
+        where_clauses.append("source_system = :filter_source_system")
+        params["filter_source_system"] = str(resolved_source).strip()
+
+    if filters:
+        for k, v in filters.items():
+            if k in ("patient_id", "source_system", "document_id", "document_ids"):
+                continue
+            if k not in ALLOWED_CHUNK_FILTER_COLUMNS:
+                raise SupabaseVectorStoreError(
+                    f"Disallowed filter column '{k}'. Allowed columns: {sorted(ALLOWED_CHUNK_FILTER_COLUMNS)}"
+                )
+            if v is None:
+                continue
+
+            param_name = f"filter_{k}"
+            if isinstance(v, (list, tuple, set)):
+                cleaned_items = [str(item).strip() for item in v if str(item).strip()]
+                if not cleaned_items:
+                    where_clauses.append("1 = 0")
+                else:
+                    where_clauses.append(f"{k} = ANY(:{param_name})")
+                    params[param_name] = cleaned_items
+            else:
+                where_clauses.append(f"{k} = :{param_name}")
+                params[param_name] = v
+
+    return where_clauses, params
+
+
+def _apply_sqlite_filters(
+    stmt: Any,
+    document_id: str | None = None,
+    document_ids: list[str] | None = None,
+    patient_id: str | None = None,
+    source_system: str | None = None,
+    filters: dict[str, Any] | None = None,
+) -> Any:
+    """Applies strict allowlisted filters against SQLAlchemy DocumentChunk expressions for SQLite fallback."""
+    if document_id is not None:
+        stmt = stmt.where(DocumentChunk.document_id == str(document_id).strip())
+
+    if document_ids is not None:
+        cleaned_ids = [str(did).strip() for did in document_ids if str(did).strip()]
+        if not cleaned_ids:
+            stmt = stmt.where(DocumentChunk.id.is_(None))
+        else:
+            stmt = stmt.where(DocumentChunk.document_id.in_(cleaned_ids))
+
+    resolved_patient = patient_id or (filters.get("patient_id") if filters else None)
+    if resolved_patient is not None:
+        stmt = stmt.where(DocumentChunk.patient_id == str(resolved_patient).strip())
+
+    resolved_source = source_system or (filters.get("source_system") if filters else None)
+    if resolved_source is not None:
+        stmt = stmt.where(DocumentChunk.source_system == str(resolved_source).strip())
+
+    if filters:
+        for k, v in filters.items():
+            if k in ("patient_id", "source_system", "document_id", "document_ids"):
+                continue
+            if k not in ALLOWED_CHUNK_FILTER_COLUMNS:
+                raise SupabaseVectorStoreError(
+                    f"Disallowed filter column '{k}'. Allowed columns: {sorted(ALLOWED_CHUNK_FILTER_COLUMNS)}"
+                )
+            if v is None:
+                continue
+            if isinstance(v, (list, tuple, set)):
+                cleaned_list = [str(x) for x in v]
+                if not cleaned_list:
+                    stmt = stmt.where(DocumentChunk.id.is_(None))
+                else:
+                    stmt = stmt.where(getattr(DocumentChunk, k).in_(cleaned_list))
+            else:
+                stmt = stmt.where(getattr(DocumentChunk, k) == v)
+
+    return stmt
+
+
 def _cosine_similarity(v1: list[float], v2: list[float]) -> float:
     """Calculate cosine similarity between two float vectors in Python."""
     if len(v1) != len(v2) or not v1:
@@ -203,13 +327,24 @@ class SupabaseVectorStore:
         filters: dict[str, Any] | None = None,
     ) -> None:
         """Delete all chunk points belonging to a specific document_id."""
+        if filters:
+            for k in filters:
+                if k not in ALLOWED_CHUNK_FILTER_COLUMNS:
+                    raise SupabaseVectorStoreError(
+                        f"Disallowed filter column '{k}'. Allowed columns: {sorted(ALLOWED_CHUNK_FILTER_COLUMNS)}"
+                    )
         try:
             async with self.session_factory() as session:
-                stmt = delete(DocumentChunk).where(DocumentChunk.document_id == document_id)
+                stmt = delete(DocumentChunk).where(DocumentChunk.document_id == str(document_id).strip())
                 if filters:
                     for k, v in filters.items():
+                        if k in ("document_id", "document_ids"):
+                            continue
                         if hasattr(DocumentChunk, k) and v is not None:
-                            stmt = stmt.where(getattr(DocumentChunk, k) == v)
+                            if isinstance(v, (list, tuple, set)):
+                                stmt = stmt.where(getattr(DocumentChunk, k).in_(list(v)))
+                            else:
+                                stmt = stmt.where(getattr(DocumentChunk, k) == v)
                 else:
                     stmt = stmt.where(
                         DocumentChunk.client_id.is_(None),
@@ -219,6 +354,8 @@ class SupabaseVectorStore:
                 await session.execute(stmt)
                 await session.commit()
 
+        except SupabaseVectorStoreError:
+            raise
         except Exception as exc:
             logger.warning("Failed to delete document chunks from Supabase pgvector", document_id=document_id, error=str(exc))
             raise SupabaseVectorStoreError(
@@ -231,15 +368,26 @@ class SupabaseVectorStore:
         filters: dict[str, Any] | None = None,
     ) -> int:
         """Count the number of chunks indexed (overall or for a specific document_id)."""
+        if filters:
+            for k in filters:
+                if k not in ALLOWED_CHUNK_FILTER_COLUMNS:
+                    raise SupabaseVectorStoreError(
+                        f"Disallowed filter column '{k}'. Allowed columns: {sorted(ALLOWED_CHUNK_FILTER_COLUMNS)}"
+                    )
         try:
             async with self.session_factory() as session:
                 stmt = select(func.count(DocumentChunk.id))
                 if document_id is not None:
-                    stmt = stmt.where(DocumentChunk.document_id == document_id)
+                    stmt = stmt.where(DocumentChunk.document_id == str(document_id).strip())
                 if filters:
                     for k, v in filters.items():
+                        if k in ("document_id", "document_ids"):
+                            continue
                         if hasattr(DocumentChunk, k) and v is not None:
-                            stmt = stmt.where(getattr(DocumentChunk, k) == v)
+                            if isinstance(v, (list, tuple, set)):
+                                stmt = stmt.where(getattr(DocumentChunk, k).in_(list(v)))
+                            else:
+                                stmt = stmt.where(getattr(DocumentChunk, k) == v)
                 elif document_id is not None:
                     stmt = stmt.where(
                         DocumentChunk.client_id.is_(None),
@@ -249,6 +397,8 @@ class SupabaseVectorStore:
                 result = await session.execute(stmt)
                 return int(result.scalar_one() or 0)
 
+        except SupabaseVectorStoreError:
+            raise
         except Exception as exc:
             logger.warning("Failed to count chunks", document_id=document_id, error=str(exc))
             raise SupabaseVectorStoreError(
@@ -260,17 +410,21 @@ class SupabaseVectorStore:
         query_vector: list[float],
         limit: int,
         document_id: str | None = None,
+        document_ids: list[str] | None = None,
         patient_id: str | None = None,
         source_system: str | None = None,
         query_filter: Any = None,
         score_threshold: float | None = None,
         filters: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> list[DenseSearchResult]:
         """Execute ANN dense vector search using cosine distance in Supabase pgvector."""
         if not query_vector:
             raise SupabaseVectorStoreError("query_vector must not be empty.")
         if limit <= 0:
             raise SupabaseVectorStoreError(f"limit must be positive, got {limit}.")
+        if document_ids is not None and len(document_ids) == 0:
+            return []
 
         is_postgres = "postgresql" in engine.dialect.name.lower()
 
@@ -278,40 +432,21 @@ class SupabaseVectorStore:
             async with self.session_factory() as session:
                 if is_postgres:
                     # Native PostgreSQL pgvector cosine distance: 1 - (embedding <=> :vec)
-                    where_clauses = ["1=1"]
-                    params: dict[str, Any] = {
-                        "query_vec": "[" + ",".join(str(float(x)) for x in query_vector) + "]",
-                        "limit": limit,
-                    }
-
-                    if document_id is not None:
-                        where_clauses.append("document_id = :doc_id")
-                        params["doc_id"] = document_id
-
-                    resolved_patient = patient_id or (filters.get("patient_id") if filters else None)
-                    if resolved_patient:
-                        where_clauses.append("patient_id = :patient_id")
-                        params["patient_id"] = resolved_patient
-
-                    resolved_source = source_system or (filters.get("source_system") if filters else None)
-                    if resolved_source:
-                        where_clauses.append("source_system = :source_system")
-                        params["source_system"] = resolved_source
-
-                    if filters:
-                        for k, v in filters.items():
-                            if k not in ("patient_id", "source_system", "document_id") and v is not None:
-                                param_name = f"filter_{k}"
-                                if isinstance(v, (list, tuple)):
-                                    where_clauses.append(f"{k} = ANY(:{param_name})")
-                                    params[param_name] = list(v)
-                                else:
-                                    where_clauses.append(f"{k} = :{param_name}")
-                                    params[param_name] = v
+                    where_clauses, params = _build_sql_filters(
+                        document_id=document_id,
+                        document_ids=document_ids,
+                        patient_id=patient_id,
+                        source_system=source_system,
+                        filters=filters,
+                    )
+                    params["query_vec"] = "[" + ",".join(str(float(x)) for x in query_vector) + "]"
+                    params["limit"] = limit
 
                     if score_threshold is not None:
                         where_clauses.append("(1.0 - (embedding <=> CAST(:query_vec AS vector))) >= :threshold")
                         params["threshold"] = float(score_threshold)
+
+                    where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
 
                     sql = text(f"""
                         SELECT
@@ -321,7 +456,7 @@ class SupabaseVectorStore:
                             source_system, document_type, file_name, metadata_json,
                             (1.0 - (embedding <=> CAST(:query_vec AS vector))) AS score
                         FROM document_chunks
-                        WHERE {" AND ".join(where_clauses)}
+                        WHERE {where_sql}
                         ORDER BY embedding <=> CAST(:query_vec AS vector) ASC
                         LIMIT :limit;
                     """)
@@ -360,21 +495,14 @@ class SupabaseVectorStore:
                 else:
                     # SQLite fallback: load candidates and calculate cosine similarity in Python
                     stmt = select(DocumentChunk)
-                    if document_id is not None:
-                        stmt = stmt.where(DocumentChunk.document_id == document_id)
-                    resolved_patient = patient_id or (filters.get("patient_id") if filters else None)
-                    if resolved_patient:
-                        stmt = stmt.where(DocumentChunk.patient_id == resolved_patient)
-                    resolved_source = source_system or (filters.get("source_system") if filters else None)
-                    if resolved_source:
-                        stmt = stmt.where(DocumentChunk.source_system == resolved_source)
-                    if filters:
-                        for k, v in filters.items():
-                            if hasattr(DocumentChunk, k) and v is not None:
-                                if isinstance(v, (list, tuple)):
-                                    stmt = stmt.where(getattr(DocumentChunk, k).in_(list(v)))
-                                else:
-                                    stmt = stmt.where(getattr(DocumentChunk, k) == v)
+                    stmt = _apply_sqlite_filters(
+                        stmt,
+                        document_id=document_id,
+                        document_ids=document_ids,
+                        patient_id=patient_id,
+                        source_system=source_system,
+                        filters=filters,
+                    )
 
                     res = await session.execute(stmt)
                     chunks = res.scalars().all()
@@ -415,6 +543,8 @@ class SupabaseVectorStore:
                         )
                     return results
 
+        except SupabaseVectorStoreError:
+            raise
         except Exception as exc:
             logger.exception("Dense vector search failed in SupabaseVectorStore", error=str(exc))
             raise SupabaseVectorStoreError(f"Dense vector search failed: {exc}") from exc
@@ -424,16 +554,20 @@ class SupabaseVectorStore:
         query_vector: SparseVector | Any,
         limit: int,
         document_id: str | None = None,
+        document_ids: list[str] | None = None,
         patient_id: str | None = None,
         source_system: str | None = None,
         query_filter: Any = None,
         score_threshold: float | None = None,
         filters: dict[str, Any] | None = None,
         query_text: str | None = None,
+        **kwargs: Any,
     ) -> list[SparseSearchResult]:
         """Execute lexical full-text search in PostgreSQL or keyword overlap in SQLite."""
         if limit <= 0:
             raise SupabaseVectorStoreError(f"limit must be positive, got {limit}.")
+        if document_ids is not None and len(document_ids) == 0:
+            return []
 
         text_to_query = query_text or ""
         is_postgres = "postgresql" in engine.dialect.name.lower()
@@ -441,25 +575,18 @@ class SupabaseVectorStore:
         try:
             async with self.session_factory() as session:
                 if is_postgres and text_to_query.strip():
-                    where_clauses = ["tsv_content @@ websearch_to_tsquery('english', :query_text)"]
-                    params: dict[str, Any] = {
-                        "query_text": text_to_query.strip(),
-                        "limit": limit,
-                    }
+                    where_clauses, params = _build_sql_filters(
+                        document_id=document_id,
+                        document_ids=document_ids,
+                        patient_id=patient_id,
+                        source_system=source_system,
+                        filters=filters,
+                    )
+                    where_clauses.insert(0, "tsv_content @@ websearch_to_tsquery('english', :query_text)")
+                    params["query_text"] = text_to_query.strip()
+                    params["limit"] = limit
 
-                    if document_id is not None:
-                        where_clauses.append("document_id = :doc_id")
-                        params["doc_id"] = document_id
-
-                    resolved_patient = patient_id or (filters.get("patient_id") if filters else None)
-                    if resolved_patient:
-                        where_clauses.append("patient_id = :patient_id")
-                        params["patient_id"] = resolved_patient
-
-                    resolved_source = source_system or (filters.get("source_system") if filters else None)
-                    if resolved_source:
-                        where_clauses.append("source_system = :source_system")
-                        params["source_system"] = resolved_source
+                    where_sql = " AND ".join(where_clauses)
 
                     sql = text(f"""
                         SELECT
@@ -469,7 +596,7 @@ class SupabaseVectorStore:
                             source_system, document_type, file_name, metadata_json,
                             ts_rank_cd(tsv_content, websearch_to_tsquery('english', :query_text)) AS score
                         FROM document_chunks
-                        WHERE {" AND ".join(where_clauses)}
+                        WHERE {where_sql}
                         ORDER BY score DESC
                         LIMIT :limit;
                     """)
@@ -508,8 +635,14 @@ class SupabaseVectorStore:
                 else:
                     # SQLite / fallback: simple token matching
                     stmt = select(DocumentChunk)
-                    if document_id is not None:
-                        stmt = stmt.where(DocumentChunk.document_id == document_id)
+                    stmt = _apply_sqlite_filters(
+                        stmt,
+                        document_id=document_id,
+                        document_ids=document_ids,
+                        patient_id=patient_id,
+                        source_system=source_system,
+                        filters=filters,
+                    )
                     res = await session.execute(stmt)
                     chunks = res.scalars().all()
 
@@ -519,7 +652,7 @@ class SupabaseVectorStore:
                         content_lower = chunk.content.lower()
                         match_count = sum(1 for t in terms if t in content_lower)
                         score = float(match_count) / max(len(terms), 1) if terms else 0.5
-                        if score > 0:
+                        if score > 0 or not terms:
                             scored.append((score, chunk))
 
                     scored.sort(key=lambda x: x[0], reverse=True)
@@ -550,6 +683,8 @@ class SupabaseVectorStore:
                         for idx, (score, chunk) in enumerate(top_scored)
                     ]
 
+        except SupabaseVectorStoreError:
+            raise
         except Exception as exc:
             logger.exception("Sparse search failed in SupabaseVectorStore", error=str(exc))
             raise SupabaseVectorStoreError(f"Sparse search failed: {exc}") from exc
@@ -567,6 +702,7 @@ class SupabaseVectorStore:
         filter: Any = None,
         filters: dict[str, Any] | None = None,
         query_text: str | None = None,
+        **kwargs: Any,
     ) -> list[HybridSearchResult]:
         """
         Execute hybrid retrieval combining dense ANN vector retrieval and lexical retrieval
@@ -576,13 +712,15 @@ class SupabaseVectorStore:
             raise SupabaseVectorStoreError(f"limit must be positive, got {limit}.")
         if candidate_limit < limit:
             raise SupabaseVectorStoreError(f"candidate_limit ({candidate_limit}) must be >= limit ({limit}).")
+        if document_ids is not None and len(document_ids) == 0:
+            return []
 
-        # Fallback to dual retrieval + Python RRF if SQLite or text search not directly executed in SQL
         # Retrieve dense candidates
         dense_candidates = await self.search_dense(
             query_vector=dense_query_vector,
             limit=candidate_limit,
             document_id=document_id,
+            document_ids=document_ids,
             patient_id=patient_id,
             source_system=source_system,
             filters=filters,
@@ -593,6 +731,7 @@ class SupabaseVectorStore:
             query_vector=sparse_query_vector,
             limit=candidate_limit,
             document_id=document_id,
+            document_ids=document_ids,
             patient_id=patient_id,
             source_system=source_system,
             filters=filters,
@@ -614,12 +753,36 @@ class SupabaseVectorStore:
 
         # Sort by RRF score descending
         sorted_point_ids = sorted(rrf_scores.keys(), key=lambda pid: rrf_scores[pid], reverse=True)
-        top_point_ids = sorted_point_ids[:limit]
 
         results: list[HybridSearchResult] = []
-        for rank, pid in enumerate(top_point_ids, start=1):
+        for pid in sorted_point_ids:
             source_item = candidate_map[pid]
             score = rrf_scores[pid]
+
+            # Defense-in-depth boundary checks
+            if document_id is not None and source_item.document_id != str(document_id).strip():
+                continue
+            if document_ids is not None and source_item.document_id not in [str(did).strip() for did in document_ids]:
+                continue
+            if patient_id is not None and source_item.patient_id != str(patient_id).strip():
+                continue
+            if source_system is not None and source_item.source_system != str(source_system).strip():
+                continue
+            if filters:
+                mismatch = False
+                for fk, fv in filters.items():
+                    if fv is None or fk in ("document_id", "document_ids"):
+                        continue
+                    item_val = getattr(source_item, fk, None)
+                    if isinstance(fv, (list, tuple, set)):
+                        if item_val not in [str(x) for x in fv]:
+                            mismatch = True
+                            break
+                    elif item_val != str(fv).strip() if isinstance(fv, str) else item_val != fv:
+                        mismatch = True
+                        break
+                if mismatch:
+                    continue
 
             results.append(
                 HybridSearchResult(
@@ -633,7 +796,7 @@ class SupabaseVectorStore:
                     end_page=source_item.end_page,
                     page_numbers=list(source_item.page_numbers),
                     block_types=list(source_item.block_types),
-                    rank=rank,
+                    rank=len(results) + 1,
                     client_id=source_item.client_id,
                     tenant_id=source_item.tenant_id,
                     collection_id=source_item.collection_id,
@@ -644,6 +807,8 @@ class SupabaseVectorStore:
                     file_name=source_item.file_name,
                 )
             )
+            if len(results) >= limit:
+                break
 
         return results
 
