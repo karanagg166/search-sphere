@@ -228,9 +228,9 @@ class MemoryGuard:
         """
         Calculates conservative memory headroom.
         Returns (raw_cgroup_mb, inactive_file_mb, safe_headroom_mb, conservative_used_mb).
-        Inactive file page cache is discounted by 50% so estimated reclaimable cache is NOT
-        treated as guaranteed free memory, while avoiding false critical alarms from clean model
-        weights cached in RAM.
+        Inactive file page cache is credited at 70% (retaining a 30% safety margin) so estimated
+        reclaimable cache is NOT treated as 100% guaranteed free memory, while avoiding false
+        'high' or 'critical' alarms when clean model weights (FastEmbed + cross-encoder) reside in RAM.
         """
         snapshot = self._cached_metrics_snapshot or {}
         current_mb = self.get_current_memory_mb()
@@ -238,40 +238,39 @@ class MemoryGuard:
         inactive_mb = snapshot.get("inactive_file_mb", 0.0)
         # Raw container unallocated headroom
         container_headroom = max(0.0, self.platform_limit_mb - raw_mb)
-        # Safe headroom: actual unallocated headroom + 50% of inactive page cache
-        safe_headroom = max(0.0, container_headroom + (inactive_mb * 0.5))
-        # Conservative memory used (bounded below by process RSS)
-        process_rss = snapshot.get("process_rss_mb", current_mb)
-        conservative_used = max(process_rss, self.platform_limit_mb - safe_headroom)
+        # Safe headroom: actual unallocated headroom + 70% of inactive page cache
+        safe_headroom = max(0.0, container_headroom + (inactive_mb * 0.70))
+        # Conservative memory used
+        conservative_used = max(0.0, self.platform_limit_mb - safe_headroom)
         return raw_mb, inactive_mb, safe_headroom, conservative_used
 
     def get_pressure_level(self, force_refresh: bool = False) -> str:
         """
         Categorizes system memory pressure using conservative container headroom:
-        - 'critical': working set >= 460 MiB or conservative used >= 460.8 MiB or safe headroom <= 25 MiB
-        - 'high': working set >= 420 MiB or conservative used >= 425 MiB or safe headroom <= 50 MiB
-        - 'moderate': working set >= 370 MiB or conservative used >= 368 MiB or safe headroom <= 100 MiB
-        - 'normal': Below 370 MiB with ample safe container headroom (> 100 MiB)
+        - 'critical': working set >= 460 MiB or conservative used >= 465 MiB or safe headroom <= 25 MiB
+        - 'high': working set >= 425 MiB or conservative used >= 430 MiB or safe headroom <= 45 MiB
+        - 'moderate': working set >= 370 MiB or conservative used >= 370 MiB or safe headroom <= 110 MiB
+        - 'normal': Below 370 MiB with ample safe container headroom (> 110 MiB)
         """
         mem_mb = self.get_current_memory_mb(force_refresh=force_refresh)
         _, _, safe_headroom, conservative_used = self._get_headroom_snapshot()
 
         if (
             mem_mb >= CRITICAL_THRESHOLD_MB
-            or conservative_used >= (self.platform_limit_mb * 0.90)
+            or conservative_used >= 465.0
             or safe_headroom <= 25.0
         ):
             level = "critical"
         elif (
             mem_mb >= HIGH_THRESHOLD_MB
-            or conservative_used >= (self.platform_limit_mb * 0.83)
-            or safe_headroom <= 50.0
+            or conservative_used >= 430.0
+            or safe_headroom <= 45.0
         ):
             level = "high"
         elif (
             mem_mb >= MODERATE_THRESHOLD_MB
-            or conservative_used >= (self.platform_limit_mb * 0.72)
-            or safe_headroom <= 100.0
+            or conservative_used >= 370.0
+            or safe_headroom <= 110.0
         ):
             level = "moderate"
         else:
@@ -326,7 +325,7 @@ class MemoryGuard:
 
         container_headroom_mb = max(0.0, self.platform_limit_mb - raw_cgroup_mb)
         working_set_headroom_mb = max(0.0, self.platform_limit_mb - working_set_mb)
-        safe_headroom_mb = max(0.0, container_headroom_mb + (inactive_file_mb * 0.5))
+        safe_headroom_mb = max(0.0, container_headroom_mb + (inactive_file_mb * 0.70))
         usage_pct = min(100.0, (current_mb / self.platform_limit_mb) * 100.0)
 
         return {
