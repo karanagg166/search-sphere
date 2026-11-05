@@ -288,6 +288,10 @@ async def diagnostic_check():
         res["cross_encoder"] = f"ok ({type(reranker).__name__}, score={score_val:.4f}, {(time.perf_counter() - t0)*1000:.1f}ms)"
     except Exception as exc:
         res["cross_encoder"] = f"error: {exc}"
+    finally:
+        # In memory-constrained environments (512 MiB limit), unload cross-encoder model
+        # after diagnostic verification so document indexing and worker tasks have ample headroom.
+        model_manager.unload_model("reranker")
 
     try:
         from src.config import settings

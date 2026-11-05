@@ -87,6 +87,10 @@ class DurableDocumentProcessor:
             try:
                 # If memory is high or interactive queries are active, yield and wait
                 if not memory_guard.is_heavy_workload_allowed() or workload_scheduler.active_rag_queries > 0:
+                    try:
+                        model_manager.unload_model("reranker")
+                    except Exception:
+                        pass
                     await asyncio.sleep(2.0)
                     continue
 
