@@ -10,8 +10,10 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from src.models.document import Document
 from src.models.document_chunk import DocumentChunk
 from src.models.ingestion_job import IngestionJob
+from src.models.user import User
 from src.processing.models.document import EmbeddedChunk, EmbeddedDocument
 from src.repositories.ingestion_queue import IngestionQueue
 from src.vector_store.supabase_vector_store import (
@@ -42,6 +44,8 @@ async def index():
     async with sessions() as db, db.begin():
         await db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == doc_id))
         await db.execute(delete(IngestionJob).where(IngestionJob.document_id == doc_id))
+        await db.execute(delete(Document).where(Document.id == doc_id))
+        await db.execute(delete(User).where(User.id == doc_id))
     await engine.dispose()
 
 
@@ -141,3 +145,27 @@ async def test_job_terminal_status_and_vectors_share_one_fenced_commit(index):
     assert await contents(sessions, doc_id) == ["PUBLIC COMMITTED"]
     async with sessions() as db, db.begin():
         assert await queue.lock_lease(db, lease) is None
+
+
+@pytest.mark.asyncio
+async def test_native_chunk_telemetry_rolls_back_with_failed_replacement(index):
+    store, sessions, doc_id = index
+    async with sessions() as db, db.begin():
+        db.add(User(id=doc_id, email=f"{doc_id}@example.invalid", name="Synthetic fixture"))
+        await db.flush()
+        db.add(Document(
+            id=doc_id, user_id=doc_id, filename="synthetic.pdf",
+            storage_key=f"fixture/{doc_id}.pdf", file_url="private-fixture-locator",
+            file_size=100, status="indexed",
+        ))
+    await store.index_document(doc_id, document("PUBLIC NATIVE ORIGINAL"))
+    bad = document("PUBLIC INVALID REPLACEMENT")
+    bad = EmbeddedDocument([replace(bad.chunks[0], embedding=[1.0, 2.0])])
+    with pytest.raises(SupabaseVectorStoreError):
+        await store.index_document(doc_id, bad)
+    async with sessions() as db:
+        assert (await db.get(Document, doc_id)).chunk_count == 1
+    await store.index_document(doc_id, EmbeddedDocument([]))
+    async with sessions() as db:
+        assert (await db.get(Document, doc_id)).chunk_count == 0
+    assert await contents(sessions, doc_id) == []
