@@ -293,6 +293,8 @@ class HybridRetriever:
         top_k: int | None = None,
         candidate_k: int | None = None,
         document_id: str | None = None,
+        document_ids: list[str] | None = None,
+        filters: dict[str, Any] | None = None,
         reranker: Any = None,
     ) -> list[Any]:
         """
@@ -304,6 +306,8 @@ class HybridRetriever:
             top_k: Optional final number of reranked results to return.
             candidate_k: Optional candidate limit fetched from hybrid retrieval.
             document_id: Optional document ID to filter chunks server-side.
+            document_ids: Optional list of document IDs to filter chunks server-side.
+            filters: Optional metadata filters mapping.
             reranker: Optional custom CrossEncoderReranker instance.
 
         Returns:
@@ -323,4 +327,6 @@ class HybridRetriever:
             top_k=top_k,
             candidate_k=candidate_k,
             document_id=document_id,
+            document_ids=document_ids,
+            filters=filters,
         )

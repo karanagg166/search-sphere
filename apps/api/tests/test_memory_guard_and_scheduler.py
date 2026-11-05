@@ -61,15 +61,46 @@ class TestMemoryGuard:
     def test_memory_status_structure(self):
         metrics = memory_guard.get_metrics()
 
+        # Core required metrics
+        assert "raw_cgroup_mb" in metrics
+        assert "limit_mb" in metrics
+        assert "inactive_file_mb" in metrics
+        assert "estimated_working_set_mb" in metrics
+        assert "process_rss_mb" in metrics
+        assert "pressure_level" in metrics
+        assert "container_headroom_mb" in metrics
+        assert "working_set_headroom_mb" in metrics
         assert "current_mb" in metrics
         assert "peak_mb" in metrics
-        assert "limit_mb" in metrics
         assert "headroom_mb" in metrics
         assert "usage_percent" in metrics
-        assert "pressure_level" in metrics
         assert "heavy_workload_allowed" in metrics
         assert "interactive_rag_allowed" in metrics
         assert metrics["limit_mb"] == 512.0
+
+    def test_cgroup_conservative_admission_under_page_cache(self):
+        """
+        Verify that estimated reclaimable page cache is NOT treated as guaranteed free memory.
+        When raw cgroup usage is 480 MiB (even with 130 MiB inactive cache yielding 350 MiB working set),
+        container headroom is only 32 MiB (< 50 MiB required), so heavy workloads must be rejected.
+        """
+        guard = MemoryGuard(platform_limit_mb=512.0, bypass_in_test=False)
+        snapshot = {
+            "raw_cgroup_mb": 480.0,
+            "inactive_file_mb": 130.0,
+            "estimated_working_set_mb": 350.0,
+            "process_rss_mb": 220.0,
+        }
+        with patch.object(guard, "_read_memory_snapshot", return_value=snapshot):
+            guard.invalidate_cache()
+            metrics = guard.get_metrics()
+            assert metrics["raw_cgroup_mb"] == 480.0
+            assert metrics["estimated_working_set_mb"] == 350.0
+            assert metrics["inactive_file_mb"] == 130.0
+            assert metrics["container_headroom_mb"] == 32.0
+            assert metrics["working_set_headroom_mb"] == 162.0
+            # Must NOT admit heavy workloads because actual container headroom is only 32 MiB
+            assert guard.is_heavy_workload_allowed() is False
 
     @pytest.mark.parametrize(
         "simulated_mb,expected_pressure,can_rag,can_heavy",
@@ -218,3 +249,16 @@ class TestHealthMemoryEndpoint:
             assert "limit_mb" in data["scheduler"]["memory"]
             assert "pressure_level" in data["scheduler"]["memory"]
             assert "models" in data
+
+    @pytest.mark.asyncio
+    async def test_health_endpoint_lightweight_no_release_memory(self):
+        """Verifies /health request path is ultra-lightweight and does NOT invoke expensive gc/malloc_trim."""
+        with patch("src.services.model_manager.model_manager.release_memory") as mock_release:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.get("/health")
+                assert response.status_code == 200
+                data = response.json()
+                assert data["status"] == "ok"
+                assert "memory_mb" in data
+                assert "pressure_level" in data
+                mock_release.assert_not_called()

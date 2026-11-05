@@ -607,7 +607,11 @@ def main() -> int:
         memory = require_json(status, payload, "Memory/scheduler endpoint")
         if memory.get("status") != "ok" or not isinstance(memory.get("scheduler"), dict):
             fail("Memory/scheduler endpoint", "memory pressure or missing scheduler metrics")
-        record("Memory/scheduler endpoint", "healthy scheduler contract")
+        mem_metrics = memory.get("scheduler", {}).get("memory", {})
+        for req_key in ("current_mb", "limit_mb", "pressure_level", "raw_cgroup_mb", "estimated_working_set_mb", "process_rss_mb"):
+            if req_key not in mem_metrics:
+                fail("Memory/scheduler endpoint", f"missing required metric '{req_key}'")
+        record("Memory/scheduler endpoint", "healthy scheduler contract and comprehensive memory telemetry")
 
         check_cors()
         check_frontend()

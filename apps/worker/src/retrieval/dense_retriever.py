@@ -70,6 +70,7 @@ class DenseRetriever:
         query: str,
         top_k: int | None = None,
         document_id: str | None = None,
+        document_ids: list[str] | None = None,
         score_threshold: float | None = None,
         filters: dict[str, Any] | None = None,
     ) -> list[DenseSearchResult]:
@@ -81,6 +82,7 @@ class DenseRetriever:
             top_k: Optional number of top results to retrieve
                 (defaults to DENSE_SEARCH_TOP_K).
             document_id: Optional document ID to filter chunks server-side.
+            document_ids: Optional list of document IDs to filter chunks server-side.
             score_threshold: Optional minimum similarity score threshold.
             filters: Optional metadata filters dictionary.
 
@@ -111,7 +113,7 @@ class DenseRetriever:
                 f"limit of {self.max_top_k}."
             )
 
-        # 3. document_id validation
+        # 3. document_id and document_ids validation
         resolved_doc_id: str | None = None
         if document_id is not None:
             if not isinstance(document_id, str) or not document_id.strip():
@@ -119,6 +121,23 @@ class DenseRetriever:
                     "document_id filter must be a non-empty string if provided."
                 )
             resolved_doc_id = document_id.strip()
+
+        resolved_doc_ids: list[str] | None = None
+        if document_ids is not None:
+            if not isinstance(document_ids, (list, tuple)):
+                raise QueryValidationError(
+                    "document_ids filter must be a list of strings if provided."
+                )
+            if len(document_ids) == 0:
+                return []
+            cleaned_ids = []
+            for did in document_ids:
+                if not isinstance(did, str) or not did.strip():
+                    raise QueryValidationError(
+                        "Each item in document_ids must be a non-empty string."
+                    )
+                cleaned_ids.append(did.strip())
+            resolved_doc_ids = cleaned_ids
 
         start_total = time.perf_counter()
 
@@ -162,6 +181,8 @@ class DenseRetriever:
                 "document_id": resolved_doc_id,
                 "score_threshold": score_threshold,
             }
+            if resolved_doc_ids is not None:
+                search_kwargs["document_ids"] = resolved_doc_ids
             if filters is not None:
                 search_kwargs["filters"] = filters
             results = await self.vector_store.search_dense(**search_kwargs)

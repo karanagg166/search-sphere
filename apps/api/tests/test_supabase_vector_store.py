@@ -7,7 +7,10 @@ from src.processing.models.sparse_vector import SparseVector
 from src.retrieval.hybrid_retriever import HybridRetriever
 from src.services.document_indexer import audit_and_recover_missing_vectors
 from src.vector_store import get_vector_store
-from src.vector_store.supabase_vector_store import SupabaseVectorStore
+from src.vector_store.supabase_vector_store import (
+    SupabaseVectorStore,
+    SupabaseVectorStoreError,
+)
 
 
 def sample_embedded_doc(chunks_text: list[str]) -> EmbeddedDocument:
@@ -208,3 +211,197 @@ async def test_missing_vector_recovery_with_supabase_store():
         res = await audit_and_recover_missing_vectors(batch_size=2)
         assert "status" in res
         assert res["status"] in ("ok", "completed", "skipped")
+
+
+@pytest.mark.asyncio
+async def test_sql_injection_and_allowlist_enforcement():
+    """Verify that unauthorized or SQL-interpolated filter columns are strictly rejected."""
+    store = SupabaseVectorStore()
+    malicious_filters = {"id; DROP TABLE document_chunks; --": "malicious_payload"}
+
+    # 1. search_dense must reject unallowlisted column
+    with pytest.raises(SupabaseVectorStoreError) as exc_info:
+        await store.search_dense(
+            query_vector=[0.1] * 384,
+            limit=5,
+            filters=malicious_filters,
+        )
+    assert "Disallowed filter column" in str(exc_info.value)
+
+    # 2. search_sparse must reject unallowlisted column
+    with pytest.raises(SupabaseVectorStoreError) as exc_info:
+        await store.search_sparse(
+            query_vector=SparseVector(indices=[1], values=[1.0]),
+            limit=5,
+            filters=malicious_filters,
+            query_text="search query",
+        )
+    assert "Disallowed filter column" in str(exc_info.value)
+
+    # 3. count_document_points must reject unallowlisted column
+    with pytest.raises(SupabaseVectorStoreError) as exc_info:
+        await store.count_document_points(
+            document_id="some-doc",
+            filters=malicious_filters,
+        )
+    assert "Disallowed filter column" in str(exc_info.value)
+
+    # 4. delete_document_points must reject unallowlisted column
+    with pytest.raises(SupabaseVectorStoreError) as exc_info:
+        await store.delete_document_points(
+            document_id="some-doc",
+            filters=malicious_filters,
+        )
+    assert "Disallowed filter column" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_multi_tenant_dense_sparse_hybrid_isolation():
+    """
+    Seed documents belonging to two distinct test tenants.
+    Verify that neither dense retrieval, lexical retrieval, nor RRF hybrid fusion
+    expose another tenant's data.
+    """
+    store = SupabaseVectorStore()
+    doc_alpha = "doc-tenant-alpha-001"
+    doc_beta = "doc-tenant-beta-002"
+
+    payload_alpha = {
+        "client_id": "clinic_alpha",
+        "tenant_id": "tenant_alpha_corp",
+        "collection_id": "ehr_alpha",
+        "owner_subject_id": "practitioner_alpha",
+        "patient_id": "patient_alpha_123",
+        "source_system": "quick_clinic",
+        "document_type": "CLINICAL_SUMMARY",
+    }
+    payload_beta = {
+        "client_id": "clinic_beta",
+        "tenant_id": "tenant_beta_corp",
+        "collection_id": "ehr_beta",
+        "owner_subject_id": "practitioner_beta",
+        "patient_id": "patient_beta_456",
+        "source_system": "quick_clinic",
+        "document_type": "CLINICAL_SUMMARY",
+    }
+
+    doc_data_alpha = sample_embedded_doc(["Patient Alpha confidential diagnosis: acute bronchial pneumonia."])
+    doc_data_beta = sample_embedded_doc(["Patient Beta confidential diagnosis: diabetic ketoacidosis."])
+
+    await store.index_document(doc_alpha, doc_data_alpha, extra_payload=payload_alpha)
+    await store.index_document(doc_beta, doc_data_beta, extra_payload=payload_beta)
+
+    try:
+        query_vec = [0.0] * 384
+        query_vec[0] = 1.0
+        sparse_vec = SparseVector(indices=[0, 1], values=[1.0, 1.0])
+
+        # 1. Dense search scoped to Tenant Alpha
+        dense_results = await store.search_dense(
+            query_vector=query_vec,
+            limit=10,
+            filters={"client_id": "clinic_alpha", "tenant_id": "tenant_alpha_corp"},
+        )
+        assert len(dense_results) > 0
+        for r in dense_results:
+            assert r.tenant_id == "tenant_alpha_corp"
+            assert r.client_id == "clinic_alpha"
+            assert "Patient Beta" not in r.content
+
+        # 2. Sparse lexical search scoped to Tenant Alpha
+        sparse_results = await store.search_sparse(
+            query_vector=sparse_vec,
+            limit=10,
+            filters={"client_id": "clinic_alpha", "tenant_id": "tenant_alpha_corp"},
+            query_text="confidential diagnosis",
+        )
+        assert len(sparse_results) > 0
+        for r in sparse_results:
+            assert r.tenant_id == "tenant_alpha_corp"
+            assert r.client_id == "clinic_alpha"
+            assert "Patient Beta" not in r.content
+
+        # 3. Hybrid RRF search scoped to Tenant Alpha
+        hybrid_results = await store.search_hybrid(
+            dense_query_vector=query_vec,
+            sparse_query_vector=sparse_vec,
+            limit=5,
+            candidate_limit=10,
+            filters={"client_id": "clinic_alpha", "tenant_id": "tenant_alpha_corp"},
+            query_text="confidential diagnosis",
+        )
+        assert len(hybrid_results) > 0
+        for r in hybrid_results:
+            assert r.tenant_id == "tenant_alpha_corp"
+            assert r.client_id == "clinic_alpha"
+            assert "Patient Beta" not in r.content
+
+        # 4. Cross-check: searching for Patient Beta keywords with Tenant Alpha filter must NOT leak Beta's data
+        leak_probe_results = await store.search_hybrid(
+            dense_query_vector=query_vec,
+            sparse_query_vector=sparse_vec,
+            limit=5,
+            candidate_limit=10,
+            filters={"client_id": "clinic_alpha", "tenant_id": "tenant_alpha_corp"},
+            query_text="diabetic ketoacidosis",
+        )
+        for r in leak_probe_results:
+            assert r.tenant_id != "tenant_beta_corp"
+            assert "Patient Beta" not in r.content
+
+    finally:
+        await store.delete_document_points(doc_alpha, filters=payload_alpha)
+        await store.delete_document_points(doc_beta, filters=payload_beta)
+
+
+@pytest.mark.asyncio
+async def test_document_ids_scoping():
+    """Verify document_ids list filtering and empty list immediate return."""
+    store = SupabaseVectorStore()
+    doc_1 = "doc-scope-1"
+    doc_2 = "doc-scope-2"
+    await store.index_document(doc_1, sample_embedded_doc(["Content for Document 1"]))
+    await store.index_document(doc_2, sample_embedded_doc(["Content for Document 2"]))
+
+    try:
+        query_vec = [0.0] * 384
+        query_vec[0] = 1.0
+
+        # Scoped to doc_1 only
+        results = await store.search_dense(
+            query_vector=query_vec,
+            limit=10,
+            document_ids=[doc_1],
+        )
+        assert len(results) == 1
+        assert results[0].document_id == doc_1
+
+        # Empty document_ids list must return empty list immediately
+        empty_dense = await store.search_dense(
+            query_vector=query_vec,
+            limit=10,
+            document_ids=[],
+        )
+        assert empty_dense == []
+
+        empty_sparse = await store.search_sparse(
+            query_vector=SparseVector(indices=[1], values=[1.0]),
+            limit=10,
+            document_ids=[],
+            query_text="test",
+        )
+        assert empty_sparse == []
+
+        empty_hybrid = await store.search_hybrid(
+            dense_query_vector=query_vec,
+            sparse_query_vector=SparseVector(indices=[1], values=[1.0]),
+            limit=5,
+            candidate_limit=10,
+            document_ids=[],
+            query_text="test",
+        )
+        assert empty_hybrid == []
+
+    finally:
+        await store.delete_document_points(doc_1)
+        await store.delete_document_points(doc_2)
