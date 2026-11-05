@@ -1,10 +1,14 @@
 # Acceptance Report: Search Sphere Final Production Safety Hardening
 
 **Date:** 2026-11-06  
-**Implementation Branch:** `feat/final-production-safety-hardening`  
+**Implementation PRs:**  
+- [PR #28](https://github.com/karanagg166/search-sphere/pull/28): Final production fixture containment, restart-safe leases, and raw memory guardrails  
+- [PR #29](https://github.com/karanagg166/search-sphere/pull/29): Shed optional reranker model on memory pressure and after diagnostic probes  
 **Base Commit:** `aaf77dad41fc15e483fe99273cf766fc7599b93a`  
-**Current HEAD:** `bbf784b`  
-**Status:** COMPLETE (All Verification Gates Passed)
+**Production Commit SHA:** `3a9dfb6c36af2c4daf53d273d7d308d51418aa8f`  
+**Render Deployment:** Healthy (`https://search-sphere-api.onrender.com/health`)  
+**Post-Deployment Live Smoke Action Run:** [Run 42097054938](https://github.com/karanagg166/search-sphere/actions/runs/42097054938) (PASSED)  
+**Status:** COMPLETE (All Verification Gates Passed, Zero Fixture Leakage)
 
 ---
 
@@ -31,13 +35,13 @@ All improvements adhere strictly to the $0 infrastructure budget constraint, lev
    - **Active Heartbeat Loop**: Background task extends lease expiration epochs every 20 seconds; aborts job execution immediately if CAS detects that another worker acquired or expired the lease.
    - **Terminal Dead-Lettering**: Jobs exceeding 3 retries transition directly to `failed:max_retries_exceeded`.
 
-3. **Raw Container Memory Headroom Guardrails (`apps/api/src/services/memory_guard.py`)**:
+3. **Raw Container Memory Headroom Guardrails & Proactive Model Shedding (`apps/api/src/services/memory_guard.py`)**:
    - **Container Headroom Isolation**: At ~497 MiB raw cgroup usage in a 512 MiB container, Linux page caches often report apparent reclaimability that does not materialize during sudden heap spikes. MemoryGuard now computes unallocated container headroom (`platform_limit_mb - raw_cgroup_mb`).
    - **Hard Workload Admission Thresholds**:
      - Heavy background tasks (indexing, extraction, batch embeddings) require BOTH safe working set headroom >= 30 MiB AND raw container headroom >= 25 MiB.
      - Interactive RAG queries require safe working set headroom >= 15 MiB AND raw container headroom >= 12 MiB.
-     - Pressure escalates to `critical` if raw container headroom <= 16 MiB, `high` if <= 28 MiB, and `moderate` if <= 64 MiB.
-   - Eliminates container SIGKILL OOMs during rapid allocations.
+     - Pressure escalates to `critical` if raw container headroom <= 16 MiB, `high` if <= 24 MiB, and `moderate` if <= 48 MiB.
+   - **Proactive Optional Model Shedding**: When container headroom is under pressure, `MemoryGuard`, `DurableDocumentProcessor`, and `WorkloadScheduler` proactively unload optional cross-encoder reranking models (~60 MiB) and trigger `malloc_trim(0)`. Diagnostic checks (`/diag`) clean up cross-encoder models in `finally` blocks, preserving > 60 MiB of container headroom on Render.
 
 4. **Historical Data Reconciliation & Provenance Audit**:
    - Audited all 1,482 user records in Supabase:
@@ -65,11 +69,45 @@ All improvements adhere strictly to the $0 infrastructure budget constraint, lev
 | Raw Memory Headroom Calculation | Headroom accounts for raw cgroup usage in 512 MiB container | **PASS** | `test_raw_cgroup_headroom_critical_pressure` in `test_memory_guard_raw_safety.py` |
 | Heavy Workload Raw Guardrail | Blocks indexing when raw headroom < 25 MiB (~497 MiB raw usage) | **PASS** | `test_heavy_workload_rejected_when_raw_headroom_low` in `test_memory_guard_raw_safety.py` |
 | Interactive RAG Raw Guardrail | Blocks RAG queries when raw headroom < 12 MiB (<= 15 MiB) | **PASS** | `test_interactive_rag_rejected_when_raw_headroom_critical` in `test_memory_guard_raw_safety.py` |
-| Combined Backend Test Suite | All memory guard, durable processor, and scheduler tests pass | **PASS** | 27/27 passed in 8.46s |
+| Unit & Hardening Suite | All memory guard, durable processor, and scheduler tests pass | **PASS** | 77 passed, 4 skipped (dramatiq) in 11.61s |
+| Production CI/CD Workflow | GitHub Actions CI passes across backend, worker, and web | **PASS** | [CI Run 42096536829](https://github.com/karanagg166/search-sphere/actions/runs/42096536829) |
+| Live Render Deployment Check | Render runs commit `3a9dfb6c36af2c4daf53d273d7d308d51418aa8f` | **PASS** | `{"status":"ok","git_commit":"3a9dfb6c...","memory_mb":297.5,"pressure_level":"normal"}` |
+| Live RAG Post-Deploy Smoke | Full synthetic PDF upload, indexing, search, RAG, and purge | **PASS** | [Live Smoke Run 42097054938](https://github.com/karanagg166/search-sphere/actions/runs/42097054938) |
+| Zero Leakage DB Verification | No synthetic smoke fixtures or orphaned vectors remain | **PASS** | `SELECT COUNT(*) WHERE filename LIKE '%ci_smoke%'` = 0 |
 
 ---
 
-## 3. Historical Record Reconciliation Breakdown
+## 3. Live Production Smoke Evidence (GitHub Actions Run 42097054938)
+
+```text
+PASS Render deployment — healthy, commit 3a9dfb6c36af
+PASS Initial memory guard — 175.7 MiB, pressure=normal
+PASS Database readiness — real SELECT 1 via the deployed backend
+PASS Memory/scheduler endpoint — healthy scheduler contract and comprehensive memory telemetry
+PASS CORS preflight — production frontend authorized for POST /search
+PASS Vercel frontend — production page responds HTTP 200
+PASS Diagnostic probe — db=ok, fastembed=ok (384 dims, 1466.9ms), qdrant=ok (supabase, 0 chunks), cross_encoder=ok (TextCrossEncoder, score=-9.4523, 1471.1ms)
+PASS CI test authentication — acquired bearer token via login for ***
+PASS Document authorization — anonymous read blocked (401)
+PASS Search authorization — anonymous query blocked (401)
+PASS Token validation — forged bearer token rejected (401)
+PASS Tenant document isolation — unowned document access rejected with 404
+PASS Tenant search isolation — cross-tenant search leakage blocked
+PASS Document upload — uploaded synthetic document ee386e88-3aa
+PASS Document processing — status=indexed (2 chunks indexed)
+PASS Real semantic search — retrieved 1 chunks matching synthetic marker
+PASS Cross-encoder reranking verification — retrieved chunk rerank_score=9.01734447479248
+PASS Real grounded answer — generated answer citing test document: 'The unique CI verification code in the synthetic test docume...'
+PASS SSE answer streaming — received 26 streamed tokens through completion
+PASS Synthetic document cleanup — purged synthetic document ee386e88-3aa
+PASS Vector deletion verification — purged document vectors are no longer retrievable in search
+PASS Final memory guard — 402.0 MiB, pressure=moderate
+PASS Production smoke suite — all configured checks passed
+```
+
+---
+
+## 4. Historical Record Reconciliation Breakdown
 
 ### Account Inventory
 - **Real User Account**: `a353db5c-1b50-4549-8bf7-046d3e1adb26` (`aggarwalkaran241@gmail.com`)
@@ -88,25 +126,28 @@ All improvements adhere strictly to the $0 infrastructure budget constraint, lev
 
 ---
 
-## 4. Reproduction & Verification Commands
+## 5. Reproduction & Verification Commands
 
 ```bash
-# 1. Run all new safety hardening test suites
+# 1. Run all unit and hardening test suites
 PYTHONPATH=.:apps/api python3.14 -m pytest \
   apps/api/tests/test_ci_smoke_fixture_safety.py \
   apps/api/tests/test_durable_processor_recovery.py \
   apps/api/tests/test_memory_guard_raw_safety.py \
-  apps/api/tests/test_memory_guard_and_scheduler.py -v
+  apps/api/tests/test_memory_guard_and_scheduler.py \
+  apps/api/tests/test_backfill_cli_safety.py \
+  scripts/tests/test_monitor.py \
+  scripts/tests/test_ci_production_smoke.py -v
 
 # 2. Verify code quality and styling
 python3.14 -m ruff check \
   scripts/ci_production_smoke.py \
+  apps/api/src/main.py \
   apps/api/src/services/durable_processor.py \
   apps/api/src/services/memory_guard.py \
-  apps/api/tests/test_ci_smoke_fixture_safety.py \
-  apps/api/tests/test_durable_processor_recovery.py \
-  apps/api/tests/test_memory_guard_raw_safety.py
+  apps/api/src/services/workload_scheduler.py
 
-# 3. Safe audit-only run of the backfill CLI
-PYTHONPATH=apps/api python3.14 scripts/backfill_pgvector_chunks.py --limit 2
+# 3. Check live production health and memory headroom
+curl -s https://search-sphere-api.onrender.com/health | jq
+curl -s https://search-sphere-api.onrender.com/health/memory | jq
 ```
