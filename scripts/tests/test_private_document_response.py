@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
+from src.config import settings
 from src.services.document_access import private_document_response
+from src.storage.object_storage import SupabaseStorage
 
 
 def owned_document():
@@ -50,3 +52,13 @@ async def test_signing_failure_never_falls_back_to_a_public_link():
         await private_document_response(owned_document(), storage)
     assert error.value.status_code == 503
     assert "provider" not in error.value.detail
+
+
+def test_modern_server_only_storage_settings_take_precedence(monkeypatch):
+    monkeypatch.setattr(settings, "SUPABASE_URL", "https://synthetic.supabase.co")
+    monkeypatch.setattr(settings, "SUPABASE_SECRET_KEY", "synthetic-server-only-key")
+    monkeypatch.setattr(settings, "SUPABASE_SERVICE_ROLE_KEY", None)
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    storage = SupabaseStorage()
+    assert storage.base_url == "https://synthetic.supabase.co"
+    assert storage._headers()["apikey"] == "synthetic-server-only-key"

@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # Supabase & Object Storage
     NEXT_PUBLIC_SUPABASE_URL: str = ""
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: str = ""
+    SUPABASE_URL: str = ""
+    SUPABASE_PUBLISHABLE_KEY: str = ""
+    SUPABASE_SECRET_KEY: str | None = None
     SUPABASE_STORAGE_BUCKET: str = "documents"
     SUPABASE_SERVICE_ROLE_KEY: str | None = None
     STORAGE_BACKEND: str = "supabase"
@@ -203,7 +206,7 @@ class Settings(BaseSettings):
                     "Production configuration failure: STORAGE_BACKEND must be 'supabase' in production. "
                     "Ephemeral local storage causes data loss on container sleep/restart."
                 )
-            if self.STORAGE_BACKEND.lower() == "supabase" and not self.SUPABASE_SERVICE_ROLE_KEY:
+            if self.STORAGE_BACKEND.lower() == "supabase" and not (self.SUPABASE_SECRET_KEY or self.SUPABASE_SERVICE_ROLE_KEY):
                 raise ValueError(
                     "Production security failure: SUPABASE_SERVICE_ROLE_KEY must be configured in production "
                     "to prevent unauthorized downgrade to public/anon credentials for private document storage."

@@ -39,7 +39,7 @@ this is not evidence that checks can be skipped.
 | Three authenticated post-deploy journeys | Missing | Existing workflows smoke health/contracts; optional provider assertions and missing credentials can allow incomplete checks. Search Sphere run [42094111951](https://github.com/karanagg166/search-sphere/actions/runs/42094111951) failed: uploaded for 120s. |
 | Trusted release events, protected secrets, exact serving SHA | Partial | Search Sphere workflow_run checks main/success and checks out release SHA, smoke asserts health revision. Protected environment and all three mandatory journeys remain to implement/verify. |
 | Correct pagination, strict delete verification, physical cleanup | Partial | `scripts/ci_production_smoke.py` contains fixture manifest and cleanup, but sweep/deletion and interrupted-run persistence need repair. |
-| Native PDF layout and prose cleanup | Partial | PyMuPDF extraction retains pages, bounding boxes and text/image order (`processing/extraction/document_extractor.py`); cleaners and semantic chunking exist. Column ordering and exclusions need labeled fixtures. |
+| Native PDF layout and prose cleanup | Partial | PyMuPDF extraction uses bounding boxes for text/image order but discards coordinates from block data (`processing/extraction/document_extractor.py`); cleaners and semantic chunking exist. Column ordering and exclusions need labeled fixtures. |
 | Hosted image OCR/captioning | Superseded | Current `ocr_processor.py` / `image_captioner.py` use Tesseract/local models. Replace inference with eligible hosted providers; deterministic preprocessing can remain. |
 | Structured tables and charts | Missing | No dedicated persistent table/chart representation, verified-value handling, cross-page continuation or chart extraction contract. |
 | Hosted batched/versioned embeddings, hosted reranking | Superseded | `processing/embedding/dense_embedder.py`, `retrieval/reranker.py`, `processing/chunking/semantic_splitter.py` load local models. Production Dockerfile downloads weights. Preserve retrieval behavior via hosted APIs and bounded reindex/cutover. |
@@ -112,3 +112,28 @@ and pgvector migration tests. Executed verification:
 
 Append PR links, exact serving revisions and workflow runs as phases progress;
 do not convert pending checks to PASS.
+
+### Security follow-up and consumer delivery
+
+- Security PR [#30](https://github.com/karanagg166/search-sphere/pull/30) merged at
+  `5800fa9d7cb6feb6b268ad91844e94d830f3d82f`. Render `/health` verified that exact
+  revision. Main CI [42100955787](https://github.com/karanagg166/search-sphere/actions/runs/42100955787)
+  and existing standalone smoke [42101418248](https://github.com/karanagg166/search-sphere/actions/runs/42101418248)
+  passed. This existing smoke does not yet prove physical vector deletion or consumer journeys.
+- Migration 011 restricts the effective Data API to empty `pgrst_no_exposed_schemas`,
+  following the documented PostgreSQL configuration path. The platform toggle remains
+  inaccessible because Supabase OAuth registration rejects REST configuration scopes.
+- Eight security/configuration regression tests and fourteen native/medical document
+  Storage API tests passed against isolated PostgreSQL. No local model weights were needed.
+- Project OAuth now accesses the correct organization; its plan is verified `free`.
+  Available 23-hour log sources were enumerated using counts only. Historical misuse
+  has not been established; request metadata aggregation is still being reviewed.
+- Render deployment on commit is disabled. Release orchestration must explicitly wait
+  for pre-deploy CI before triggering the next backend revision.
+- Quick-Clinic [#160](https://github.com/karanagg166/Quick-Clinic/pull/160) and ExamArena
+  [#29](https://github.com/karanagg166/ExamArena/pull/29) preserve FAILED registration and
+  return 503 on status outages. Local focused suites: 63 and 39 passed respectively,
+  with type/lint checks. Both PRs are awaiting remaining CI jobs.
+- Provider selection is Cohere only, per user instruction. Authenticated model metadata
+  confirms embedding, reranking, text and vision availability. Trial/evaluation billing
+  status still needs confirmation; model inference budget is not verified yet.
