@@ -131,3 +131,22 @@ async def test_private_bucket_and_idempotency_preserve_other_buckets(db):
         SELECT EXISTS(SELECT 1 FROM pg_policies WHERE schemaname='storage'
             AND policyname='Public Access for documents')
     """)
+
+
+@pytest.mark.asyncio
+async def test_data_api_exposes_only_an_empty_schema(db):
+    if not await db.fetchval("SELECT 1 FROM pg_roles WHERE rolname='authenticator'"):
+        await db.execute("CREATE ROLE authenticator NOLOGIN")
+    sql = (
+        Path(__file__).parents[2] / "apps/api/alembic/sql/private_data_api_surface.sql"
+    ).read_text()
+    await db.execute(sql)
+    assert "pgrst.db_schemas=pgrst_no_exposed_schemas" in await db.fetchval(
+        "SELECT rolconfig FROM pg_roles WHERE rolname='authenticator'"
+    )
+    assert (
+        await db.fetchval(
+            "SELECT count(*) FROM pg_class WHERE relnamespace='pgrst_no_exposed_schemas'::regnamespace"
+        )
+        == 0
+    )

@@ -54,16 +54,16 @@ class SupabaseStorage(ObjectStorage):
         api_key: str | None = None,
         bucket: str | None = None,
     ):
-        self.base_url = (base_url or settings.NEXT_PUBLIC_SUPABASE_URL).rstrip("/")
+        self.base_url = (base_url or settings.SUPABASE_URL or settings.NEXT_PUBLIC_SUPABASE_URL).rstrip("/")
         # Authoritative private storage operations require the service-role key.
         # Reject silent downgrade to publishable/anon credentials in production.
-        service_key = settings.SUPABASE_SERVICE_ROLE_KEY or api_key
+        service_key = settings.SUPABASE_SECRET_KEY or settings.SUPABASE_SERVICE_ROLE_KEY or api_key
         if not service_key:
             if settings.ENVIRONMENT.lower() == "production":
                 raise RuntimeError(
                     "Missing SUPABASE_SERVICE_ROLE_KEY for private storage backend in production."
                 )
-            service_key = settings.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+            service_key = settings.SUPABASE_PUBLISHABLE_KEY or settings.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 
         self.api_key = service_key
         self.bucket = bucket or settings.SUPABASE_STORAGE_BUCKET
@@ -235,7 +235,8 @@ def get_object_storage() -> ObjectStorage:
     """Dependency provider returning the configured ObjectStorage backend."""
     backend = settings.STORAGE_BACKEND.lower()
     if backend == "supabase":
-        if not settings.NEXT_PUBLIC_SUPABASE_URL or "your-project" in settings.NEXT_PUBLIC_SUPABASE_URL:
+        storage_url = settings.SUPABASE_URL or settings.NEXT_PUBLIC_SUPABASE_URL
+        if not storage_url or "your-project" in storage_url:
             if settings.ENVIRONMENT.lower() != "production":
                 logger.info("Supabase URL not configured in non-production environment; falling back to LocalStorage.")
                 return LocalStorage()
