@@ -94,6 +94,11 @@ jobs:
           PYTHONPATH: "apps/api"
         run: pytest scripts/tests/test_ingestion_queue_postgres.py -v
 
+      - name: Verify hosted inference eligibility and bounded failures
+        env:
+          PYTHONPATH: "apps/api"
+        run: pytest scripts/tests/test_cohere_gateway.py -v
+
       - name: Run Monitor & Keep-Alive Safety Suite
         env:
           PYTHONPATH: "."

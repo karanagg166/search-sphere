@@ -8,6 +8,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     LOG_LEVEL: str = "INFO"
+    COHERE_TRIAL_KEY_SHA256: str = ""
+    COHERE_MONTHLY_CALL_LIMIT: int = 900
+    COHERE_APPROVED_DATA_CLASSIFICATIONS: list[str] = ["public", "synthetic"]
+    COHERE_SENSITIVE_APPROVAL_REF: str = ""
 
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./test.db"
