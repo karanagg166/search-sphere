@@ -40,3 +40,12 @@ def test_enqueue_document_handles_offline_queue_gracefully():
     ):
         result = enqueue_document("test-doc-uuid-456")
         assert result is False
+
+
+def test_enqueue_document_returns_false_when_broker_disabled(monkeypatch):
+    """Verify that enqueue_document returns False gracefully when process_document_task is None."""
+    import src.tasks.document_tasks as doc_tasks
+
+    monkeypatch.setattr(doc_tasks, "process_document_task", None)
+    result = doc_tasks.enqueue_document("test-doc-uuid-789")
+    assert result is False

@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://redis:6379/0"
 
     # RabbitMQ Queue & Worker
+    ENABLE_RABBITMQ: bool = False
     RABBITMQ_URL: str = "amqp://guest:guest@rabbitmq:5672/"
 
     # Frontend URL (for OAuth callbacks & CORS)
