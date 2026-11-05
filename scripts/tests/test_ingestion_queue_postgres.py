@@ -1,6 +1,7 @@
 """Concurrency and process-loss regressions against migrated PostgreSQL/pgvector."""
 
 import asyncio
+import hashlib
 import os
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -10,7 +11,11 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from src.config import settings
+from src.inference.policy import ProviderQuotaExceededError, ProviderRateLimitError
+from src.inference.usage import CohereUsageBudget
 from src.models.ingestion_job import IngestionJob
+from src.models.provider_usage import ProviderUsage
 from src.repositories.ingestion_queue import IngestionQueue
 
 
@@ -150,3 +155,57 @@ async def test_completed_job_rejects_stale_worker_mutations(queue):
     assert not await queue.fail(lease, "processing_failed", retryable=True)
     async with queue.sessions() as db:
         assert (await db.get(IngestionJob, job.id)).status == "SUCCEEDED"
+
+
+@pytest.mark.asyncio
+async def test_provider_quota_is_atomic_across_concurrent_workers_and_restarts(
+    queue, monkeypatch
+):
+    monkeypatch.setattr(settings, "COHERE_MONTHLY_CALL_LIMIT", 3)
+    key = "synthetic-budget-" + uuid.uuid4().hex
+    budget = CohereUsageBudget(queue.sessions)
+    outcomes = await asyncio.gather(
+        *(budget.reserve(key, "chat") for _ in range(8)), return_exceptions=True
+    )
+    assert sum(result is None for result in outcomes) == 3
+    assert (
+        sum(isinstance(result, ProviderQuotaExceededError) for result in outcomes) == 5
+    )
+    with pytest.raises(ProviderQuotaExceededError):
+        await CohereUsageBudget(queue.sessions).reserve(key, "chat")
+    async with queue.sessions() as db, db.begin():
+        await db.execute(
+            delete(ProviderUsage).where(
+                ProviderUsage.bucket.startswith(
+                    "cohere:" + hashlib.sha256(key.encode()).hexdigest()
+                )
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_rejection_does_not_consume_an_unsent_monthly_call(
+    queue, monkeypatch
+):
+    monkeypatch.setattr(settings, "COHERE_MONTHLY_CALL_LIMIT", 900)
+    key = "synthetic-rate-" + uuid.uuid4().hex
+    fingerprint = "cohere:" + hashlib.sha256(key.encode()).hexdigest()
+    outcomes = await asyncio.gather(
+        *(CohereUsageBudget(queue.sessions).reserve(key, "rerank") for _ in range(10)),
+        return_exceptions=True,
+    )
+    assert sum(result is None for result in outcomes) == 8
+    assert sum(isinstance(result, ProviderRateLimitError) for result in outcomes) == 2
+    async with queue.sessions() as db, db.begin():
+        used = (
+            await db.execute(
+                select(ProviderUsage.used).where(
+                    ProviderUsage.bucket.startswith(fingerprint),
+                    ProviderUsage.bucket.contains(":month:"),
+                )
+            )
+        ).scalar_one()
+        assert used == 8
+        await db.execute(
+            delete(ProviderUsage).where(ProviderUsage.bucket.startswith(fingerprint))
+        )

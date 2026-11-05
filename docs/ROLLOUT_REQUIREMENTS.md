@@ -82,7 +82,7 @@ this is not evidence that checks can be skipped.
 
 ## Rollout results
 
-Open. No repair PR merged yet. Production Alembic migration
+Initial security checkpoint (subsequent delivery results follow below): production Alembic migration
 `010_backend_data_api_lockdown` was applied successfully after isolated PostgreSQL 16
 and pgvector migration tests. Executed verification:
 
@@ -155,3 +155,35 @@ The user confirmed the configured Cohere key is a free trial key on 2026-11-06.
 Only Cohere is authorized for model inference. Published trial limits are 1,000
 API calls per month, with endpoint-specific rate limits. No paid fallback is allowed.
 Sensitive-data eligibility must be enforced independently of free-tier billing.
+
+### Current deployment and provider checkpoint
+
+- Security follow-up [#31](https://github.com/karanagg166/search-sphere/pull/31)
+  merged at `8288c9d0062fdf3de4b451b8e7b811c310027c36`; pinned Render deployment
+  `dep-dbmel3jl550s738ujl00` and `/health` confirm this exact revision. Migration 011
+  is applied. Backend table HEAD probes now return 404 through the empty Data API
+  surface; Auth and private Storage continue to operate.
+- Available 23-hour Data API metadata logs show HEAD requests, including successful
+  probes before containment and denial afterward. No GET/POST record retrieval was
+  observed in that window. This does not establish absence of historical access
+  outside the available window or prove who made requests. No contents were fetched.
+- Quick-Clinic #160 merged at `4ac08783d3366ae575cb1121e2bb450b2e15075b`;
+  [CI 42102041583](https://github.com/karanagg166/Quick-Clinic/actions/runs/42102041583)
+  passed, and Vercel production deployment `dpl_AacmgdgsJqRQB85HRiRVxLxJRZtQ`
+  reports that SHA and READY.
+- ExamArena #29 merged at `1f698d7f89a6a9c9d16f4b86996d14cfe10a0716`;
+  [CI 42102046560](https://github.com/karanagg166/ExamArena/actions/runs/42102046560)
+  passed, and Vercel production deployment `dpl_AunqTLgEgDBLP5fkw6A1tV4b12dC`
+  reports that SHA and READY. Live `/api/health` confirms the revision.
+- Queue foundation [#32](https://github.com/karanagg166/search-sphere/pull/32)
+  merged at `c140ea2d7b9c96fc16af48ba1a3dd34f654309a0`; PR
+  [CI 42106105000](https://github.com/karanagg166/search-sphere/actions/runs/42106105000)
+  passed. API/worker binding and production migration 012 remain pending.
+- Standalone smoke [42107881625](https://github.com/karanagg166/search-sphere/actions/runs/42107881625)
+  confirmed revision 8288c9d, then failed the initial memory guard at 429.3 MiB.
+  The hosted runtime/image repair is required; the guard has not been weakened.
+- Cohere-only public synthetic embedding, rerank, generation and vision checks passed.
+  [Provider evidence and limits](COHERE_INFERENCE.md) record timings, one recovered
+  timeout, trial budget enforcement and the independent sensitive-data restriction.
+- All three required authenticated synthetic release journeys, physical cleanup,
+  hosted-runtime capacity and full free-tier rollout verification remain OPEN.
