@@ -34,7 +34,7 @@ async def upload_document(
 ) -> DocumentResponse:
     service = DocumentService(db=db, storage=storage)
     document = await service.upload_document(file=file, user=current_user)
-    return await private_document_response(document, storage)
+    return DocumentResponse.model_validate(document)
 
 
 @router.get(
@@ -57,7 +57,7 @@ async def list_documents(
     )
     return DocumentListResponse(
         total=total,
-        documents=[await private_document_response(doc, storage) for doc in documents],
+        documents=[DocumentResponse.model_validate(doc) for doc in documents],
     )
 
 
@@ -97,7 +97,20 @@ async def get_document(
     document = await service.get_user_document(
         document_id=document_id, user_id=current_user.id
     )
-    return await private_document_response(document, storage)
+    return DocumentResponse.model_validate(document)
+
+
+@router.get("/{document_id}/access", summary="Get an authorized private document download")
+async def get_document_access(
+    document_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: ObjectStorage = Depends(get_object_storage),
+) -> dict[str, str | int]:
+    service = DocumentService(db=db, storage=storage)
+    document = await service.get_user_document(document_id=document_id, user_id=current_user.id)
+    response = await private_document_response(document, storage)
+    return {"url": response.file_url, "expires_in": 600}
 
 
 @router.delete(
@@ -133,4 +146,4 @@ async def reindex_document(
     doc = await service.get_user_document(document_id=document_id, user_id=current_user.id)
     await index_document_pipeline(document_id=doc.id)
     updated_doc = await service.get_user_document(document_id=document_id, user_id=current_user.id)
-    return await private_document_response(updated_doc, storage)
+    return DocumentResponse.model_validate(updated_doc)

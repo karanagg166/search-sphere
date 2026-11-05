@@ -6,7 +6,7 @@ import { FileText, ExternalLink, Trash2, Loader2, Database, AlertCircle } from "
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/auth-context";
 import { useBackendAvailability } from "@/context/backend-availability-context";
-import { fetchDocuments, deleteDocument, DocumentItem } from "@/lib/api";
+import { fetchDocuments, fetchDocumentAccessUrl, deleteDocument, DocumentItem } from "@/lib/api";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -19,6 +19,23 @@ export function DocumentList() {
   const { isWaking } = useBackendAvailability();
   const queryClient = useQueryClient();
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [openingDocument, setOpeningDocument] = useState(false);
+
+  async function openDocument(documentId: string) {
+    const tab = window.open("about:blank", "_blank");
+    if (tab) tab.opener = null;
+    setOpeningDocument(true);
+    try {
+      const url = await fetchDocumentAccessUrl(documentId);
+      if (tab) tab.location.replace(url);
+      else window.location.assign(url);
+    } catch {
+      tab?.close();
+      setDeleteError("Unable to open this document. Please try again.");
+    } finally {
+      setOpeningDocument(false);
+    }
+  }
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["documents"],
@@ -106,16 +123,16 @@ export function DocumentList() {
               </div>
 
               <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-                <a
-                  href={doc.file_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  type="button"
+                  onClick={() => openDocument(doc.id)}
+                  disabled={openingDocument}
                   className="h-8 px-2.5 rounded-md border border-border bg-background hover:bg-muted text-xs font-medium flex items-center gap-1.5 transition-colors"
                   title="View PDF"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
                   <span>View</span>
-                </a>
+                </button>
 
                 <Button
                   variant="ghost"
