@@ -488,11 +488,11 @@ def check_frontend() -> None:
     record("Vercel frontend", "production page responds HTTP 200")
 
 
-def acquire_ci_auth() -> tuple[str, str, str] | None:
+def acquire_ci_auth() -> tuple[str, str] | None:
     """Acquire a valid JWT bearer token for the CI test account."""
     direct_token = os.environ.get("PROD_SMOKE_BEARER_TOKEN", "").strip()
     if direct_token:
-        return direct_token, "", ""
+        return direct_token, ""
 
     email = os.environ.get("PROD_SMOKE_USER_EMAIL", "").strip()
     password = os.environ.get("PROD_SMOKE_USER_PASSWORD", "").strip()
@@ -506,7 +506,7 @@ def acquire_ci_auth() -> tuple[str, str, str] | None:
         token = str(res["access_token"])
         user_id = str(res.get("user", {}).get("id", ""))
         record("CI test authentication", f"acquired bearer token via login for {email}")
-        return token, user_id, email
+        return token, user_id
 
     # If user doesn't exist, try signup
     signup_payload = {"name": "CI Smoke Tester", "email": email, "password": password}
@@ -515,7 +515,7 @@ def acquire_ci_auth() -> tuple[str, str, str] | None:
         token = str(res["access_token"])
         user_id = str(res.get("user", {}).get("id", ""))
         record("CI test authentication", f"provisioned new test account and acquired token for {email}")
-        return token, user_id, email
+        return token, user_id
 
     fail("CI test authentication", f"login returned HTTP {status}: {res}")
     return None
@@ -770,7 +770,8 @@ def run_rag_suite() -> None:
         RESULTS.append("NOT RUN authenticated RAG verification (configure PROD_SMOKE_* credentials)")
         return
 
-    token, user_id, email = auth_info
+    token, user_id = auth_info
+    email = os.environ.get("PROD_SMOKE_USER_EMAIL", "").strip()
     ACTIVE_CI_TOKEN = token
     ACTIVE_CI_USER_ID = user_id
     ACTIVE_CI_EMAIL = email
