@@ -1,5 +1,6 @@
 import asyncio
 import time
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -38,7 +39,9 @@ class DurableDocumentProcessor:
     and single-job concurrency under 512 MiB memory limits.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, worker_id: str | None = None) -> None:
+        self.worker_id: str = worker_id or f"w_{uuid.uuid4().hex[:8]}"
+        self.heartbeat_interval: float = 20.0
         self._wake_event = asyncio.Event()
         self._running: bool = False
         self._worker_task: asyncio.Task | None = None
@@ -55,7 +58,7 @@ class DurableDocumentProcessor:
         if not self._running:
             self._running = True
             self._worker_task = asyncio.create_task(self._run_loop())
-            logger.info("DurableDocumentProcessor background worker started")
+            logger.info("DurableDocumentProcessor background worker started", worker_id=self.worker_id)
 
     async def stop(self) -> None:
         """Gracefully terminates background processing loop."""
@@ -68,15 +71,16 @@ class DurableDocumentProcessor:
             except asyncio.CancelledError:
                 pass
             self._worker_task = None
-        logger.info("DurableDocumentProcessor background worker stopped")
+        logger.info("DurableDocumentProcessor background worker stopped", worker_id=self.worker_id)
 
     async def _run_loop(self) -> None:
         """Sequential single-document background processing loop."""
         # Initial yield so Uvicorn binds port and answers readiness probes immediately
         await asyncio.sleep(2.0)
 
-        # 1. Recover stranded jobs from previous restart/crash immediately
-        await self.recover_stranded_jobs(force_all=True)
+        # 1. Recover stranded jobs from previous restart/crash safely (expired leases only)
+        # Avoid force_all=True so living workers during deployment handoffs are never stolen
+        await self.recover_stranded_jobs(force_all=False)
         self._last_recovery_time = time.monotonic()
 
         while self._running:
@@ -88,10 +92,10 @@ class DurableDocumentProcessor:
 
                 claimed_job = await self.claim_next_job()
                 if claimed_job:
-                    doc_id, storage_key, attempt = claimed_job
+                    doc_id, storage_key, attempt, lease_token = claimed_job
                     self._active_doc_id = doc_id
                     try:
-                        await self.process_job(doc_id, storage_key, attempt)
+                        await self.process_job(doc_id, storage_key, attempt, lease_token=lease_token)
                     finally:
                         self._active_doc_id = None
                         # Allow event loop and other requests to interleave smoothly
@@ -116,10 +120,10 @@ class DurableDocumentProcessor:
                 logger.warning("Unexpected error in durable processor loop", error=str(exc))
                 await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
-    async def claim_next_job(self) -> tuple[str, str, int] | None:
+    async def claim_next_job(self) -> tuple[str, str, int, str] | None:
         """
         Atomically claims one pending document for processing using optimistic locking.
-        Returns (doc_id, storage_key, attempt) if claimed, or None.
+        Returns (doc_id, storage_key, attempt, lease_token) if claimed, or None.
         """
         async with AsyncSessionLocal() as session:
             # 1. Select the oldest pending document
@@ -148,7 +152,12 @@ class DurableDocumentProcessor:
                     attempt = 1
 
             if attempt > MAX_INDEXING_RETRIES:
-                doc.status = "failed:max_retries_exceeded"
+                fail_stmt = (
+                    update(Document)
+                    .where(Document.id == doc.id, Document.status == doc.status)
+                    .values(status="failed:max_retries_exceeded", updated_at=datetime.now(UTC))
+                )
+                await session.execute(fail_stmt)
                 await session.commit()
                 logger.warning(
                     "Document exceeded max indexing retries; marked terminal failed",
@@ -157,8 +166,9 @@ class DurableDocumentProcessor:
                 )
                 return None
 
-            # 2. Atomic claim update
-            lease_token = f"proc:{int(time.time())}:{attempt}"
+            # 2. Atomic claim update with worker identity and lease expiration epoch
+            expires_epoch = int(time.time() + LEASE_TIMEOUT_SECONDS)
+            lease_token = f"proc:{self.worker_id}:{expires_epoch}:{attempt}"
             old_status = doc.status
             update_stmt = (
                 update(Document)
@@ -174,19 +184,130 @@ class DurableDocumentProcessor:
                     document_id=doc.id,
                     lease=lease_token,
                     attempt=attempt,
+                    worker_id=self.worker_id,
                 )
-                return (doc.id, doc.storage_key, attempt)
+                return (doc.id, doc.storage_key, attempt, lease_token)
 
             return None
 
-    async def process_job(self, document_id: str, storage_key: str, attempt: int) -> bool:
+    async def complete_job(self, document_id: str, chunk_count: int, expected_lease: str) -> bool:
+        """Atomically marks a job indexed only if this worker still holds the lease."""
+        try:
+            async with AsyncSessionLocal() as session:
+                stmt = (
+                    update(Document)
+                    .where(Document.id == document_id, Document.status == expected_lease)
+                    .values(
+                        status="indexed",
+                        chunk_count=chunk_count,
+                        updated_at=datetime.now(UTC),
+                    )
+                )
+                res = await session.execute(stmt)
+                await session.commit()
+                if res.rowcount != 0:
+                    logger.info("Document successfully marked as indexed", document_id=document_id)
+                    return True
+                logger.warning(
+                    "Stale worker prevented from overwriting document status",
+                    document_id=document_id,
+                    worker_id=self.worker_id,
+                    lease=expected_lease,
+                )
+                return False
+        except Exception as exc:
+            logger.error("Failed to atomically complete document job", error=str(exc))
+            return False
+
+    async def heartbeat(self, document_id: str, current_lease: str, attempt: int) -> str | None:
         """
-        Executes full multimodal extraction, chunking, embedding, and Qdrant synchronization
-        under memory-aware scheduler guardrails.
+        Extends lease expiration in PostgreSQL using compare-and-set.
+        Returns the new lease token, or None if the lease was lost or stolen.
         """
-        logger.info("Executing durable document processing", document_id=document_id, attempt=attempt)
+        new_expires = int(time.time() + LEASE_TIMEOUT_SECONDS)
+        new_lease = f"proc:{self.worker_id}:{new_expires}:{attempt}"
+        try:
+            async with AsyncSessionLocal() as session:
+                stmt = (
+                    update(Document)
+                    .where(Document.id == document_id, Document.status == current_lease)
+                    .values(status=new_lease, updated_at=datetime.now(UTC))
+                )
+                res = await session.execute(stmt)
+                await session.commit()
+                if res.rowcount != 0:
+                    return new_lease
+                logger.warning(
+                    "Heartbeat lease extension failed: lease no longer held",
+                    document_id=document_id,
+                    current_lease=current_lease,
+                    worker_id=self.worker_id,
+                )
+                return None
+        except Exception as exc:
+            logger.warning("Heartbeat DB error", error=str(exc))
+            return None
+
+    async def _run_heartbeat(
+        self,
+        document_id: str,
+        initial_lease: str,
+        attempt: int,
+        stop_event: asyncio.Event,
+        lease_holder: list[str],
+        cancelled_event: asyncio.Event,
+    ) -> None:
+        """Periodically refreshes PostgreSQL lease to prove worker liveness."""
+        while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=self.heartbeat_interval)
+                break
+            except TimeoutError:
+                if stop_event.is_set():
+                    break
+                current_token = lease_holder[0]
+                new_token = await self.heartbeat(document_id, current_token, attempt)
+                if new_token:
+                    lease_holder[0] = new_token
+                else:
+                    cancelled_event.set()
+                    break
+
+    async def process_job(
+        self,
+        document_id: str,
+        storage_key: str,
+        attempt: int,
+        lease_token: str | None = None,
+    ) -> bool:
+        """
+        Executes full multimodal extraction, chunking, embedding, and vector synchronization
+        under memory-aware scheduler guardrails and distributed lease protection.
+        """
+        current_lease = lease_token or f"proc:{self.worker_id}:{int(time.time() + LEASE_TIMEOUT_SECONDS)}:{attempt}"
+        logger.info(
+            "Executing durable document processing",
+            document_id=document_id,
+            attempt=attempt,
+            worker_id=self.worker_id,
+            lease=current_lease,
+        )
         storage = get_object_storage()
         vector_store = None
+
+        stop_heartbeat = asyncio.Event()
+        lease_cancelled = asyncio.Event()
+        lease_holder = [current_lease]
+        heartbeat_task = asyncio.create_task(
+            self._run_heartbeat(
+                document_id,
+                current_lease,
+                attempt,
+                stop_heartbeat,
+                lease_holder,
+                lease_cancelled,
+            )
+        )
 
         try:
             async with workload_scheduler.heavy_job_scope():
@@ -205,6 +326,7 @@ class DurableDocumentProcessor:
                         attempt,
                         failure_status="failed:missing_storage_file",
                         error_msg=f"Storage object not found: {dl_err}",
+                        expected_lease=lease_holder[0],
                     )
                     return False
 
@@ -214,7 +336,12 @@ class DurableDocumentProcessor:
                         attempt,
                         failure_status="failed:missing_storage_file",
                         error_msg="Downloaded storage bytes are empty.",
+                        expected_lease=lease_holder[0],
                     )
+                    return False
+
+                if lease_cancelled.is_set():
+                    logger.warning("Lease cancelled before extraction; aborting job", document_id=document_id)
                     return False
 
                 # Step 2: Multimodal PDF text and image extraction
@@ -228,6 +355,7 @@ class DurableDocumentProcessor:
                         attempt,
                         failure_status="failed:corrupted_pdf",
                         error_msg=str(ext_err),
+                        expected_lease=lease_holder[0],
                     )
                     return False
 
@@ -245,6 +373,10 @@ class DurableDocumentProcessor:
                 chunk_count = len(chunked_doc.chunks)
                 del cleaned_doc
 
+                if lease_cancelled.is_set():
+                    logger.warning("Lease cancelled before embedding; aborting job", document_id=document_id)
+                    return False
+
                 if chunk_count > 0:
                     # Step 5: Dense embeddings (bounded batching)
                     embedder = DenseEmbedder()
@@ -254,7 +386,11 @@ class DurableDocumentProcessor:
                     sparse_embedder = BM25Embedder()
                     sparse_vectors = await asyncio.to_thread(sparse_embedder.embed_chunks, chunked_doc.chunks)
 
-                    # Step 7: Vector index synchronization
+                    if lease_cancelled.is_set():
+                        logger.warning("Lease cancelled before vector store write; aborting job", document_id=document_id)
+                        return False
+
+                    # Step 7: Vector index synchronization (idempotent: cleans up previous chunks first)
                     vector_store = get_vector_store(sparse_embedder=sparse_embedder)
                     points_written = await vector_store.index_document(
                         document_id=document_id,
@@ -267,21 +403,9 @@ class DurableDocumentProcessor:
                         points=points_written,
                     )
 
-                # Step 8: Atomically update DB record to 'indexed'
-                async with AsyncSessionLocal() as session:
-                    await session.execute(
-                        update(Document)
-                        .where(Document.id == document_id)
-                        .values(
-                            status="indexed",
-                            chunk_count=chunk_count,
-                            updated_at=datetime.now(UTC),
-                        )
-                    )
-                    await session.commit()
-
-                logger.info("Document successfully marked as indexed", document_id=document_id)
-                return True
+                # Step 8: Atomically update DB record to 'indexed' using CAS against current lease
+                success = await self.complete_job(document_id, chunk_count, expected_lease=lease_holder[0])
+                return success
 
         except Exception as exc:
             logger.exception("Error during document indexing execution", document_id=document_id, error=str(exc))
@@ -290,10 +414,16 @@ class DurableDocumentProcessor:
                 attempt,
                 failure_status=f"uploaded:retry:{attempt + 1}" if attempt < MAX_INDEXING_RETRIES else "failed:max_retries_exceeded",
                 error_msg=str(exc),
+                expected_lease=lease_holder[0],
             )
             return False
 
         finally:
+            stop_heartbeat.set()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
             if vector_store is not None:
                 try:
                     await vector_store.close()
@@ -307,16 +437,25 @@ class DurableDocumentProcessor:
         attempt: int,
         failure_status: str,
         error_msg: str,
-    ) -> None:
+        expected_lease: str | None = None,
+    ) -> bool:
         """Persists retry or terminal failure state atomically in PostgreSQL."""
         try:
             async with AsyncSessionLocal() as session:
-                await session.execute(
-                    update(Document)
-                    .where(Document.id == document_id)
-                    .values(status=failure_status, updated_at=datetime.now(UTC))
-                )
+                stmt = update(Document).where(Document.id == document_id)
+                if expected_lease:
+                    stmt = stmt.where(Document.status == expected_lease)
+                stmt = stmt.values(status=failure_status, updated_at=datetime.now(UTC))
+                res = await session.execute(stmt)
                 await session.commit()
+                if expected_lease and res.rowcount == 0:
+                    logger.warning(
+                        "Stale worker prevented from marking failure on lost lease",
+                        document_id=document_id,
+                        worker_id=self.worker_id,
+                        expected_lease=expected_lease,
+                    )
+                    return False
             logger.warning(
                 "Document state updated on failure",
                 document_id=document_id,
@@ -324,16 +463,21 @@ class DurableDocumentProcessor:
                 attempt=attempt,
                 error=error_msg,
             )
+            return True
         except Exception as db_err:
             logger.error("Failed to update document status in database", error=str(db_err))
+            return False
 
     async def recover_stranded_jobs(self, force_all: bool = False) -> list[str]:
         """
         Durably recovers documents stranded in 'proc:%' or 'processing:%' state
         from container restarts, OOM crashes, or deploy interruptions.
-        If force_all=True, recovers any active lease immediately (safe on container startup).
-        Otherwise recovers only leases older than LEASE_TIMEOUT_SECONDS.
+        Uses Compare-and-Set updates to ensure multiple concurrent workers cannot race.
+        If force_all=False, recovers ONLY leases whose expiration epoch has passed
+        or whose updated_at exceeds LEASE_TIMEOUT_SECONDS, safely preserving active work
+        during rolling deployments and handoffs.
         """
+        now_epoch = int(time.time())
         cutoff = datetime.now(UTC) - timedelta(seconds=LEASE_TIMEOUT_SECONDS)
         recovered_ids: list[str] = []
 
@@ -343,43 +487,81 @@ class DurableDocumentProcessor:
                     Document.status.like("proc:%"),
                     Document.status.like("processing%"),
                 )
-                if not force_all:
-                    stmt = select(Document).where(base_filter, Document.updated_at < cutoff)
-                else:
-                    stmt = select(Document).where(base_filter)
+                stmt = select(Document).where(base_filter)
                 result = await session.execute(stmt)
                 stale_docs = result.scalars().all()
 
                 for doc in stale_docs:
-                    attempt = 1
                     parts = doc.status.split(":")
-                    if len(parts) >= 3 and parts[-1].isdigit():
-                        attempt = int(parts[-1])
+                    attempt = 1
+                    is_expired = force_all
 
+                    if len(parts) >= 4 and parts[2].isdigit():
+                        # proc:{worker_id}:{expires_epoch}:{attempt}
+                        expires_epoch = int(parts[2])
+                        if parts[3].isdigit():
+                            attempt = int(parts[3])
+                        if not force_all:
+                            is_expired = (now_epoch >= expires_epoch)
+                    elif len(parts) >= 3 and parts[1].isdigit():
+                        # legacy proc:{epoch}:{attempt}
+                        created_epoch = int(parts[1])
+                        if parts[2].isdigit():
+                            attempt = int(parts[2])
+                        if not force_all:
+                            is_expired = ((now_epoch - created_epoch) >= LEASE_TIMEOUT_SECONDS)
+                    else:
+                        # Legacy arbitrary token or processing%
+                        if len(parts) >= 2 and parts[-1].isdigit():
+                            attempt = int(parts[-1])
+                        if not force_all:
+                            doc_updated_at = getattr(doc, "updated_at", None)
+                            if isinstance(doc_updated_at, datetime):
+                                is_expired = (doc_updated_at < cutoff)
+                            else:
+                                is_expired = True
+
+                    if not is_expired:
+                        continue
+
+                    # Expired lease: atomically reclaim using CAS
                     if attempt >= MAX_INDEXING_RETRIES:
-                        doc.status = "failed:max_retries_exceeded"
-                        logger.error(
-                            "Stranded document exceeded max retries across restarts; marked terminal failed",
-                            document_id=doc.id,
-                            attempts=attempt,
-                        )
+                        next_status = "failed:max_retries_exceeded"
                     else:
                         next_attempt = attempt + 1
-                        doc.status = f"uploaded:retry:{next_attempt}"
-                        logger.warning(
-                            "Requeued stranded document lease after container restart/timeout",
-                            document_id=doc.id,
-                            next_attempt=next_attempt,
-                        )
-                        recovered_ids.append(doc.id)
+                        next_status = f"uploaded:retry:{next_attempt}"
+
+                    update_stmt = (
+                        update(Document)
+                        .where(Document.id == doc.id, Document.status == doc.status)
+                        .values(status=next_status, updated_at=datetime.now(UTC))
+                    )
+                    update_res = await session.execute(update_stmt)
+                    if update_res.rowcount != 0:
+                        doc.status = next_status
+                        if next_status != "failed:max_retries_exceeded":
+                            recovered_ids.append(doc.id)
+                            logger.warning(
+                                "Requeued expired document lease using atomic CAS",
+                                document_id=doc.id,
+                                previous_status=doc.status,
+                                next_attempt=attempt + 1,
+                            )
+                        else:
+                            logger.error(
+                                "Expired document exceeded max retries across restarts; marked terminal failed",
+                                document_id=doc.id,
+                                attempts=attempt,
+                            )
 
                 if stale_docs:
                     await session.commit()
-                    logger.info(
-                        "Stranded document recovery completed",
-                        total_stranded=len(stale_docs),
-                        requeued=len(recovered_ids),
-                    )
+                    if recovered_ids:
+                        logger.info(
+                            "Stranded document recovery completed",
+                            total_stranded=len(stale_docs),
+                            requeued=len(recovered_ids),
+                        )
 
         except Exception as exc:
             logger.warning("Error recovering stranded documents", error=str(exc))
@@ -390,9 +572,11 @@ class DurableDocumentProcessor:
         """Provides status metadata for diagnostics and monitoring."""
         return {
             "worker_running": self._running,
+            "worker_id": self.worker_id,
             "active_doc_id": self._active_doc_id,
             "max_retries": MAX_INDEXING_RETRIES,
             "lease_timeout_sec": LEASE_TIMEOUT_SECONDS,
+            "heartbeat_interval_sec": self.heartbeat_interval,
         }
 
 

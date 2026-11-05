@@ -247,30 +247,34 @@ class MemoryGuard:
     def get_pressure_level(self, force_refresh: bool = False) -> str:
         """
         Categorizes system memory pressure using conservative container headroom:
-        - 'critical': working set >= 460 MiB or conservative used >= 475 MiB or safe headroom <= 20 MiB
-        - 'high': working set >= 435 MiB or conservative used >= 450 MiB or safe headroom <= 35 MiB
-        - 'moderate': working set >= 370 MiB or conservative used >= 370 MiB or safe headroom <= 110 MiB
-        - 'normal': Below 370 MiB with ample safe container headroom (> 110 MiB)
+        - 'critical': working set >= 460 MiB, conservative used >= 475 MiB, safe headroom <= 20 MiB, or raw container headroom <= 16 MiB
+        - 'high': working set >= 435 MiB, conservative used >= 450 MiB, safe headroom <= 35 MiB, or raw container headroom <= 28 MiB
+        - 'moderate': working set >= 370 MiB, conservative used >= 370 MiB, safe headroom <= 110 MiB, or raw container headroom <= 64 MiB
+        - 'normal': Below 370 MiB with ample safe container headroom (> 110 MiB) and ample raw container headroom (> 64 MiB)
         """
         mem_mb = self.get_current_memory_mb(force_refresh=force_refresh)
-        _, _, safe_headroom, conservative_used = self._get_headroom_snapshot()
+        raw_mb, _, safe_headroom, conservative_used = self._get_headroom_snapshot()
+        container_headroom = max(0.0, self.platform_limit_mb - raw_mb)
 
         if (
             mem_mb >= CRITICAL_THRESHOLD_MB
             or conservative_used >= 475.0
             or safe_headroom <= 20.0
+            or container_headroom <= 16.0
         ):
             level = "critical"
         elif (
             mem_mb >= 435.0
             or conservative_used >= 450.0
             or safe_headroom <= 35.0
+            or container_headroom <= 28.0
         ):
             level = "high"
         elif (
             mem_mb >= MODERATE_THRESHOLD_MB
             or conservative_used >= 370.0
             or safe_headroom <= 110.0
+            or container_headroom <= 64.0
         ):
             level = "moderate"
         else:
@@ -282,7 +286,9 @@ class MemoryGuard:
                 previous_level=self._last_logged_pressure,
                 current_level=level,
                 current_memory_mb=round(mem_mb, 1),
+                raw_cgroup_mb=round(raw_mb, 1),
                 platform_limit_mb=round(self.platform_limit_mb, 1),
+                container_headroom_mb=round(container_headroom, 1),
                 safe_headroom_mb=round(safe_headroom, 1),
             )
             self._last_logged_pressure = level
@@ -290,25 +296,36 @@ class MemoryGuard:
         return level
 
     def is_heavy_workload_allowed(self) -> bool:
-        """Returns True if actual container headroom permits launching a heavy background task (indexing, extraction)."""
+        """
+        Returns True if actual container headroom permits launching a heavy background task (indexing, extraction).
+        Requires BOTH safe headroom >= 30 MiB AND raw unallocated container headroom >= 25 MiB,
+        preventing new heavy workloads at ~497 MiB raw usage even if estimated reclaimable page cache appears available.
+        """
         if self.bypass_in_test and getattr(settings, "ENVIRONMENT", "").lower() in ("test", "testing", "ci"):
             return True
         pressure = self.get_pressure_level()
         if pressure in ("high", "critical"):
             return False
-        # Conservative check: require at least 30 MiB of safe container headroom
-        _, _, safe_headroom, _ = self._get_headroom_snapshot()
+        raw_mb, _, safe_headroom, _ = self._get_headroom_snapshot()
+        raw_headroom = max(0.0, self.platform_limit_mb - raw_mb)
+        if raw_headroom < 25.0:
+            return False
         return safe_headroom >= 30.0
 
     def is_interactive_rag_allowed(self) -> bool:
-        """Returns True if memory headroom permits serving an interactive RAG query."""
+        """
+        Returns True if memory headroom permits serving an interactive RAG query.
+        Requires safe headroom >= 15 MiB and raw container headroom >= 12 MiB under non-critical pressure.
+        """
         if self.bypass_in_test and getattr(settings, "ENVIRONMENT", "").lower() in ("test", "testing", "ci"):
             return True
         pressure = self.get_pressure_level()
         if pressure == "critical":
             return False
-        # Conservative check: require at least 15 MiB of safe container headroom
-        _, _, safe_headroom, _ = self._get_headroom_snapshot()
+        raw_mb, _, safe_headroom, _ = self._get_headroom_snapshot()
+        raw_headroom = max(0.0, self.platform_limit_mb - raw_mb)
+        if raw_headroom < 12.0:
+            return False
         return safe_headroom >= 15.0
 
     def get_metrics(self, force_refresh: bool = False) -> dict[str, Any]:
