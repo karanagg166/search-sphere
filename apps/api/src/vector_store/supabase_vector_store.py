@@ -4,6 +4,7 @@ from typing import Any
 
 import structlog
 from sqlalchemy import delete, func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
 from src.db import AsyncSessionLocal, engine
@@ -217,35 +218,31 @@ class SupabaseVectorStore:
         document: EmbeddedDocument,
         sparse_vectors: list[SparseVector] | None = None,
         extra_payload: dict[str, Any] | None = None,
+        session: AsyncSession | None = None,
     ) -> int:
         """
         Synchronize PostgreSQL document_chunks table with an EmbeddedDocument.
 
         Steps:
         1. Ensure table exists.
-        2. Delete any existing chunks for this document (prevent stale chunks on retry).
-        3. Convert EmbeddedChunks to DocumentChunk ORM rows with deterministic UUID point_ids.
-        4. Batch insert chunks into PostgreSQL.
-        5. Atomically update documents.chunk_count if matching document exists.
+        2. Prepare replacement rows with deterministic scoped point IDs.
+        3. Serialize deliveries for the same client/tenant/document identity.
+        4. Delete old chunks and insert replacements in one transaction.
+        5. Update native document telemetry in that same transaction.
         6. Return total chunks written.
         """
-        await self.ensure_collection()
+        if session is None:
+            await self.ensure_collection()
 
-        # 1. Clean up existing chunks for this document scope
-        filters = {}
-        if extra_payload and extra_payload.get("client_id"):
-            filters = {k: extra_payload[k] for k in ("client_id", "tenant_id") if k in extra_payload}
-            await self.delete_document_points(document_id, filters=filters)
-        else:
-            await self.delete_document_points(document_id)
-
-        if not document.chunks:
-            logger.info("Document has no chunks to index; cleaned up existing points", document_id=document_id)
-            return 0
+        external = bool(extra_payload and extra_payload.get("client_id"))
+        if external and not extra_payload.get("tenant_id"):
+            raise SupabaseVectorStoreError("External indexing requires a tenant scope.")
+        if extra_payload and extra_payload.get("source_system") and not external:
+            raise SupabaseVectorStoreError("External indexing requires a client scope.")
 
         total_chunks = len(document.chunks)
         identity = document_id
-        if extra_payload and extra_payload.get("client_id"):
+        if external:
             identity = json.dumps([extra_payload["client_id"], extra_payload.get("tenant_id"), document_id], separators=(",", ":"))
 
         chunks_to_insert: list[DocumentChunk] = []
@@ -295,18 +292,13 @@ class SupabaseVectorStore:
             chunks_to_insert.append(row)
 
         try:
-            async with self.session_factory() as session:
-                session.add_all(chunks_to_insert)
-
-                # Update document chunk_count telemetry if parent document exists
-                doc_res = await session.execute(
-                    select(Document).where(Document.id == document_id)
-                )
-                parent_doc = doc_res.scalar_one_or_none()
-                if parent_doc:
-                    parent_doc.chunk_count = total_chunks
-
-                await session.commit()
+            if session is not None:
+                # The caller holds the job lease and commits vectors, content and status
+                # together. Never commit a caller-owned transaction here.
+                await self._replace_chunks(session, document_id, identity, chunks_to_insert, extra_payload)
+            else:
+                async with self.session_factory() as owned, owned.begin():
+                    await self._replace_chunks(owned, document_id, identity, chunks_to_insert, extra_payload)
 
             logger.info(
                 "Document chunks successfully indexed in Supabase pgvector",
@@ -316,10 +308,42 @@ class SupabaseVectorStore:
             return total_chunks
 
         except Exception as exc:
-            logger.exception("Failed to insert document chunks into Supabase pgvector", document_id=document_id, error=str(exc))
+            logger.error("Document indexing transaction failed", document_id=document_id, error_type=type(exc).__name__)
             raise SupabaseVectorStoreError(
-                f"Failed to index document '{document_id}' into pgvector: {exc}"
-            ) from exc
+                "Document indexing transaction failed."
+            ) from None
+
+    async def _replace_chunks(
+        self,
+        session: AsyncSession,
+        document_id: str,
+        identity: str,
+        rows: list[DocumentChunk],
+        payload: dict[str, Any] | None,
+    ) -> None:
+        if session.get_bind().dialect.name == "postgresql":
+            # Serializes concurrent deliveries even when no native parent row exists.
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:identity, 0))"),
+                {"identity": identity},
+            )
+        deletion = delete(DocumentChunk).where(DocumentChunk.document_id == document_id)
+        if payload and payload.get("client_id"):
+            deletion = deletion.where(
+                DocumentChunk.client_id == payload["client_id"],
+                DocumentChunk.tenant_id == payload["tenant_id"],
+            )
+        else:
+            deletion = deletion.where(
+                DocumentChunk.client_id.is_(None), DocumentChunk.source_system.is_(None)
+            )
+            parent = await session.get(Document, document_id)
+            if parent is not None:
+                parent.chunk_count = len(rows)
+        await session.execute(deletion)
+        session.add_all(rows)
+        # Force validation/insertion before reporting success, including caller sessions.
+        await session.flush()
 
     async def delete_document_points(
         self,
