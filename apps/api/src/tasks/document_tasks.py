@@ -14,6 +14,8 @@ process_generic_document_task = None
 def _is_rabbitmq_enabled() -> bool:
     if getattr(settings, "ENABLE_RABBITMQ", False):
         return True
+    if getattr(settings, "ENVIRONMENT", "").lower() == "test":
+        return True
     url = getattr(settings, "RABBITMQ_URL", "")
     # If explicitly set to an external or custom URL (not the default docker placeholder)
     if url and "rabbitmq:5672" not in url and "localhost:5672" not in url:
