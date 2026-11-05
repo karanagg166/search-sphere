@@ -96,6 +96,11 @@ describe("End-to-End Cold-Start Recovery Lifecycle", () => {
     };
 
     let docFetchCalls = 0;
+    const accessUrl = "https://storage/signed?token=synthetic";
+    const accessSpy = vi.spyOn(api, "fetchDocumentAccessUrl").mockResolvedValue(accessUrl);
+    const replaceLocation = vi.fn();
+    const privateTab = { opener: {}, location: { replace: replaceLocation }, close: vi.fn() };
+    vi.spyOn(window, "open").mockReturnValue(privateTab as unknown as Window);
     vi.spyOn(api, "fetchDocuments").mockImplementation(async () => {
       docFetchCalls++;
       if (healthAttempts === 1) {
@@ -154,6 +159,12 @@ describe("End-to-End Cold-Start Recovery Lifecycle", () => {
     expect(screen.getByText(/Stored Documents \(2\)/i)).toBeDefined();
     expect(screen.getByText("Architecture.pdf")).toBeDefined();
     expect(screen.getByText("Report.pdf")).toBeDefined();
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole("button", { name: "View" })[0]);
+    });
+    expect(accessSpy).toHaveBeenCalledWith("doc-1");
+    expect(replaceLocation).toHaveBeenCalledWith(accessUrl);
+    expect(privateTab.opener).toBeNull();
   });
 
   it("protects document upload during cold start by preventing premature non-idempotent submissions", async () => {

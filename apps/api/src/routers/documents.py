@@ -6,6 +6,7 @@ from src.models.user import User
 from src.schemas.document import DocumentListResponse, DocumentResponse
 from src.security.jwt import get_current_user
 from src.security.rate_limiter import rate_limiter
+from src.services.document_access import private_document_response
 from src.services.document_indexer import (
     audit_and_recover_missing_vectors,
     index_document_pipeline,
@@ -97,6 +98,19 @@ async def get_document(
         document_id=document_id, user_id=current_user.id
     )
     return DocumentResponse.model_validate(document)
+
+
+@router.get("/{document_id}/access", summary="Get an authorized private document download")
+async def get_document_access(
+    document_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: ObjectStorage = Depends(get_object_storage),
+) -> dict[str, str | int]:
+    service = DocumentService(db=db, storage=storage)
+    document = await service.get_user_document(document_id=document_id, user_id=current_user.id)
+    response = await private_document_response(document, storage)
+    return {"url": response.file_url, "expires_in": 600}
 
 
 @router.delete(

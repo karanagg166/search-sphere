@@ -165,6 +165,13 @@ export async function fetchDocuments(): Promise<DocumentListResponse> {
   return response.data;
 }
 
+export async function fetchDocumentAccessUrl(documentId: string): Promise<string> {
+  const response = await apiClient.get<{ url: string }>(
+    `/documents/${encodeURIComponent(documentId)}/access`,
+  );
+  return response.data.url;
+}
+
 export async function deleteDocument(documentId: string): Promise<void> {
   await apiClient.delete(`/documents/${documentId}`);
 }
