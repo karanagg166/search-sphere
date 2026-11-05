@@ -105,18 +105,18 @@ class TestMemoryGuard:
             assert guard.is_heavy_workload_allowed() is True
 
         # Case 2: Genuinely exhausted container where inactive cache cannot provide sufficient headroom
-        # Raw 495 MiB, only 20 MiB inactive cache -> safe headroom = 17 + 14 = 31 MiB (< 35 MiB) -> Rejected
+        # Raw 495 MiB, only 15 MiB inactive cache -> safe headroom = 17 + 10.5 = 27.5 MiB (< 30 MiB) -> Rejected
         snapshot_exhausted = {
             "raw_cgroup_mb": 495.0,
-            "inactive_file_mb": 20.0,
-            "estimated_working_set_mb": 475.0,
+            "inactive_file_mb": 15.0,
+            "estimated_working_set_mb": 480.0,
             "process_rss_mb": 450.0,
         }
         with patch.object(guard, "_read_memory_snapshot", return_value=snapshot_exhausted):
             guard.invalidate_cache()
             metrics = guard.get_metrics()
             assert metrics["raw_cgroup_mb"] == 495.0
-            assert metrics["safe_headroom_mb"] == 31.0
+            assert metrics["safe_headroom_mb"] == 27.5
             assert guard.is_heavy_workload_allowed() is False
 
     @pytest.mark.parametrize(

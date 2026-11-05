@@ -247,8 +247,8 @@ class MemoryGuard:
     def get_pressure_level(self, force_refresh: bool = False) -> str:
         """
         Categorizes system memory pressure using conservative container headroom:
-        - 'critical': working set >= 460 MiB or conservative used >= 465 MiB or safe headroom <= 25 MiB
-        - 'high': working set >= 425 MiB or conservative used >= 430 MiB or safe headroom <= 45 MiB
+        - 'critical': working set >= 460 MiB or conservative used >= 475 MiB or safe headroom <= 20 MiB
+        - 'high': working set >= 435 MiB or conservative used >= 450 MiB or safe headroom <= 35 MiB
         - 'moderate': working set >= 370 MiB or conservative used >= 370 MiB or safe headroom <= 110 MiB
         - 'normal': Below 370 MiB with ample safe container headroom (> 110 MiB)
         """
@@ -257,14 +257,14 @@ class MemoryGuard:
 
         if (
             mem_mb >= CRITICAL_THRESHOLD_MB
-            or conservative_used >= 465.0
-            or safe_headroom <= 25.0
+            or conservative_used >= 475.0
+            or safe_headroom <= 20.0
         ):
             level = "critical"
         elif (
-            mem_mb >= HIGH_THRESHOLD_MB
-            or conservative_used >= 430.0
-            or safe_headroom <= 45.0
+            mem_mb >= 435.0
+            or conservative_used >= 450.0
+            or safe_headroom <= 35.0
         ):
             level = "high"
         elif (
@@ -296,9 +296,9 @@ class MemoryGuard:
         pressure = self.get_pressure_level()
         if pressure in ("high", "critical"):
             return False
-        # Conservative check: require at least 35 MiB of safe container headroom
+        # Conservative check: require at least 30 MiB of safe container headroom
         _, _, safe_headroom, _ = self._get_headroom_snapshot()
-        return safe_headroom >= 35.0
+        return safe_headroom >= 30.0
 
     def is_interactive_rag_allowed(self) -> bool:
         """Returns True if memory headroom permits serving an interactive RAG query."""
