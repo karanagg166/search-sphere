@@ -187,3 +187,18 @@ Sensitive-data eligibility must be enforced independently of free-tier billing.
   timeout, trial budget enforcement and the independent sensitive-data restriction.
 - All three required authenticated synthetic release journeys, physical cleanup,
   hosted-runtime capacity and full free-tier rollout verification remain OPEN.
+
+### Atomic pgvector replacement
+
+`SupabaseVectorStore.index_document` now deletes old vectors and inserts replacements
+in the same PostgreSQL transaction. Concurrent deliveries serialize per scoped
+identity. An optional caller session permits the runtime worker to fence publication
+with its queue lease and commit vectors/content/status together. Empty replacements
+and client/tenant scopes use the same transaction. SQL error parameters are hidden
+and the indexing boundary emits safe error types rather than document contents.
+
+Real PostgreSQL regressions verify failed insertion preserves old evidence, readers
+see old vectors until commit, rollback preserves old vectors, eight duplicate writers
+produce one index, colliding native/client/tenant identities stay isolated, incomplete
+scopes are denied, and job completion rolls back with vectors. This is an atomic
+replacement primitive; immutable source versions and a bounded model cutover remain open.

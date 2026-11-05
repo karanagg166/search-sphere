@@ -11,6 +11,7 @@ logger = structlog.get_logger()
 # Use pool_pre_ping to automatically reconnect if dropped by Supabase/PgBouncer
 engine_kwargs = {
     "echo": False,
+    "hide_parameters": True,
     "pool_pre_ping": True,
 }
 if "sqlite" not in settings.DATABASE_URL:
