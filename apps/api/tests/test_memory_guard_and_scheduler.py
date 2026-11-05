@@ -80,18 +80,20 @@ class TestMemoryGuard:
 
     def test_cgroup_conservative_admission_under_page_cache(self):
         """
-        Verify that estimated reclaimable page cache is NOT treated as guaranteed free memory.
-        When raw cgroup usage is 480 MiB (even with 130 MiB inactive cache yielding 350 MiB working set),
-        container headroom is only 32 MiB (< 50 MiB required), so heavy workloads must be rejected.
+        Verify that estimated reclaimable page cache is NOT treated as 100% guaranteed free memory,
+        while safely discounting inactive cache (50%) to allow valid workloads without false OOM alarms.
         """
         guard = MemoryGuard(platform_limit_mb=512.0, bypass_in_test=False)
-        snapshot = {
+
+        # Case 1: Healthy container with model files in page cache (350 MiB working set, 130 MiB inactive cache)
+        # Safe headroom is 32 MiB unallocated + 65 MiB discounted cache = 97 MiB safe headroom -> Allowed
+        snapshot_healthy = {
             "raw_cgroup_mb": 480.0,
             "inactive_file_mb": 130.0,
             "estimated_working_set_mb": 350.0,
             "process_rss_mb": 220.0,
         }
-        with patch.object(guard, "_read_memory_snapshot", return_value=snapshot):
+        with patch.object(guard, "_read_memory_snapshot", return_value=snapshot_healthy):
             guard.invalidate_cache()
             metrics = guard.get_metrics()
             assert metrics["raw_cgroup_mb"] == 480.0
@@ -99,7 +101,22 @@ class TestMemoryGuard:
             assert metrics["inactive_file_mb"] == 130.0
             assert metrics["container_headroom_mb"] == 32.0
             assert metrics["working_set_headroom_mb"] == 162.0
-            # Must NOT admit heavy workloads because actual container headroom is only 32 MiB
+            assert metrics["safe_headroom_mb"] == 97.0
+            assert guard.is_heavy_workload_allowed() is True
+
+        # Case 2: Genuinely exhausted container where inactive cache cannot provide sufficient headroom
+        # Raw 495 MiB, only 20 MiB inactive cache -> safe headroom = 17 + 10 = 27 MiB (< 35 MiB) -> Rejected
+        snapshot_exhausted = {
+            "raw_cgroup_mb": 495.0,
+            "inactive_file_mb": 20.0,
+            "estimated_working_set_mb": 475.0,
+            "process_rss_mb": 450.0,
+        }
+        with patch.object(guard, "_read_memory_snapshot", return_value=snapshot_exhausted):
+            guard.invalidate_cache()
+            metrics = guard.get_metrics()
+            assert metrics["raw_cgroup_mb"] == 495.0
+            assert metrics["safe_headroom_mb"] == 27.0
             assert guard.is_heavy_workload_allowed() is False
 
     @pytest.mark.parametrize(

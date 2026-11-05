@@ -224,37 +224,54 @@ class MemoryGuard:
             self._peak_memory_mb = current
         return self._peak_memory_mb
 
+    def _get_headroom_snapshot(self) -> tuple[float, float, float, float]:
+        """
+        Calculates conservative memory headroom.
+        Returns (raw_cgroup_mb, inactive_file_mb, safe_headroom_mb, conservative_used_mb).
+        Inactive file page cache is discounted by 50% so estimated reclaimable cache is NOT
+        treated as guaranteed free memory, while avoiding false critical alarms from clean model
+        weights cached in RAM.
+        """
+        snapshot = self._cached_metrics_snapshot or {}
+        current_mb = self.get_current_memory_mb()
+        raw_mb = snapshot.get("raw_cgroup_mb", current_mb)
+        inactive_mb = snapshot.get("inactive_file_mb", 0.0)
+        # Raw container unallocated headroom
+        container_headroom = max(0.0, self.platform_limit_mb - raw_mb)
+        # Safe headroom: actual unallocated headroom + 50% of inactive page cache
+        safe_headroom = max(0.0, container_headroom + (inactive_mb * 0.5))
+        # Conservative memory used (bounded below by process RSS)
+        process_rss = snapshot.get("process_rss_mb", current_mb)
+        conservative_used = max(process_rss, self.platform_limit_mb - safe_headroom)
+        return raw_mb, inactive_mb, safe_headroom, conservative_used
+
     def get_pressure_level(self, force_refresh: bool = False) -> str:
         """
         Categorizes system memory pressure using conservative container headroom:
-        - 'critical': raw usage >= 465 MiB or working set >= 430 MiB or container headroom < 47 MiB
-        - 'high': raw usage >= 430 MiB or working set >= 380 MiB or container headroom < 82 MiB
-        - 'moderate': raw usage >= 380 MiB or working set >= 320 MiB or container headroom < 132 MiB
-        - 'normal': Below 320 MiB with ample container headroom
+        - 'critical': working set >= 460 MiB or conservative used >= 460.8 MiB or safe headroom <= 25 MiB
+        - 'high': working set >= 420 MiB or conservative used >= 425 MiB or safe headroom <= 50 MiB
+        - 'moderate': working set >= 370 MiB or conservative used >= 368 MiB or safe headroom <= 100 MiB
+        - 'normal': Below 370 MiB with ample safe container headroom (> 100 MiB)
         """
         mem_mb = self.get_current_memory_mb(force_refresh=force_refresh)
-        # Check actual container headroom from cached snapshot if available
-        snapshot = self._cached_metrics_snapshot or {}
-        raw_mb = snapshot.get("raw_cgroup_mb", mem_mb)
-        actual_used = max(mem_mb, raw_mb)
-        headroom = max(0.0, self.platform_limit_mb - actual_used)
+        _, _, safe_headroom, conservative_used = self._get_headroom_snapshot()
 
         if (
             mem_mb >= CRITICAL_THRESHOLD_MB
-            or mem_mb >= (self.platform_limit_mb * 0.90)
-            or headroom <= (self.platform_limit_mb * 0.10)
+            or conservative_used >= (self.platform_limit_mb * 0.90)
+            or safe_headroom <= 25.0
         ):
             level = "critical"
         elif (
             mem_mb >= HIGH_THRESHOLD_MB
-            or mem_mb >= (self.platform_limit_mb * 0.82)
-            or headroom <= (self.platform_limit_mb * 0.18)
+            or conservative_used >= (self.platform_limit_mb * 0.83)
+            or safe_headroom <= 50.0
         ):
             level = "high"
         elif (
             mem_mb >= MODERATE_THRESHOLD_MB
-            or mem_mb >= (self.platform_limit_mb * 0.72)
-            or headroom <= (self.platform_limit_mb * 0.28)
+            or conservative_used >= (self.platform_limit_mb * 0.72)
+            or safe_headroom <= 100.0
         ):
             level = "moderate"
         else:
@@ -267,7 +284,7 @@ class MemoryGuard:
                 current_level=level,
                 current_memory_mb=round(mem_mb, 1),
                 platform_limit_mb=round(self.platform_limit_mb, 1),
-                headroom_mb=round(headroom, 1),
+                safe_headroom_mb=round(safe_headroom, 1),
             )
             self._last_logged_pressure = level
 
@@ -280,12 +297,9 @@ class MemoryGuard:
         pressure = self.get_pressure_level()
         if pressure in ("high", "critical"):
             return False
-        # Conservative check: require at least 50 MiB of actual container headroom
-        current_mb = self.get_current_memory_mb()
-        snapshot = self._cached_metrics_snapshot or {}
-        raw_mb = snapshot.get("raw_cgroup_mb", current_mb)
-        actual_headroom = self.platform_limit_mb - max(current_mb, raw_mb)
-        return actual_headroom >= 50.0
+        # Conservative check: require at least 35 MiB of safe container headroom
+        _, _, safe_headroom, _ = self._get_headroom_snapshot()
+        return safe_headroom >= 35.0
 
     def is_interactive_rag_allowed(self) -> bool:
         """Returns True if memory headroom permits serving an interactive RAG query."""
@@ -294,12 +308,9 @@ class MemoryGuard:
         pressure = self.get_pressure_level()
         if pressure == "critical":
             return False
-        # Conservative check: require at least 25 MiB of container headroom
-        current_mb = self.get_current_memory_mb()
-        snapshot = self._cached_metrics_snapshot or {}
-        raw_mb = snapshot.get("raw_cgroup_mb", current_mb)
-        actual_headroom = self.platform_limit_mb - max(current_mb, raw_mb)
-        return actual_headroom >= 25.0
+        # Conservative check: require at least 15 MiB of safe container headroom
+        _, _, safe_headroom, _ = self._get_headroom_snapshot()
+        return safe_headroom >= 15.0
 
     def get_metrics(self, force_refresh: bool = False) -> dict[str, Any]:
         """Provides structured memory diagnostic metrics for monitoring and health endpoints."""
@@ -315,6 +326,7 @@ class MemoryGuard:
 
         container_headroom_mb = max(0.0, self.platform_limit_mb - raw_cgroup_mb)
         working_set_headroom_mb = max(0.0, self.platform_limit_mb - working_set_mb)
+        safe_headroom_mb = max(0.0, container_headroom_mb + (inactive_file_mb * 0.5))
         usage_pct = min(100.0, (current_mb / self.platform_limit_mb) * 100.0)
 
         return {
@@ -326,6 +338,7 @@ class MemoryGuard:
             "pressure_level": pressure,
             "container_headroom_mb": round(container_headroom_mb, 2),
             "working_set_headroom_mb": round(working_set_headroom_mb, 2),
+            "safe_headroom_mb": round(safe_headroom_mb, 2),
             "current_mb": round(current_mb, 2),
             "peak_mb": round(peak_mb, 2),
             "headroom_mb": round(container_headroom_mb, 2),
