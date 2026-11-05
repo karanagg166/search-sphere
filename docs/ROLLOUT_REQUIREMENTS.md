@@ -137,3 +137,21 @@ do not convert pending checks to PASS.
 - Provider selection is Cohere only, per user instruction. Authenticated model metadata
   confirms embedding, reranking, text and vision availability. Trial/evaluation billing
   status still needs confirmation; model inference budget is not verified yet.
+
+### Durable queue foundation
+
+Migration 012 and `repositories/ingestion_queue.py` provide an atomic PostgreSQL
+outbox/queue for both standalone and external document identities. Seven executed
+PostgreSQL tests cover duplicate registration, rollback, concurrent SKIP LOCKED
+claims, restart recovery, live-lease preservation, bounded delayed retries, explicit
+reindex fencing and stale-worker rejection. The new table has RLS enabled and no
+browser grants. CI requires these tests with an explicit synthetic database URL.
+
+This PR supplies queue storage and concurrency primitives. API registration and
+runtime worker binding are still pending; it does not yet restore medical/generic
+processing. No migration 012 has been applied to production yet.
+
+The user confirmed the configured Cohere key is a free trial key on 2026-11-06.
+Only Cohere is authorized for model inference. Published trial limits are 1,000
+API calls per month, with endpoint-specific rate limits. No paid fallback is allowed.
+Sensitive-data eligibility must be enforced independently of free-tier billing.

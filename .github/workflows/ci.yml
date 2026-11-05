@@ -88,6 +88,12 @@ jobs:
           PYTHONPATH: "apps/api"
         run: pytest scripts/tests/test_data_api_lockdown.py scripts/tests/test_private_document_response.py -v
 
+      - name: Verify durable ingestion concurrency and restart recovery
+        env:
+          INGESTION_TEST_DATABASE_URL: "postgresql+asyncpg://test_user:test_password@localhost:5432/search_sphere_test"
+          PYTHONPATH: "apps/api"
+        run: pytest scripts/tests/test_ingestion_queue_postgres.py -v
+
       - name: Run Monitor & Keep-Alive Safety Suite
         env:
           PYTHONPATH: "."
