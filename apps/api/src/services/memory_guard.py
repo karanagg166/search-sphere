@@ -305,11 +305,29 @@ class MemoryGuard:
             return True
         pressure = self.get_pressure_level()
         if pressure in ("high", "critical"):
-            return False
+            try:
+                from src.services.model_manager import model_manager
+
+                if model_manager.unload_model("reranker"):
+                    pressure = self.get_pressure_level(force_refresh=True)
+            except Exception:
+                pass
+            if pressure in ("high", "critical"):
+                return False
+
         raw_mb, _, safe_headroom, _ = self._get_headroom_snapshot()
         raw_headroom = max(0.0, self.platform_limit_mb - raw_mb)
         if raw_headroom < 25.0:
-            return False
+            try:
+                from src.services.model_manager import model_manager
+
+                if model_manager.unload_model("reranker"):
+                    raw_mb, _, safe_headroom, _ = self._get_headroom_snapshot()
+                    raw_headroom = max(0.0, self.platform_limit_mb - raw_mb)
+            except Exception:
+                pass
+            if raw_headroom < 25.0:
+                return False
         return safe_headroom >= 30.0
 
     def is_interactive_rag_allowed(self) -> bool:

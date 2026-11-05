@@ -133,6 +133,10 @@ class WorkloadScheduler:
         """
         # 1. Check memory headroom before admitting heavy work
         if not memory_guard.is_heavy_workload_allowed():
+            try:
+                model_manager.unload_model("reranker")
+            except Exception:
+                pass
             model_manager.release_memory()
             if not memory_guard.is_heavy_workload_allowed():
                 self._total_rejected += 1
