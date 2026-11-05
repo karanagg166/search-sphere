@@ -4,39 +4,53 @@ from src.config import settings
 
 logger = structlog.get_logger()
 
-# Setup RabbitMQ broker for the API producer if dramatiq is available
+# Setup RabbitMQ broker for the API producer if enabled and dramatiq is available
 broker = None
 process_document_task = None
 process_medical_document_task = None
 process_generic_document_task = None
 
-try:
-    import dramatiq
-    from dramatiq.brokers.rabbitmq import RabbitmqBroker
 
-    broker = RabbitmqBroker(url=settings.RABBITMQ_URL)
-    dramatiq.set_broker(broker)
+def _is_rabbitmq_enabled() -> bool:
+    if getattr(settings, "ENABLE_RABBITMQ", False):
+        return True
+    url = getattr(settings, "RABBITMQ_URL", "")
+    # If explicitly set to an external or custom URL (not the default docker placeholder)
+    if url and "rabbitmq:5672" not in url and "localhost:5672" not in url:
+        return True
+    return False
 
-    @dramatiq.actor(queue_name="default", actor_name="process_document_task")
-    def process_document_task(document_id: str) -> None:
-        """Dispatches document ingestion tasks to the background worker via RabbitMQ."""
-        logger.info("process_document_task dispatched", document_id=document_id)
 
-    @dramatiq.actor(queue_name="default", actor_name="process_medical_document_task")
-    def process_medical_document_task(document_id: str, request_id: str | None = None) -> None:
-        """Dispatches external medical document ingestion tasks to the background worker."""
-        logger.info("process_medical_document_task dispatched", document_id=document_id, request_id=request_id)
+if _is_rabbitmq_enabled():
+    try:
+        import dramatiq
+        from dramatiq.brokers.rabbitmq import RabbitmqBroker
 
-    @dramatiq.actor(queue_name="default", actor_name="process_generic_document_task")
-    def process_generic_document_task(document_id: str, request_id: str | None = None) -> None:
-        """Dispatches generic multi-tenant external document ingestion tasks to the background worker."""
-        logger.info("process_generic_document_task dispatched", document_id=document_id, request_id=request_id)
+        broker = RabbitmqBroker(url=settings.RABBITMQ_URL)
+        dramatiq.set_broker(broker)
 
-except Exception as e:
-    logger.warning("Could not initialize RabbitMQ broker for Dramatiq", error=str(e))
-    process_document_task = None
-    process_medical_document_task = None
-    process_generic_document_task = None
+        @dramatiq.actor(queue_name="default", actor_name="process_document_task")
+        def process_document_task(document_id: str) -> None:
+            """Dispatches document ingestion tasks to the background worker via RabbitMQ."""
+            logger.info("process_document_task dispatched", document_id=document_id)
+
+        @dramatiq.actor(queue_name="default", actor_name="process_medical_document_task")
+        def process_medical_document_task(document_id: str, request_id: str | None = None) -> None:
+            """Dispatches external medical document ingestion tasks to the background worker."""
+            logger.info("process_medical_document_task dispatched", document_id=document_id, request_id=request_id)
+
+        @dramatiq.actor(queue_name="default", actor_name="process_generic_document_task")
+        def process_generic_document_task(document_id: str, request_id: str | None = None) -> None:
+            """Dispatches generic multi-tenant external document ingestion tasks to the background worker."""
+            logger.info("process_generic_document_task dispatched", document_id=document_id, request_id=request_id)
+
+    except Exception as e:
+        logger.warning("Could not initialize RabbitMQ broker for Dramatiq", error=str(e))
+        process_document_task = None
+        process_medical_document_task = None
+        process_generic_document_task = None
+else:
+    logger.info("RabbitMQ broker not enabled; document tasks will use DurableDocumentProcessor.")
 
 
 def enqueue_document(document_id: str) -> bool:

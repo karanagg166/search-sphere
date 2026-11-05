@@ -25,6 +25,8 @@ EXPECTED_SHA = os.environ.get("EXPECTED_SHA", "").strip().lower()
 MAX_MEMORY_MIB = 420.0
 WAIT_SECONDS = 240
 RESULTS: list[str] = []
+SYNTHETIC_DOCUMENT_IDS: list[str] = []
+ACTIVE_CI_TOKEN: str | None = None
 
 
 def record(label: str, detail: str = "") -> None:
@@ -447,6 +449,7 @@ def ensure_synthetic_document(
         fail("Document upload", f"failed to upload synthetic document: HTTP {status} {upload_res}")
 
     doc_id = str(upload_res["id"])
+    SYNTHETIC_DOCUMENT_IDS.append(doc_id)
     record("Document upload", f"uploaded synthetic document {doc_id[:12]}")
 
     # Poll until indexed or ready
@@ -480,6 +483,9 @@ def cleanup_synthetic_document(token: str, document_id: str, marker: str | None 
     else:
         print(f"::warning::Failed to clean up synthetic document {document_id}: HTTP {status}")
 
+    if document_id in SYNTHETIC_DOCUMENT_IDS:
+        SYNTHETIC_DOCUMENT_IDS.remove(document_id)
+
     # Verify vector purge: search scoped to the deleted document must return 0 results
     if marker:
         time.sleep(1)
@@ -495,6 +501,31 @@ def cleanup_synthetic_document(token: str, document_id: str, marker: str | None 
             if len(remaining) > 0:
                 fail("Vector deletion verification", f"deleted document vectors still retrieved ({len(remaining)} points found)")
         record("Vector deletion verification", "purged document vectors are no longer retrievable in search")
+
+
+def sweep_dangling_synthetic_documents(token: str) -> None:
+    """Purge orphaned synthetic documents from prior interrupted runs to prevent fixture accumulation."""
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        status, _, payload = http(f"{API}/documents?limit=50", headers=headers, timeout=20)
+        if status == 200 and isinstance(payload, dict):
+            docs = payload.get("documents", [])
+            dangling = [
+                d["id"]
+                for d in docs
+                if isinstance(d, dict)
+                and (
+                    d.get("filename") == "ci_smoke_test.pdf"
+                    or str(d.get("filename", "")).startswith("ci_smoke_")
+                )
+            ]
+            if dangling:
+                print(f"Sweeping {len(dangling)} dangling synthetic documents from earlier runs...")
+                for doc_id in dangling:
+                    http(f"{API}/documents/{doc_id}", method="DELETE", headers=headers, timeout=20)
+                record("Pre-test fixture cleanup", f"swept {len(dangling)} dangling synthetic documents")
+    except Exception as exc:  # noqa: BLE001
+        print(f"::warning::Pre-test fixture sweep warning: {exc}")
 
 
 def run_real_rag_pipeline(
@@ -554,6 +585,7 @@ def run_real_rag_pipeline(
 
 
 def run_rag_suite() -> None:
+    global ACTIVE_CI_TOKEN
     require = os.environ.get("REQUIRE_RAG", "false").lower() == "true"
     do_answer = os.environ.get("RUN_LLM_ANSWER", "false").lower() == "true"
     marker = os.environ.get("PROD_SMOKE_EXPECTED_MARKER", "SS-SYNTHETIC-SMOKE-42").strip()
@@ -567,6 +599,11 @@ def run_rag_suite() -> None:
         return
 
     token, _ = auth_info
+    ACTIVE_CI_TOKEN = token
+
+    # Proactively sweep dangling synthetic fixtures from any prior interrupted runs
+    sweep_dangling_synthetic_documents(token)
+
     # Multi-tenant isolation checks with valid token
     check_auth_boundary(auth_token=token)
 
@@ -577,8 +614,16 @@ def run_rag_suite() -> None:
             created_id = doc_id
         run_real_rag_pipeline(token, doc_id, marker, do_answer=do_answer)
     finally:
-        if created_id:
-            cleanup_synthetic_document(token, created_id, marker=marker)
+        # Guaranteed cleanup: sweep all synthetic documents recorded in this test run
+        for pending_id in SYNTHETIC_DOCUMENT_IDS:
+            try:
+                cleanup_synthetic_document(
+                    token,
+                    pending_id,
+                    marker=marker if pending_id == created_id else None,
+                )
+            except Exception as cl_err:  # noqa: BLE001
+                print(f"::warning::Cleanup failure for {pending_id}: {cl_err}")
 
 
 def save_summary() -> None:
@@ -639,6 +684,12 @@ def main() -> int:
         RESULTS.append(f"FAIL {str(exc).replace('|', '/')}")
         return 1
     finally:
+        if ACTIVE_CI_TOKEN and SYNTHETIC_DOCUMENT_IDS:
+            for s_id in SYNTHETIC_DOCUMENT_IDS:
+                try:
+                    cleanup_synthetic_document(ACTIVE_CI_TOKEN, s_id)
+                except (urllib.error.URLError, TimeoutError, OSError):
+                    pass
         save_summary()
 
 

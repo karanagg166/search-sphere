@@ -115,14 +115,22 @@ async def audit_and_backfill(
 
             if chunk_count > 0:
                 stats.already_indexed += 1
-                if doc.chunk_count != chunk_count and not dry_run:
-                    async with AsyncSession(engine) as update_session:
-                        await update_session.execute(
-                            update(Document)
-                            .where(Document.id == doc_id)
-                            .values(chunk_count=chunk_count, updated_at=datetime.now(UTC))
+                if doc.chunk_count != chunk_count:
+                    if dry_run:
+                        logger.info(
+                            f"[PROPOSED] Would update chunk_count={chunk_count} for doc {doc_id} (current={doc.chunk_count})"
                         )
-                        await update_session.commit()
+                    else:
+                        async with AsyncSession(engine) as update_session:
+                            await update_session.execute(
+                                update(Document)
+                                .where(Document.id == doc_id)
+                                .values(chunk_count=chunk_count, updated_at=datetime.now(UTC))
+                            )
+                            await update_session.commit()
+                        logger.info(
+                            f"[COMMITTED] Updated chunk_count={chunk_count} for doc {doc_id}"
+                        )
                 continue
 
             # Check if PDF exists in durable storage
@@ -138,23 +146,31 @@ async def audit_and_backfill(
                 logger.warning(
                     f"Document {doc_id} ({doc.filename}) has missing storage object: {storage_key}"
                 )
-                if mark_missing and not dry_run:
-                    async with AsyncSession(engine) as update_session:
-                        await update_session.execute(
-                            update(Document)
-                            .where(Document.id == doc_id)
-                            .values(
-                                status="failed:missing_storage_file",
-                                updated_at=datetime.now(UTC),
-                            )
+                if mark_missing:
+                    if dry_run:
+                        logger.info(
+                            f"[PROPOSED] Would mark missing storage file for doc {doc_id} ({doc.filename})"
                         )
-                        await update_session.commit()
+                    else:
+                        async with AsyncSession(engine) as update_session:
+                            await update_session.execute(
+                                update(Document)
+                                .where(Document.id == doc_id)
+                                .values(
+                                    status="failed:missing_storage_file",
+                                    updated_at=datetime.now(UTC),
+                                )
+                            )
+                            await update_session.commit()
+                        logger.info(
+                            f"[COMMITTED] Marked doc {doc_id} as failed:missing_storage_file"
+                        )
                 continue
 
             if dry_run:
                 stats.reindexed_success += 1
                 stats.successful_ids.append(doc_id)
-                logger.info(f"[DRY-RUN] Would reindex {doc_id} ({doc.filename}) from {storage_key}")
+                logger.info(f"[PROPOSED] Would reindex {doc_id} ({doc.filename}) from {storage_key}")
                 continue
 
             # Live Reindexing Execution
@@ -204,7 +220,7 @@ async def audit_and_backfill(
 
                 stats.reindexed_success += 1
                 stats.successful_ids.append(doc_id)
-                logger.info(f"Successfully reindexed {doc_id} ({n_chunks} chunks).")
+                logger.info(f"[COMMITTED] Reindexed document {doc_id} ({doc.filename}) with {n_chunks} chunks.")
 
             except Exception:
                 stats.reindex_failed += 1
@@ -251,14 +267,22 @@ async def audit_and_backfill(
 
             if chunk_count > 0:
                 stats.already_indexed += 1
-                if doc.chunk_count != chunk_count and not dry_run:
-                    async with AsyncSession(engine) as update_session:
-                        await update_session.execute(
-                            update(ExternalDocument)
-                            .where(ExternalDocument.id == doc_id)
-                            .values(chunk_count=chunk_count, updated_at=datetime.now(UTC))
+                if doc.chunk_count != chunk_count:
+                    if dry_run:
+                        logger.info(
+                            f"[PROPOSED] Would update chunk_count={chunk_count} for external doc {doc_id} (current={doc.chunk_count})"
                         )
-                        await update_session.commit()
+                    else:
+                        async with AsyncSession(engine) as update_session:
+                            await update_session.execute(
+                                update(ExternalDocument)
+                                .where(ExternalDocument.id == doc_id)
+                                .values(chunk_count=chunk_count, updated_at=datetime.now(UTC))
+                            )
+                            await update_session.commit()
+                        logger.info(
+                            f"[COMMITTED] Updated chunk_count={chunk_count} for external doc {doc_id}"
+                        )
                 continue
 
             # Check storage existence
@@ -271,12 +295,32 @@ async def audit_and_backfill(
             if not file_exists:
                 stats.storage_missing += 1
                 stats.unrecoverable_ids.append(doc_id)
+                if mark_missing:
+                    if dry_run:
+                        logger.info(
+                            f"[PROPOSED] Would mark missing storage file for external doc {doc_id}"
+                        )
+                    else:
+                        async with AsyncSession(engine) as update_session:
+                            await update_session.execute(
+                                update(ExternalDocument)
+                                .where(ExternalDocument.id == doc_id)
+                                .values(
+                                    status="FAILED",
+                                    processing_error="Missing storage file",
+                                    updated_at=datetime.now(UTC),
+                                )
+                            )
+                            await update_session.commit()
+                        logger.info(
+                            f"[COMMITTED] Marked external doc {doc_id} as FAILED: Missing storage file"
+                        )
                 continue
 
             if dry_run:
                 stats.reindexed_success += 1
                 stats.successful_ids.append(doc_id)
-                logger.info(f"[DRY-RUN] Would reindex external doc {doc_id} from {storage_path}")
+                logger.info(f"[PROPOSED] Would reindex external doc {doc_id} from {storage_path}")
                 continue
 
             # Live processing for external doc
@@ -331,7 +375,7 @@ async def audit_and_backfill(
 
                 stats.reindexed_success += 1
                 stats.successful_ids.append(doc_id)
-                logger.info(f"Successfully reindexed external doc {doc_id} ({n_chunks} chunks).")
+                logger.info(f"[COMMITTED] Reindexed external doc {doc_id} ({n_chunks} chunks).")
 
             except Exception:
                 stats.reindex_failed += 1
@@ -347,7 +391,7 @@ async def audit_and_backfill(
 
 def print_report(results: dict[str, BackfillStats], dry_run: bool) -> None:
     print("\n" + "=" * 60)
-    print(f"  SEARCH SPHERE PGVECTOR AUDIT & RECOVERY REPORT ({'DRY-RUN' if dry_run else 'LIVE'})")
+    print(f"  SEARCH SPHERE PGVECTOR AUDIT & RECOVERY REPORT ({'DRY-RUN (PROPOSED)' if dry_run else 'LIVE (COMMITTED)'})")
     print("=" * 60)
     for category, stats in results.items():
         print(f"\n[{category.upper()}]")
@@ -361,16 +405,79 @@ def print_report(results: dict[str, BackfillStats], dry_run: bool) -> None:
     print("\n" + "=" * 60)
 
 
-async def main() -> int:
-    parser = argparse.ArgumentParser(description="Audit and backfill pgvector document chunks.")
-    parser.add_argument("--dry-run", action="store_true", default=False, help="Audit only, no writes.")
-    parser.add_argument("--target", choices=["all", "documents", "external_documents"], default="all")
-    parser.add_argument("--batch-size", type=int, default=5, help="Batch size before memory trim.")
-    parser.add_argument("--limit", type=int, default=None, help="Limit number of documents to audit.")
-    parser.add_argument("--document-id", type=str, default=None, help="Audit/backfill a single document ID.")
-    parser.add_argument("--mark-missing", action="store_true", default=False, help="Update DB status for missing storage files.")
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Audit and backfill pgvector document chunks. Defaults to safe, read-only audit mode."
+    )
+    parser.add_argument(
+        "--execute",
+        action="store_true",
+        default=False,
+        help="Perform actual database writes and vector indexing. By default, audit mode is active.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Explicitly request audit-only mode without writes (this is the default behavior).",
+    )
+    parser.add_argument(
+        "--target",
+        choices=["all", "documents", "external_documents"],
+        default="all",
+        help="Entity target to audit or backfill (default: all).",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=5,
+        help="Batch size before memory trim.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Limit number of documents to audit or backfill.",
+    )
+    parser.add_argument(
+        "--max-documents",
+        type=int,
+        default=None,
+        help="Alias for --limit: maximum number of documents to audit or backfill.",
+    )
+    parser.add_argument(
+        "--document-id",
+        type=str,
+        default=None,
+        help="Audit/backfill a single document ID.",
+    )
+    parser.add_argument(
+        "--mark-missing",
+        action="store_true",
+        default=False,
+        help="Update DB status for missing storage files.",
+    )
+    return parser
 
-    args = parser.parse_args()
+
+async def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    # Resolve limit vs max_documents
+    effective_limit = args.limit if args.limit is not None else args.max_documents
+
+    # Default is audit-only unless --execute is explicitly passed
+    # If both --execute and --dry-run are passed, safety takes precedence: dry_run wins
+    dry_run = not args.execute or args.dry_run
+
+    # Enforce bounded scope for live production execution
+    if not dry_run and effective_limit is None and not args.document_id:
+        logger.error(
+            "Safety error: Live execution (--execute) requires explicit bounded scope. "
+            "Specify --limit (or --max-documents) or --document-id to prevent unbounded writes."
+        )
+        return 2
 
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
@@ -383,12 +490,12 @@ async def main() -> int:
             engine=engine,
             target=args.target,
             batch_size=args.batch_size,
-            limit=args.limit,
+            limit=effective_limit,
             document_id=args.document_id,
-            dry_run=args.dry_run,
+            dry_run=dry_run,
             mark_missing=args.mark_missing,
         )
-        print_report(results, dry_run=args.dry_run)
+        print_report(results, dry_run=dry_run)
     finally:
         await engine.dispose()
 

@@ -43,6 +43,8 @@ class DurableDocumentProcessor:
         self._running: bool = False
         self._worker_task: asyncio.Task | None = None
         self._active_doc_id: str | None = None
+        self._last_recovery_time: float = 0.0
+        self._recovery_interval: float = 60.0  # Periodic sweep every 60s
 
     def notify_new_job(self) -> None:
         """Signals the background processor that a new document upload is ready."""
@@ -73,8 +75,9 @@ class DurableDocumentProcessor:
         # Initial yield so Uvicorn binds port and answers readiness probes immediately
         await asyncio.sleep(2.0)
 
-        # 1. Recover stranded jobs from previous restart/crash
-        await self.recover_stranded_jobs()
+        # 1. Recover stranded jobs from previous restart/crash immediately
+        await self.recover_stranded_jobs(force_all=True)
+        self._last_recovery_time = time.monotonic()
 
         while self._running:
             try:
@@ -94,6 +97,12 @@ class DurableDocumentProcessor:
                         # Allow event loop and other requests to interleave smoothly
                         await asyncio.sleep(0.5)
                 else:
+                    # Periodically check for stranded jobs when idle
+                    now = time.monotonic()
+                    if now - self._last_recovery_time > self._recovery_interval:
+                        await self.recover_stranded_jobs(force_all=False)
+                        self._last_recovery_time = now
+
                     # No pending jobs: wait on wake event or poll timeout
                     try:
                         await asyncio.wait_for(self._wake_event.wait(), timeout=POLL_INTERVAL_SECONDS)
@@ -318,23 +327,26 @@ class DurableDocumentProcessor:
         except Exception as db_err:
             logger.error("Failed to update document status in database", error=str(db_err))
 
-    async def recover_stranded_jobs(self) -> list[str]:
+    async def recover_stranded_jobs(self, force_all: bool = False) -> list[str]:
         """
         Durably recovers documents stranded in 'proc:%' or 'processing:%' state
         from container restarts, OOM crashes, or deploy interruptions.
+        If force_all=True, recovers any active lease immediately (safe on container startup).
+        Otherwise recovers only leases older than LEASE_TIMEOUT_SECONDS.
         """
         cutoff = datetime.now(UTC) - timedelta(seconds=LEASE_TIMEOUT_SECONDS)
         recovered_ids: list[str] = []
 
         try:
             async with AsyncSessionLocal() as session:
-                stmt = select(Document).where(
-                    or_(
-                        Document.status.like("proc:%"),
-                        Document.status.like("processing%"),
-                    ),
-                    Document.updated_at < cutoff,
+                base_filter = or_(
+                    Document.status.like("proc:%"),
+                    Document.status.like("processing%"),
                 )
+                if not force_all:
+                    stmt = select(Document).where(base_filter, Document.updated_at < cutoff)
+                else:
+                    stmt = select(Document).where(base_filter)
                 result = await session.execute(stmt)
                 stale_docs = result.scalars().all()
 
