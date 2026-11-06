@@ -6,6 +6,7 @@ from src.models.document_chunk import DocumentChunk
 from src.models.document_content import DocumentContent
 from src.models.document_deletion import DocumentDeletion
 from src.models.document_evidence import DocumentEvidence
+from src.models.document_version import DocumentVersion
 from src.models.external_document import ExternalDocument
 from src.models.external_document_content import ExternalDocumentContent
 from src.models.feedback import Feedback
@@ -27,6 +28,7 @@ __all__ = [
     "DocumentContent",
     "DocumentDeletion",
     "DocumentEvidence",
+    "DocumentVersion",
     "ExternalDocument",
     "ExternalDocumentContent",
     "MedicalObservation",

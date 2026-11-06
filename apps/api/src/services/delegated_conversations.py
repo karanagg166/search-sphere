@@ -68,6 +68,7 @@ async def append_turn(db, access, query, answer, sources, retrieval_query=None, 
     response = Message(id=str(uuid.uuid4()), conversation_id=conversation.id, role="assistant", content=answer,
                        original_query=query, retrieval_query=retrieval_query, rewritten=rewritten,
                        sources=sources, created_at=now + timedelta(microseconds=1))
+    response.sources = [{**source, "source_message_id": response.id} for source in sources]
     db.add_all([question, response])
     conversation.updated_at = now
     await db.flush()

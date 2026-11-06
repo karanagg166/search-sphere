@@ -207,6 +207,12 @@ async def test_external_http_upload_register_and_worker_publish(fixture, monkeyp
             status = await client.get(status_path, headers=headers)
             assert status.status_code == 200 and status.json()["status"] == "READY", status.text
             assert status.json()["job"]["status"] == "SUCCEEDED"
+            if not medical:
+                published = await client.get(f"/api/v1/documents/{external_id}/versions", headers=headers)
+                assert published.status_code == 200
+                version = published.json()["versions"][0]
+                assert version["version_id"] == status.json()["current_version_id"] and version["number"] == 1
+                assert "storage_key" not in published.text
             duplicate = await client.post(registration_path, headers=headers, json=body)
             assert duplicate.status_code == 202 and duplicate.json()["status"] == "READY"
             assert duplicate.json()["job"]["attempts"] == 1

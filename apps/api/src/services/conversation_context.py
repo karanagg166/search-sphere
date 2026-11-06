@@ -70,6 +70,8 @@ async def message_evidence(db, access, message):
         if row is None:
             return None
         digest = hashlib.sha256(row.content.encode()).hexdigest()
+        if source.get("version_id") and source["version_id"] != row.metadata_json.get("version_id"):
+            return None
         # New delegated references retain IDs/hashes instead of copying passages.
         # Legacy native references must still match their exact source text.
         if source.get("content_sha256"):
@@ -78,6 +80,7 @@ async def message_evidence(db, access, message):
         elif not source.get("content") or source["content"] != row.content:
             return None
         verified[row.point_id] = digest
+        access.evidence_versions[row.point_id] = row.metadata_json.get("version_id")
     access.observation_evidence.update(observed)
     return verified
 
@@ -207,5 +210,6 @@ async def prior_answer_chunks(access):
         content=row.content, token_count=row.token_count, start_page=row.start_page, end_page=row.end_page,
         page_numbers=row.page_numbers, block_types=row.block_types, rerank_score=1.0, rank=index + 1,
         client_id=row.client_id, tenant_id=row.tenant_id, collection_id=row.collection_id, owner_subject_id=row.owner_subject_id,
-        patient_id=row.patient_id, source_system=row.source_system, file_name=row.file_name, document_type=row.document_type)
+        patient_id=row.patient_id, source_system=row.source_system, file_name=row.file_name, document_type=row.document_type,
+        version_id=row.metadata_json.get("version_id"))
         for index, point_id in enumerate(access.evidence) if (row := by_id.get(point_id)) is not None]

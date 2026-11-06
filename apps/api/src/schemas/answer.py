@@ -29,6 +29,9 @@ class AnswerSource(BaseModel):
         description="1-based identifier corresponding to citation references (e.g. [1]) in the answer.",
     )
     document_id: str = Field(..., description="ID of source document.")
+    chunk_id: str | None = None
+    version_id: str | None = None
+    source_message_id: str | None = None
     chunk_index: int = Field(..., description="Index of chunk within document.")
     start_page: int = Field(..., description="Starting page of chunk.")
     end_page: int = Field(..., description="Ending page of chunk.")

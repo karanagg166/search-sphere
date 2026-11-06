@@ -156,6 +156,19 @@ async def reindex_document(
     return DocumentResponse.model_validate(document)
 
 
+@router.get("/{document_id}/versions", summary="List authorized published index versions")
+async def get_document_versions(
+    document_id: str, limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    storage: ObjectStorage = Depends(get_object_storage),
+) -> dict:
+    from src.services.document_versions import list_published_versions
+
+    document = await DocumentService(db, storage).get_user_document(document_id, current_user.id)
+    return {"current_version_id": document.current_version_id,
+        "versions": await list_published_versions(db, "standalone", document.id, limit, offset)}
+
+
 @router.get("/{document_id}/evidence/{evidence_id}", summary="Read authorized full structured evidence")
 async def get_document_evidence(
     document_id: str, evidence_id: str,

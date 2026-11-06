@@ -12,6 +12,7 @@ from src.models.external_document import ExternalDocument
 from src.models.external_document_content import ExternalDocumentContent
 from src.models.medical_observation import MedicalObservation
 from src.retrieval.permission_cache import invalidate_scope
+from src.services.document_versions import record_publication
 from src.services.ingestion_source import load_ingestion_source
 from src.vector_store.supabase_vector_store import SupabaseVectorStore
 
@@ -24,6 +25,7 @@ async def publish_ingestion(sessions, queue, lease, source, processed):
         current = await load_ingestion_source(db, source.kind, source.internal_id)
         if current != source:
             return False
+        version = await record_publication(db, job, source, processed)
         asset_ids = [block.provenance["asset_id"] for page in processed.extracted.pages for block in page.blocks if "asset_id" in block.provenance]
         await db.execute(update(DocumentDeletion).where(
             DocumentDeletion.kind == "asset", DocumentDeletion.source_record_id == source.internal_id,
@@ -41,7 +43,8 @@ async def publish_ingestion(sessions, queue, lease, source, processed):
                 asset.status, asset.lease_token = "PUBLISHED", None
         store = SupabaseVectorStore(session_factory=sessions)
         count = await store.index_document(
-            source.document_id, processed.embedded, extra_payload=source.vector_payload(), session=db,
+            source.document_id, processed.embedded,
+            extra_payload={**source.vector_payload(), "version_id": version.id, "source_sha256": version.source_sha256}, session=db,
         )
         await db.execute(delete(DocumentEvidence).where(
             DocumentEvidence.document_kind == source.kind, DocumentEvidence.source_record_id == source.internal_id,
@@ -66,11 +69,13 @@ async def publish_ingestion(sessions, queue, lease, source, processed):
             db.add(DocumentEvidence(
                 document_kind=source.kind, source_record_id=source.internal_id, evidence_id=evidence_id,
                 client_id=source.client_id, tenant_id=source.tenant_id, collection_id=source.collection_id,
-                subject_id=source.subject_id, source_sha256=data.pop("source_sha256", ""), kind=data["kind"], data_json=data,
+                subject_id=source.subject_id, source_sha256=data.pop("source_sha256", ""), kind=data["kind"],
+                data_json={**data, "version_id": version.id},
             ))
         model = Document if source.kind == "standalone" else ExternalDocument
         row = await db.get(model, source.internal_id)
         row.chunk_count = count
+        row.current_version_id = version.id
         await invalidate_scope(db, source.client_id, source.tenant_id)
         row.status = "indexed" if source.kind == "standalone" else "READY"
         if source.kind == "external":

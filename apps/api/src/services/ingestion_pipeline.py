@@ -1,6 +1,7 @@
 """Hosted processing shared by standalone and delegated document ingestion."""
 
 import asyncio
+import hashlib
 from dataclasses import dataclass
 
 from src.config import settings
@@ -28,6 +29,7 @@ class ProcessedIngestion:
     extracted: ExtractedDocument
     embedded: EmbeddedDocument
     observations: list[ExtractedObservationData]
+    source_sha256: str | None = None
 
 
 async def process_ingestion(source, storage, stage):
@@ -39,6 +41,7 @@ async def process_ingestion(source, storage, stage):
     maximum = settings.MAX_UPLOAD_SIZE_BYTES if source.kind == "standalone" else (10 if source.client_id == "quick_clinic" else 50) * 1024 * 1024
     if not content or len(content) != source.file_size or len(content) > maximum:
         raise IngestionSourceError("invalid_document")
+    source_sha256 = hashlib.sha256(content).hexdigest()
     await stage("extracting")
     if source.mime_type in {"text/plain", "text/markdown", "text/csv"}:
         try:
@@ -72,4 +75,4 @@ async def process_ingestion(source, storage, stage):
             extracted_doc=extracted, report_date=source.report_date,
             default_extraction_method="OCR" if source.mime_type.startswith("image/") else "REGEX",
         )
-    return ProcessedIngestion(extracted, embedded, observations)
+    return ProcessedIngestion(extracted, embedded, observations, source_sha256)

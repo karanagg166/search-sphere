@@ -2,8 +2,11 @@
 
 import hashlib
 
+from sqlalchemy import select
+
 from src.inference.policy import ProviderNotApprovedError
 from src.models.document_chunk import DocumentChunk
+from src.models.external_document import ExternalDocument
 from src.models.medical_observation import MedicalObservation
 from src.schemas.search import RewriteResult
 from src.security.data_screening import contains_secrets
@@ -43,8 +46,11 @@ async def complete_medical_turn(db, query, result):
                 raise ProviderNotApprovedError("Medical observation access changed.")
             digest = observation_fingerprint(row)
             access.observation_evidence[row.id] = digest
+            citation.version_id = await db.scalar(select(ExternalDocument.current_version_id).where(
+                ExternalDocument.source_system == row.source_system, ExternalDocument.tenant_id == row.tenant_id,
+                ExternalDocument.external_document_id == row.external_document_id))
             sources.append({"source_type": "OBSERVATION", "observation_id": row.id,
-                            "document_id": row.external_document_id, "content_sha256": digest})
+                            "document_id": row.external_document_id, "version_id": citation.version_id, "content_sha256": digest})
         else:
             row = (await db.execute(access.chunk_query().where(
                 DocumentChunk.document_id == citation.document_id, DocumentChunk.chunk_index == citation.chunk_index,
@@ -53,8 +59,12 @@ async def complete_medical_turn(db, query, result):
                 raise ProviderNotApprovedError("Medical source access or version changed.")
             digest = hashlib.sha256(row.content.encode()).hexdigest()
             access.evidence[row.point_id] = digest
+            access.evidence_versions[row.point_id] = row.metadata_json.get("version_id")
+            citation.version_id = row.metadata_json.get("version_id")
+            citation.chunk_id = row.point_id
             sources.append({"document_id": row.document_id, "chunk_index": row.chunk_index, "chunk_id": row.point_id,
-                            "chunk_row_id": str(row.id), "content_sha256": digest})
+                            "chunk_row_id": str(row.id), "version_id": row.metadata_json.get("version_id"),
+                            "source_sha256": row.metadata_json.get("source_sha256"), "content_sha256": digest})
     await access.validate()
     result.requires_history = access.requires_history
     result.context_message_ids = access.selected_message_ids

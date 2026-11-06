@@ -192,6 +192,7 @@ class GenericRagService:
                 results.append(
                     SearchChunkResult(
                         chunk_id=chunk_id,
+                        version_id=getattr(chunk, "version_id", None),
                         document_id=doc.external_document_id,
                         text=chunk.content,
                         score=round(float(chunk.score), 4),
@@ -323,6 +324,7 @@ class GenericRagService:
                     AnswerCitation(
                         citation_number=num,
                         chunk_id=chunk_pid or str(num),
+                        version_id=getattr(chunk, "version_id", None),
                         document_id=doc.external_document_id if doc else chunk.document_id,
                         file_name=doc.file_name if doc else None,
                         page_number=chunk.start_page,
@@ -351,7 +353,9 @@ class GenericRagService:
         if len(by_id) != len(identifiers) or any(by_id[chunk.point_id].content != chunk.content for chunk in chunks):
             raise ProviderNotApprovedError("Answer source access or version changed.")
         sources = [{"document_id": row.document_id, "chunk_index": row.chunk_index, "chunk_id": row.point_id,
-                    "chunk_row_id": str(row.id), "content_sha256": hashlib.sha256(row.content.encode()).hexdigest()}
+                    "chunk_row_id": str(row.id), "version_id": row.metadata_json.get("version_id"),
+                    "source_sha256": row.metadata_json.get("source_sha256"),
+                    "content_sha256": hashlib.sha256(row.content.encode()).hexdigest()}
                    for point_id in identifiers if (row := by_id.get(point_id)) is not None]
         message = await append_turn(self.db, access, query, result.answer, sources, result.retrieval_query, result.rewritten)
         await self.db.commit()

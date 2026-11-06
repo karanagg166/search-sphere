@@ -27,6 +27,7 @@ class MedicalDocumentIngestResponse(BaseModel):
 
 
 class MedicalDocumentStatusResponse(BaseModel):
+    current_version_id: str | None = Field(default=None, alias="currentVersionId", serialization_alias="currentVersionId")
     model_config = ConfigDict(populate_by_name=True)
 
     document_id: str = Field(..., alias="documentId", serialization_alias="documentId")

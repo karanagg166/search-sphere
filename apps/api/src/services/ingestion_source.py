@@ -36,6 +36,7 @@ class IngestionSource:
     file_name: str = field(repr=False)
     document_type: str | None = None
     report_date: datetime | None = None
+    active_version_id: str | None = None
 
     def vector_payload(self):
         from src.inference.cohere_gateway import EMBEDDING_MODEL
@@ -83,6 +84,7 @@ async def load_ingestion_source(db, kind, document_id):
         file_name=row.filename if kind == "standalone" else row.file_name,
         document_type=None if kind == "standalone" else row.document_type,
         report_date=None if kind == "standalone" else row.report_date,
+        active_version_id=row.current_version_id,
     )
 
 

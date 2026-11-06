@@ -189,6 +189,19 @@ async def get_document_cleanup(
     return await cleanup_receipt(db, row)
 
 
+@router.get("/{document_id}/versions", summary="List delegated published index versions")
+async def get_document_versions(
+    document_id: str, limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
+    context: ServiceContext = Depends(get_service_context(required_scopes={"documents:read"})),
+    db: AsyncSession = Depends(get_db), storage: ObjectStorage = Depends(get_object_storage),
+) -> dict:
+    from src.services.document_versions import list_published_versions
+
+    document = await GenericDocumentService(db, storage).get_document(context, document_id)
+    return {"current_version_id": document.current_version_id,
+        "versions": await list_published_versions(db, "external", document.id, limit, offset)}
+
+
 @router.get("/{document_id}/evidence/{evidence_id}", summary="Read delegated full structured evidence")
 async def get_document_evidence(
     document_id: str, evidence_id: str,

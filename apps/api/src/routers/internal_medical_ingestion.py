@@ -246,6 +246,7 @@ async def get_medical_document_status(
     await attach_job_progress(session, "external", [record])
     return MedicalDocumentStatusResponse(
         documentId=record.external_document_id,
+        currentVersionId=record.current_version_id,
         status=record.status,
         job=record.job,
         processedAt=record.processed_at,
