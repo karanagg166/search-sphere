@@ -14,11 +14,14 @@ from src.retrieval.reranked_retriever import (
     RerankedQueryValidationError,
     RerankedRetrievalError,
 )
+from src.schemas.query_route import QueryRoute
 from src.schemas.search import (
     SearchRequest,
     SearchResponse,
     SearchResultResponse,
 )
+from src.security.query_access import current_query_access
+from src.services.conversation_context import select_conversation_context
 from src.services.query_rewriter import QueryRewriter, get_query_rewriter
 from src.services.workload_scheduler import workload_scheduler
 
@@ -83,6 +86,15 @@ class SearchService:
         """
         target_document_id: str | None = None
         target_document_ids: list[str] | None = None
+        access = current_query_access()
+        selection = await select_conversation_context(access, request.query)
+        if access is not None:
+            access.history = selection.history
+            access.selected_message_ids = selection.message_ids
+            access.requires_history = selection.requires_history
+        if selection.clarification:
+            return SearchResponse(query=request.query, retrieval_query=request.query, total=0, results=[],
+                requires_history=True, route=QueryRoute.CLARIFICATION, clarification=selection.clarification)
 
         # 1. Authorization & Scoping
         if request.document_id is not None:
@@ -123,9 +135,13 @@ class SearchService:
         async with workload_scheduler.interactive_rag_scope():
             rewrite_result = await self.query_rewriter.rewrite(
                 query=request.query,
-                conversation_context=request.conversation_context,
+                conversation_context=selection.history,
             )
             retrieval_query = rewrite_result.retrieval_query
+            if selection.requires_history and not rewrite_result.rewritten and selection.exact_previous_answer is None:
+                return SearchResponse(query=request.query, retrieval_query=request.query, total=0, results=[],
+                    requires_history=True, route=QueryRoute.CLARIFICATION, context_message_ids=selection.message_ids,
+                    clarification="Please specify the topic or policy for this follow-up.")
 
             # 3. Execute two-stage reranked retrieval pipeline
             try:
@@ -212,4 +228,6 @@ class SearchService:
             rewritten=rewrite_result.rewritten,
             total=len(result_responses),
             results=result_responses,
+            requires_history=selection.requires_history,
+            context_message_ids=selection.message_ids,
         )

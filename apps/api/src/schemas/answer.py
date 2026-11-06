@@ -2,6 +2,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from src.schemas.query_route import QueryRoute
 from src.schemas.search import SearchRequest
 
 
@@ -58,6 +59,9 @@ class AnswerResponse(BaseModel):
         default_factory=list,
         description="Attributed source document chunks supporting the answer.",
     )
+    requires_history: bool = False
+    route: QueryRoute = QueryRoute.RAG
+    context_message_ids: list[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod

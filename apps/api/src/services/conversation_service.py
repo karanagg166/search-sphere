@@ -5,7 +5,6 @@ import structlog
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config import settings
 from src.models.user import User
 from src.repositories.conversation_repository import ConversationRepository
 from src.schemas.answer import AnswerRequest, AnswerSource
@@ -16,7 +15,8 @@ from src.schemas.conversation import (
     ConversationSummaryResponse,
     MessageResponse,
 )
-from src.schemas.search import ConversationMessage, SearchRequest
+from src.schemas.search import SearchRequest
+from src.security.query_access import current_query_access
 from src.services.answer_generator import NO_RESULTS_ANSWER, sanitize_citations
 from src.services.answer_service import AnswerService
 
@@ -178,16 +178,6 @@ class ConversationService:
                 detail="Conversation not found.",
             )
 
-        # 2. Fetch recent conversation history for contextual query rewriting
-        recent_messages = await self.repo.get_recent_messages(
-            conversation_id=conversation_id,
-            limit=settings.CONVERSATION_MAX_HISTORY_MESSAGES,
-        )
-        conversation_context = [
-            ConversationMessage(role=m.role, content=m.content)
-            for m in recent_messages
-        ]
-
         # 3. Persist the user's question as a user message
         await self.repo.create_message(
             conversation_id=conversation_id,
@@ -206,7 +196,8 @@ class ConversationService:
         # 5. Delegate RAG answer generation to existing AnswerService
         answer_req = AnswerRequest(
             query=request.query,
-            conversation_context=conversation_context,
+            conversation_id=conversation_id,
+            conversation_context=None,
             top_k=request.top_k,
             candidate_k=request.candidate_k,
             document_id=request.document_id,
@@ -249,6 +240,9 @@ class ConversationService:
             rewritten=answer_resp.rewritten,
             answer=answer_resp.answer,
             sources=answer_resp.sources,
+            requires_history=answer_resp.requires_history,
+            route=answer_resp.route,
+            context_message_ids=answer_resp.context_message_ids,
         )
 
     async def stream_answer_in_conversation(
@@ -269,16 +263,6 @@ class ConversationService:
             yield f"event: error\ndata: {json.dumps({'error': 'Conversation not found.'})}\n\n"
             return
 
-        # 2. Fetch recent conversation history
-        recent_messages = await self.repo.get_recent_messages(
-            conversation_id=conversation_id,
-            limit=settings.CONVERSATION_MAX_HISTORY_MESSAGES,
-        )
-        conversation_context = [
-            ConversationMessage(role=m.role, content=m.content)
-            for m in recent_messages
-        ]
-
         # 3. Persist the user's question
         await self.repo.create_message(
             conversation_id=conversation_id,
@@ -297,7 +281,8 @@ class ConversationService:
         # 5. Search & retrieve chunks
         search_req = SearchRequest(
             query=request.query,
-            conversation_context=conversation_context,
+            conversation_id=conversation_id,
+            conversation_context=None,
             top_k=request.top_k,
             candidate_k=request.candidate_k,
             document_id=request.document_id,
@@ -312,22 +297,26 @@ class ConversationService:
             "query": search_response.query,
             "retrieval_query": search_response.retrieval_query,
             "rewritten": search_response.rewritten,
+            "requires_history": search_response.requires_history,
+            "route": search_response.route,
+            "context_message_ids": search_response.context_message_ids,
         }
         yield f"event: metadata\ndata: {json.dumps(metadata_payload)}\n\n"
 
         if not search_response.results:
+            no_results = search_response.clarification or NO_RESULTS_ANSWER
             yield f"event: source\ndata: {json.dumps({'sources': []})}\n\n"
-            yield f"event: token\ndata: {json.dumps({'token': NO_RESULTS_ANSWER})}\n\n"
+            yield f"event: token\ndata: {json.dumps({'token': no_results})}\n\n"
             msg = await self.repo.create_message(
                 conversation_id=conversation_id,
                 role="assistant",
-                content=NO_RESULTS_ANSWER,
+                content=no_results,
                 original_query=search_response.query,
                 retrieval_query=search_response.retrieval_query,
                 rewritten=search_response.rewritten,
                 sources=[],
             )
-            yield f"event: done\ndata: {json.dumps({'message_id': msg.id, 'answer': NO_RESULTS_ANSWER, 'sources': []})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'message_id': msg.id, 'answer': no_results, 'sources': []})}\n\n"
             return
 
         usable_chunks = search_response.results[: self.answer_service.answer_generator.max_context_chunks]
@@ -352,7 +341,7 @@ class ConversationService:
             token_iter, _ = await self.answer_service.answer_generator.generate_answer_stream(
                 query=search_response.query,
                 chunks=search_response.results,
-                conversation_context=conversation_context,
+                conversation_context=current_query_access().history if current_query_access() else None,
             )
             async for token in token_iter:
                 accumulated_tokens.append(token)
@@ -375,7 +364,7 @@ class ConversationService:
                     fallback_answer, _ = await self.answer_service.answer_generator.generate_answer(
                         query=search_response.query,
                         chunks=usable_chunks,
-                        conversation_context=conversation_context,
+                        conversation_context=current_query_access().history if current_query_access() else None,
                     )
                     raw_answer = fallback_answer.strip() if fallback_answer else ""
                     if raw_answer:

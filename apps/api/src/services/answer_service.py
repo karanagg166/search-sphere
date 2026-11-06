@@ -8,6 +8,7 @@ from src.inference.policy import ProviderError
 from src.models.user import User
 from src.schemas.answer import AnswerRequest, AnswerResponse, AnswerSource
 from src.schemas.search import SearchRequest
+from src.security.query_access import current_query_access
 from src.services.answer_generator import (
     NO_RESULTS_ANSWER,
     AnswerGenerationConfigError,
@@ -70,7 +71,8 @@ class AnswerService:
         # 1. Execute authenticated retrieval via existing SearchService
         search_req = SearchRequest(
             query=request.query,
-            conversation_context=request.conversation_context,
+            conversation_id=request.conversation_id,
+            conversation_context=None,
             top_k=request.top_k,
             candidate_k=request.candidate_k,
             document_id=request.document_id,
@@ -92,8 +94,11 @@ class AnswerService:
                 query=search_response.query,
                 retrieval_query=search_response.retrieval_query,
                 rewritten=search_response.rewritten,
-                answer=NO_RESULTS_ANSWER,
+                answer=search_response.clarification or NO_RESULTS_ANSWER,
                 sources=[],
+                requires_history=search_response.requires_history,
+                route=search_response.route,
+                context_message_ids=search_response.context_message_ids,
             )
 
         # 3. Generate grounded answer from retrieved top chunks
@@ -102,7 +107,7 @@ class AnswerService:
                 await self.answer_generator.generate_answer(
                     query=search_response.query,
                     chunks=search_response.results,
-                    conversation_context=request.conversation_context,
+                    conversation_context=current_query_access().history if current_query_access() else None,
                 )
             )
         except AnswerGenerationTimeoutError as exc:
@@ -183,6 +188,9 @@ class AnswerService:
             rewritten=search_response.rewritten,
             answer=answer_text,
             sources=sources,
+            requires_history=search_response.requires_history,
+            route=search_response.route,
+            context_message_ids=search_response.context_message_ids,
         )
 
     async def stream_answer(
@@ -195,7 +203,8 @@ class AnswerService:
         """
         search_req = SearchRequest(
             query=request.query,
-            conversation_context=request.conversation_context,
+            conversation_id=request.conversation_id,
+            conversation_context=None,
             top_k=request.top_k,
             candidate_k=request.candidate_k,
             document_id=request.document_id,
@@ -210,13 +219,16 @@ class AnswerService:
             "query": search_response.query,
             "retrieval_query": search_response.retrieval_query,
             "rewritten": search_response.rewritten,
+            "requires_history": search_response.requires_history,
+            "route": search_response.route,
+            "context_message_ids": search_response.context_message_ids,
         }
         yield f"event: metadata\ndata: {json.dumps(metadata_payload)}\n\n"
 
         if not search_response.results:
             yield f"event: source\ndata: {json.dumps({'sources': []})}\n\n"
-            yield f"event: token\ndata: {json.dumps({'token': NO_RESULTS_ANSWER})}\n\n"
-            yield f"event: done\ndata: {json.dumps({'answer': NO_RESULTS_ANSWER, 'sources': []})}\n\n"
+            yield f"event: token\ndata: {json.dumps({'token': search_response.clarification or NO_RESULTS_ANSWER})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'answer': search_response.clarification or NO_RESULTS_ANSWER, 'sources': []})}\n\n"
             return
 
         usable_chunks = search_response.results[: self.answer_generator.max_context_chunks]
@@ -240,7 +252,7 @@ class AnswerService:
             token_iter, _ = await self.answer_generator.generate_answer_stream(
                 query=search_response.query,
                 chunks=search_response.results,
-                conversation_context=request.conversation_context,
+                conversation_context=current_query_access().history if current_query_access() else None,
             )
             async for token in token_iter:
                 accumulated_tokens.append(token)
@@ -256,7 +268,7 @@ class AnswerService:
                     fallback_answer, _ = await self.answer_generator.generate_answer(
                         query=search_response.query,
                         chunks=usable_chunks,
-                        conversation_context=request.conversation_context,
+                        conversation_context=current_query_access().history if current_query_access() else None,
                     )
                     raw_answer = fallback_answer.strip() if fallback_answer else ""
                     if raw_answer:
@@ -280,7 +292,7 @@ class AnswerService:
                 fallback_answer, _ = await self.answer_generator.generate_answer(
                     query=search_response.query,
                     chunks=usable_chunks,
-                    conversation_context=request.conversation_context,
+                    conversation_context=current_query_access().history if current_query_access() else None,
                 )
                 raw_answer = fallback_answer.strip() if fallback_answer else NO_RESULTS_ANSWER
                 clean_answer = sanitize_citations(raw_answer, max_source_id=len(sources))

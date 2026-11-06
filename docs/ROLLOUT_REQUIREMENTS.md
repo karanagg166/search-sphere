@@ -490,3 +490,37 @@ pinned rollout and live verification):
 | [#42 hosted token limits](https://github.com/karanagg166/search-sphere/pull/42) | 77fba3f5d067559457382066badc444230339f27 | [42226394219](https://github.com/karanagg166/search-sphere/actions/runs/42226394219) |
 | [#43 native tables](https://github.com/karanagg166/search-sphere/pull/43) | 8e28313859071f0192157057fe3072a01e186141 | [42227369092](https://github.com/karanagg166/search-sphere/actions/runs/42227369092) |
 | [#44 hosted layout/crops](https://github.com/karanagg166/search-sphere/pull/44) | 7babae2cad6dc67c26067a0d3d2ba6845ad71c0d | [42229574288](https://github.com/karanagg166/search-sphere/actions/runs/42229574288) |
+
+### Selective native conversation history
+
+`services/conversation_context.py` classifies `requires_history` independently of
+intent. Greetings and standalone questions perform no history query. Follow-ups
+select one bounded, topic/recency/message-reference turn pair from the authorized
+PostgreSQL conversation, including older topic questions outside the recent window.
+Greetings/acknowledgments are skipped. Exact previous-answer requests load that
+response without truncation or substitution. Missing, oversized, stale, or revoked
+references produce clarification. Prior source text must match a current authorized
+chunk; selected message and source hashes are rechecked around subsequent inference.
+
+Native search/answer/conversation JSON and SSE expose history selection metadata.
+The compatibility `conversation_context` field is ignored by native query routes;
+only server-selected history is transmitted. Rewriting conservatively preserves
+names, dates, numbers, identifiers and negation, rejects invented numbers, and asks
+for clarification when a follow-up cannot be rewritten. No generated rewrite reasons
+or exception contents are logged. Real PostgreSQL tests cover the maternity-policy
+“What about interns?” regression, greetings, old-topic selection, exact response and
+message references, cross-user denial, evidence replacement, and context mutation.
+HTTP tests seed authoritative history and prove client instructions are discarded.
+
+Delegated conversation persistence, complete intent routing, exact-prior-response
+answer execution, full citation support/SSE validation, compact memory, versioned
+provenance, and caching remain open. This native foundation is not a completed query
+pipeline or production rollout.
+
+Quick-Clinic [PR #162](https://github.com/karanagg166/Quick-Clinic/pull/162) is merged
+at `98e35720e14cb5f0654cdae9d6bab78177a76e85`; live `/api/health` reports that exact
+SHA. Its trusted post-deployment deployment-contract workflow
+[42234017364](https://github.com/karanagg166/Quick-Clinic/actions/runs/42234017364)
+passed. This verifies deployment contracts only; the mandatory authenticated Search
+Sphere patient journey remains open. ExamArena PR #30's abbreviated-SHA test fixture
+was corrected after CI rejected it; full CI/review/deployment verification continues.
