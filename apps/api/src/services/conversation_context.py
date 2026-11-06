@@ -16,6 +16,7 @@ from src.schemas.query_route import QueryRoute
 from src.schemas.search import ConversationMessage, RewriteResult
 from src.security.conversation_access import conversation_query
 from src.security.structured_access import observation_fingerprint, observation_query
+from src.services.compact_memory import relevant_memory_messages
 from src.services.query_intent import QueryIntent, classify_intent
 
 _DIRECT = re.compile(r"^(?:hi|hello|hey|good (?:morning|evening|afternoon)|thanks?|thank you|bye|you['’]?re welcome|happy to help|ok(?:ay)?|got it)[!.\s]*$", re.I)
@@ -99,6 +100,11 @@ async def select_conversation_context(access, query):
         recent = list((await db.execute(base.order_by(Message.created_at.desc(), Message.id.desc()).limit(64))).scalars().all())
         matching_questions = {}
         explicit = _MESSAGE_ID.search(query)
+        if not explicit:
+            identifiers=await relevant_memory_messages(db,access,query)
+            remembered=list((await db.execute(base.where(Message.id.in_(identifiers)))).scalars().all()) if identifiers else []
+            known={message.id for message in recent}
+            recent += [message for message in remembered if message.id not in known]
         if explicit:
             referenced = (await db.execute(base.where(Message.id == explicit[1]))).scalar_one_or_none()
             if referenced is None:
