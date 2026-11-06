@@ -10,6 +10,7 @@ from src.models.conversation import Conversation
 from src.models.message import Message
 from src.security.conversation_access import conversation_query
 from src.security.data_screening import contains_secrets
+from src.services.compact_memory import update_memory
 from src.services.conversation_context import message_evidence
 
 
@@ -70,6 +71,7 @@ async def append_turn(db, access, query, answer, sources, retrieval_query=None, 
     db.add_all([question, response])
     conversation.updated_at = now
     await db.flush()
+    await update_memory(db,access,question,response)
     return response
 
 

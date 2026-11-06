@@ -730,3 +730,36 @@ medical/company record or credential was included in the provider fixtures.
 [42256311065](https://github.com/karanagg166/search-sphere/actions/runs/42256311065).
 The backend production revision remains `8288c9d` pending migrations, versioned index
 cutover, protected release deployment and all three required authenticated journeys.
+
+### Bounded permission-aware compact memory
+
+Migration 019 adds `conversation_memory`, separate from messages and owned through
+the existing conversation foreign key. Existing native/delegated identity checks
+therefore also isolate memory by user or client/tenant/actor/collection/subject.
+Completed turns update messages and memory in the same transaction while holding
+the conversation row lock. Memory keeps eight distinct topic turns, eight recent
+intents, bounded answer keywords, message IDs, and compact source fingerprints.
+It contains no copied source passages and is capped at 32 KiB per conversation.
+Document version IDs are retained when available; full versioned provenance is the
+following document-version phase, not claimed by this memory foundation.
+
+Memory supplies IDs only. The selector fetches those messages inside the same
+conversation and reauthorizes their evidence before history enters rewriting or
+answer selection. Useful topics survive intervening greetings. Deleted/changed
+sources cannot be revived from memory. Conversation deletion cascades memory.
+
+Six real PostgreSQL cases cover compact references/provenance without source text,
+transaction rollback, topics outside the 64-message window, revocation, native and
+delegated actor isolation, bounds/cascade deletion, and concurrent updates without
+lost turns. The combined authorization/history/stream/guardrail/memory suite passed
+37 PostgreSQL tests, and the full API suite passed with its existing isolated-services
+skip. No model inference is needed for compact memory maintenance.
+
+[Search Sphere #52](https://github.com/karanagg166/search-sphere/pull/52) merged at
+`0863f555e03b0a2cd78301c3eb8d78921eefe2e1`; all required CI passed in
+[42257904520](https://github.com/karanagg166/search-sphere/actions/runs/42257904520).
+Production remains on backend `8288c9d`. Caching, document versions/cutover,
+legacy-worker retirement, broader evaluation and all three live journeys remain open.
+The Vercel management credential still returns 403; the browser dashboard opens the
+Vercel login page, so billing-tier verification remains pending owner confirmation
+or reconnection. No paid resource or upgrade was requested or created.
