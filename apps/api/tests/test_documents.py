@@ -65,7 +65,7 @@ async def test_pdf_upload_and_lifecycle(mock_storage):
             assert doc_data["filename"] == "sample_report.pdf"
             assert doc_data["file_size"] == len(pdf_bytes)
             assert doc_data["mime_type"] == "application/pdf"
-            assert doc_data["status"] == "uploaded"
+            assert doc_data["status"] == "queued"
             assert "documents/" in doc_data["storage_key"]
             assert doc_data["file_url"] is not None
             document_id = doc_data["id"]

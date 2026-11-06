@@ -114,6 +114,8 @@ class DocumentExtractor:
         pages: list[ExtractedPage] = []
 
         try:
+            if document.needs_pass or document.page_count > 100:
+                raise DocumentExtractionError("PDF is encrypted or exceeds the 100-page processing limit.")
             for page_number, page in enumerate(
                 document,
                 start=1,

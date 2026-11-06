@@ -266,3 +266,49 @@ The gateway also treats permanent 4xx provider rejection as nonretryable.
 Two real PostgreSQL policy tests and synthetic gateway denial/revalidation tests are
 required in CI. The durable worker/source binding is a separate following PR. This
 foundation is not a claim that all conversation/resource paths are wired yet.
+
+The PostgreSQL policy foundation [#37](https://github.com/karanagg166/search-sphere/pull/37)
+merged at `95d93b184f37109f0e18c60a0cb14bd447f70bfe` after all four jobs passed
+([42212181916](https://github.com/karanagg166/search-sphere/actions/runs/42212181916)).
+Production migration 014 and deployment remain pending.
+
+### Unified PostgreSQL ingestion binding
+
+`services/ingestion_worker.py` now processes standalone, generic and medical records
+through one PostgreSQL queue. Registration and outbox creation commit together;
+duplicate identity registration preserves the existing job/state, while explicit
+reindex creates a new generation and invalidates the prior lease. Medical compatibility
+routes accept `forceReindex`; `/api/v1` accepts `reindex`. New standalone rows use
+`queued`, which prevents pre-upgrade workers from claiming them during handoff.
+
+The worker uses one processing slot, heartbeats, lease fencing, delayed bounded
+retries and fixed terminal codes. It resolves classification/client authorization
+from PostgreSQL before downloading content and rechecks before model requests and
+publication. Vector chunks, raw extracted content, exact structured medical
+observations, chunk counts and completion status publish in one transaction.
+Failed reindexing preserves the previous working index. Changed indexed content is
+temporarily rejected with 409 until immutable document version replacement is added;
+the pending version feature is not represented as complete.
+
+Owned status/list responses include job state, stage, attempts, generation, queue
+age, timestamps and safe failure codes. Legacy pending adoption is bounded and
+preserves live leases and original registration age. The native sync route is now
+bounded to the authenticated owner and no longer runs a global missing-vector scan.
+API RabbitMQ producers and their dependency are removed. Worker startup cannot
+silently fail while the API reports healthy. Health/diagnostics do not run models.
+
+Executed local verification: 278 API tests passed, one existing live-service test
+explicitly skipped; 33 real PostgreSQL/pgvector release tests passed. They include
+actual HTTP generic/medical upload and registration, shared processing/publication,
+structured clinical values, duplicate/concurrent registration, restart recovery,
+revocation before publication, live legacy lease preservation, old queue age,
+failed reindex preservation and the 100-page PDF guard before model calls. Provider
+HTTP in these integration tests is synthetic; live provider capability checks are
+recorded separately. The rebuilt production image passed its offline package,
+weight and health checks.
+
+The initial 350-target/400-maximum coarse token setting is provisional. Hosted-token
+limit verification and the requested 500/700/60 semantic/layout benchmark remain
+open. Full query-context binding, model-version filtering/cutover, strict physical
+deletion verification and all three authenticated live release journeys remain open.
+Do not mark the rollout complete or deploy an incomplete acceptance chain.

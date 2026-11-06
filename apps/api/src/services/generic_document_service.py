@@ -8,12 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.collection import DocumentCollection
 from src.models.external_document import ExternalDocument
+from src.repositories.external_registration import register_external_document
 from src.schemas.v1.documents import (
     DocumentRegisterRequest,
 )
 from src.security.service_context import ServiceContext
+from src.services.ingestion_progress import attach_job_progress
 from src.storage.object_storage import ObjectStorage
-from src.tasks.document_tasks import enqueue_generic_document
 from src.vector_store.qdrant_store import QdrantVectorStore
 
 logger = structlog.get_logger()
@@ -213,56 +214,18 @@ class GenericDocumentService:
         clean_file_name = sanitize_filename(request.file_name)
         clean_doc_type = request.document_type.strip().upper()
 
-        # Check existing record for this client + tenant + external_document_id
-        stmt = select(ExternalDocument).where(
-            ExternalDocument.source_system == context.client_id,
-            ExternalDocument.tenant_id == context.tenant_id,
-            ExternalDocument.external_document_id == clean_ext_id,
-        )
-        res = await self.db.execute(stmt)
-        doc = res.scalar_one_or_none()
-
-        if doc:
-            if doc.owner_subject_id != context.subject_id or doc.collection_id != context.collection_id:
-                raise HTTPException(status_code=409, detail="Document identity is already assigned to another scope.")
-            doc.collection_id = context.collection_id
-            doc.owner_subject_id = context.subject_id
-            doc.storage_path = storage_key
-            doc.file_name = clean_file_name
-            doc.mime_type = request.mime_type
-            doc.file_size = request.file_size
-            doc.document_type = clean_doc_type
-            doc.metadata_json = request.metadata
-            doc.external_patient_id = context.subject_id or "default"
-            doc.status = "QUEUED"
-            doc.processing_error = None
-        else:
-            doc = ExternalDocument(
-                source_system=context.client_id,
-                tenant_id=context.tenant_id,
-                collection_id=context.collection_id,
-                owner_subject_id=context.subject_id,
-                external_patient_id=context.subject_id or "default",
-                external_document_id=clean_ext_id,
-                storage_path=storage_key,
-                file_name=clean_file_name,
-                mime_type=request.mime_type,
-                file_size=request.file_size,
-                document_type=clean_doc_type,
-                metadata_json=request.metadata,
-                status="QUEUED",
-            )
-            self.db.add(doc)
-
+        doc, _ = await register_external_document(self.db, {
+            "source_system": context.client_id, "tenant_id": context.tenant_id,
+            "collection_id": context.collection_id, "owner_subject_id": context.subject_id,
+            "external_patient_id": context.subject_id or "default", "external_document_id": clean_ext_id,
+            "storage_path": storage_key, "file_name": clean_file_name, "mime_type": request.mime_type,
+            "file_size": request.file_size, "document_type": clean_doc_type, "metadata_json": request.metadata,
+        }, reindex=request.reindex)
         await self.db.commit()
         await self.db.refresh(doc)
+        from src.services.ingestion_worker import ingestion_worker
 
-        # Enqueue processing task using the database primary key ID
-        if not enqueue_generic_document(doc.id, request_id=request_id):
-            doc.status = "FAILED"
-            doc.processing_error = "Processing queue is unavailable; retry registration."
-            await self.db.commit()
-            await self.db.refresh(doc)
+        ingestion_worker.notify_new_job()
 
         logger.info(
             "Registered document and enqueued processing",
@@ -271,6 +234,7 @@ class GenericDocumentService:
             tenant_id=context.tenant_id,
             external_document_id=clean_ext_id,
         )
+        await attach_job_progress(self.db, "external", [doc])
         return doc
 
     async def get_document(
@@ -298,6 +262,7 @@ class GenericDocumentService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Document '{doc_id_or_external_id}' not found.",
             )
+        await attach_job_progress(self.db, "external", [doc])
         return doc
 
     async def list_documents(
@@ -328,7 +293,9 @@ class GenericDocumentService:
 
         stmt = base_stmt.order_by(ExternalDocument.created_at.desc()).limit(limit).offset(offset)
         res = await self.db.execute(stmt)
-        return list(res.scalars().all()), total
+        documents = list(res.scalars().all())
+        await attach_job_progress(self.db, "external", documents)
+        return documents, total
 
     async def delete_document(
         self,

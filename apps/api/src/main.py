@@ -57,21 +57,19 @@ async def lifespan(app: FastAPI):
     # Startup: Database schema is managed via Alembic migrations (no startup DDL)
     logger.info("Initializing Search Sphere application...")
 
-    # Start durable document processor background worker
-    try:
-        from src.services.durable_processor import durable_processor
+    # Enabled ingestion is required to start; a broken worker must not look healthy.
+    if settings.RUN_INGESTION_WORKER:
+        from src.services.ingestion_worker import ingestion_worker
 
-        durable_processor.start()
-    except Exception as e:
-        logger.warning("Could not start durable_processor on startup", error=str(e))
+        ingestion_worker.start()
 
     yield
     # Shutdown: Terminate background workers and dispose database connections gracefully
     logger.info("Shutting down Search Sphere application...")
     try:
-        from src.services.durable_processor import durable_processor
+        from src.services.ingestion_worker import ingestion_worker
 
-        await durable_processor.stop()
+        await ingestion_worker.stop()
     except Exception as e:
         logger.warning("Error stopping durable processor", error=str(e))
 

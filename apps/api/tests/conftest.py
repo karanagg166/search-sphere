@@ -68,12 +68,6 @@ def ensure_test_service_secret():
 
 
 @pytest.fixture(autouse=True)
-def isolate_unit_test_queue():
-    """Unit HTTP tests must not dispatch jobs into a running worker."""
-    from src.tasks import document_tasks
-    if not getattr(document_tasks, "broker", None):
-        yield
-        return
-    with patch.object(document_tasks.broker, "enqueue") as enqueue:
-        enqueue.side_effect = lambda message, **kwargs: message
-        yield
+def isolate_unit_test_queue(monkeypatch):
+    """HTTP tests persist real outbox rows; only dedicated worker tests claim them."""
+    monkeypatch.setattr(settings, "RUN_INGESTION_WORKER", False)

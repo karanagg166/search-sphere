@@ -88,6 +88,7 @@ class IngestionQueue:
                 job.status = "FAILED" if job.attempts >= MAX_ATTEMPTS else "QUEUED"
                 job.stage = "failed" if job.status == "FAILED" else "recovering"
                 job.error_code = "lease_expired" if job.status == "FAILED" else None
+                await self.mirror_document_state(db, job)
             await db.flush()
             job = (
                 await db.execute(
@@ -108,6 +109,7 @@ class IngestionQueue:
             job.attempts += 1
             job.lease_token = str(uuid.uuid4())
             job.lease_expires_at = datetime.now(UTC) + timedelta(seconds=LEASE_SECONDS)
+            await self.mirror_document_state(db, job)
             return JobLease(
                 job.id,
                 job.document_kind,
@@ -174,6 +176,8 @@ class IngestionQueue:
             "provider_unavailable",
             "provider_quota",
             "provider_not_approved",
+            "provider_rate_limit",
+            "provider_invalid_response",
             "document_removed",
             "processing_failed",
         }:
@@ -191,7 +195,29 @@ class IngestionQueue:
                 seconds=min(5 * 2**job.attempts, 60)
             )
             job.lease_token = job.lease_expires_at = None
+            await self.mirror_document_state(db, job)
             return True
+
+    @staticmethod
+    async def mirror_document_state(db, job):
+        from src.models.document import Document
+        from src.models.external_document import ExternalDocument
+
+        model = Document if job.document_kind == "standalone" else ExternalDocument
+        row = await db.get(model, job.document_id)
+        if row is None:
+            return
+        # A failed replacement must not hide the previous working index. Job progress
+        # reports the replacement failure independently of the active document state.
+        working = bool(row.chunk_count) and row.status in {"indexed", "READY"}
+        if not working:
+            states = {
+                "standalone": {"RUNNING": "processing", "QUEUED": "queued", "RETRY": "queued", "FAILED": f"failed:{job.error_code or 'processing_failed'}"},
+                "external": {"RUNNING": "PROCESSING", "QUEUED": "QUEUED", "RETRY": "QUEUED", "FAILED": "FAILED"},
+            }
+            row.status = states[job.document_kind].get(job.status, row.status)
+        if job.document_kind == "external":
+            row.processing_error = job.error_code
 
 
 ingestion_queue = IngestionQueue()

@@ -1,4 +1,3 @@
-import asyncio
 import uuid
 from pathlib import Path
 from typing import Any
@@ -11,9 +10,9 @@ from src.config import settings
 from src.models.document import Document
 from src.models.user import User
 from src.repositories.document_repository import DocumentRepository
-from src.services.document_indexer import index_document_pipeline
+from src.repositories.ingestion_queue import ingestion_queue
+from src.services.ingestion_progress import attach_job_progress
 from src.storage.object_storage import ObjectStorage
-from src.tasks.document_tasks import enqueue_document
 
 logger = structlog.get_logger()
 
@@ -104,12 +103,15 @@ class DocumentService:
                 file_url=file_url,
                 file_size=file_size,
                 mime_type="application/pdf",
-                status="uploaded",
+                status="queued",
+                commit=False,
             )
+            await ingestion_queue.enqueue(self.db, "standalone", document_id)
+            await self.db.commit()
+            await self.db.refresh(document)
         except Exception as exc:
-            logger.error(
-                "Database persistence failed", document_id=document_id, error=str(exc)
-            )
+            await self.db.rollback()
+            logger.error("Document registration failed", document_id=document_id, error_type=type(exc).__name__)
             # Cleanup stored file from object storage to prevent orphans
             await self.storage.delete(storage_key)
             raise HTTPException(
@@ -117,19 +119,9 @@ class DocumentService:
                 detail="Failed to save document metadata in database.",
             ) from exc
 
-        # 5. Push document to worker queue for background processing (or fallback to durable processor)
-        enqueued = enqueue_document(document_id)
-        if not enqueued:
-            logger.info(
-                "Worker queue unavailable; queuing with durable document processor",
-                document_id=document_id,
-            )
-            try:
-                from src.services.durable_processor import durable_processor
+        from src.services.ingestion_worker import ingestion_worker
 
-                durable_processor.notify_new_job()
-            except Exception:
-                asyncio.create_task(index_document_pipeline(document_id))
+        ingestion_worker.notify_new_job()
 
         logger.info(
             "Document uploaded successfully",
@@ -138,6 +130,7 @@ class DocumentService:
             filename=document.filename,
             file_size=document.file_size,
         )
+        await attach_job_progress(self.db, "standalone", [document])
         return document
 
     async def list_user_documents(
@@ -146,6 +139,7 @@ class DocumentService:
         """Lists documents owned by the user and total count."""
         documents = await self.repository.list_by_user(user_id, limit, offset)
         total = await self.repository.count_by_user(user_id)
+        await attach_job_progress(self.db, "standalone", documents)
         return documents, total
 
     async def get_user_document(self, document_id: str, user_id: str) -> Document:
@@ -168,7 +162,36 @@ class DocumentService:
                     await self.repository.update(document, chunk_count=pts)
             except Exception:
                 pass
+        await attach_job_progress(self.db, "standalone", [document])
         return document
+
+    async def reindex_user_document(self, document_id, user_id):
+        document = await self.get_user_document(document_id, user_id)
+        job = await ingestion_queue.enqueue(self.db, "standalone", document.id, reset=True)
+        await ingestion_queue.mirror_document_state(self.db, job)
+        await self.db.commit()
+        await attach_job_progress(self.db, "standalone", [document])
+        from src.services.ingestion_worker import ingestion_worker
+
+        ingestion_worker.notify_new_job()
+        return document
+
+    async def queue_pending_user_documents(self, user_id, limit=20):
+        from src.services.ingestion_recovery import legacy_lease_active
+
+        documents = await self.repository.list_by_user(user_id, limit=limit)
+        queued = []
+        for document in documents:
+            if document.status == "indexed" or document.status.startswith("failed") or legacy_lease_active(document):
+                continue
+            job = await ingestion_queue.enqueue(self.db, "standalone", document.id)
+            await ingestion_queue.mirror_document_state(self.db, job)
+            queued.append(document.id)
+        await self.db.commit()
+        from src.services.ingestion_worker import ingestion_worker
+
+        ingestion_worker.notify_new_job()
+        return queued
 
     async def delete_user_document(self, document_id: str, user_id: str) -> None:
         """Deletes document points from Qdrant vector store, file from Object Storage, and PostgreSQL metadata."""

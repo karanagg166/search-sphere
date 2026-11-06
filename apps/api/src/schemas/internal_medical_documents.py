@@ -2,9 +2,12 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.schemas.ingestion import IngestionProgress
+
 
 class MedicalDocumentIngestRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
+    reindex: bool = Field(False, alias="forceReindex")
 
     patient_id: str = Field(..., alias="patientId")
     storage_path: str = Field(..., alias="storagePath")
@@ -20,6 +23,7 @@ class MedicalDocumentIngestResponse(BaseModel):
 
     document_id: str = Field(..., alias="documentId", serialization_alias="documentId")
     status: str
+    job: IngestionProgress | None = None
 
 
 class MedicalDocumentStatusResponse(BaseModel):
@@ -29,6 +33,7 @@ class MedicalDocumentStatusResponse(BaseModel):
     status: str
     processed_at: datetime | str | None = Field(None, alias="processedAt", serialization_alias="processedAt")
     error: str | None = None
+    job: IngestionProgress | None = None
 
 
 class MedicalDocumentDeleteIndexResponse(BaseModel):

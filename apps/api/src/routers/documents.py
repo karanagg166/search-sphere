@@ -7,11 +7,6 @@ from src.schemas.document import DocumentListResponse, DocumentResponse
 from src.security.jwt import get_current_user
 from src.security.rate_limiter import rate_limiter
 from src.services.document_access import private_document_response
-from src.services.document_indexer import (
-    audit_and_recover_missing_vectors,
-    index_document_pipeline,
-    sync_unindexed_documents,
-)
 from src.services.document_service import DocumentService
 from src.storage.object_storage import ObjectStorage, get_object_storage
 
@@ -69,14 +64,16 @@ async def list_documents(
 )
 async def sync_all_unindexed(
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: ObjectStorage = Depends(get_object_storage),
 ) -> dict:
-    indexed = await sync_unindexed_documents()
-    recovery = await audit_and_recover_missing_vectors(batch_size=10)
+    queued = await DocumentService(db, storage).queue_pending_user_documents(current_user.id)
     return {
-        "message": "Sync completed",
-        "indexed_count": len(indexed),
-        "indexed_ids": indexed,
-        "recovery": recovery,
+        "message": "Owned pending documents queued",
+        "indexed_count": 0,
+        "indexed_ids": [],
+        "queued_count": len(queued),
+        "queued_ids": queued,
     }
 
 
@@ -134,7 +131,7 @@ async def delete_document(
     response_model=DocumentResponse,
     status_code=status.HTTP_200_OK,
     summary="Reindex document",
-    description="Trigger in-process re-extraction and indexing into Qdrant for a document.",
+    description="Queue durable re-extraction and indexing for an owned document.",
 )
 async def reindex_document(
     document_id: str,
@@ -143,7 +140,5 @@ async def reindex_document(
     storage: ObjectStorage = Depends(get_object_storage),
 ) -> DocumentResponse:
     service = DocumentService(db=db, storage=storage)
-    doc = await service.get_user_document(document_id=document_id, user_id=current_user.id)
-    await index_document_pipeline(document_id=doc.id)
-    updated_doc = await service.get_user_document(document_id=document_id, user_id=current_user.id)
-    return DocumentResponse.model_validate(updated_doc)
+    document = await service.reindex_user_document(document_id, current_user.id)
+    return DocumentResponse.model_validate(document)
