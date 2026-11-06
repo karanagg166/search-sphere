@@ -2,6 +2,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.schemas.query_route import QueryRoute
+
 
 class ConversationMessageSchema(BaseModel):
     role: str = Field(..., pattern="^(user|assistant|system)$")
@@ -33,11 +35,11 @@ class AnswerRequest(BaseModel):
     system_prompt: str | None = Field(
         None,
         max_length=2000,
-        description="Optional custom system preamble instructions for the LLM",
+        description="Deprecated compatibility field; server-owned grounding policy always applies.",
     )
     conversation_history: list[ConversationMessageSchema] | None = Field(
         None,
-        description="Optional multi-turn conversation history",
+        description="Deprecated compatibility field; authorized history is loaded using conversation_id.",
     )
     metadata_filters: dict[str, Any] | None = Field(
         None,
@@ -52,3 +54,9 @@ class AnswerResponse(BaseModel):
     citations: list[AnswerCitation]
     retrieved_chunk_count: int
     duration_ms: float
+    route: QueryRoute = QueryRoute.RAG
+    requires_history: bool = False
+    context_message_ids: list[str] = Field(default_factory=list)
+    retrieval_query: str | None = None
+    rewritten: bool = False
+    message_id: str | None = None

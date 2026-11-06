@@ -8,7 +8,12 @@ import structlog
 
 from src.config import settings
 from src.inference.chat_adapter import CohereChatAdapter
-from src.inference.policy import ProviderError
+from src.inference.policy import (
+    ProviderError,
+    ProviderInvalidResponseError,
+    ProviderNotApprovedError,
+    ProviderTimeoutError,
+)
 from src.schemas.search import ConversationMessage, RewriteResult
 
 logger = structlog.get_logger()
@@ -93,7 +98,7 @@ class CohereQueryRewriteProvider(BaseQueryRewriteProvider):
         self.timeout_seconds = (
             timeout_seconds
             if timeout_seconds is not None
-            else getattr(settings, "QUERY_REWRITE_TIMEOUT_SECONDS", 5.0)
+            else getattr(settings, "QUERY_REWRITE_TIMEOUT_SECONDS", 20.0)
         )
         self._client = client
 
@@ -119,12 +124,7 @@ class CohereQueryRewriteProvider(BaseQueryRewriteProvider):
                 "Cohere API key not configured or is placeholder; skipping LLM rewrite",
                 query_length=len(clean_query),
             )
-            return RewriteResult(
-                original_query=clean_query,
-                retrieval_query=clean_query,
-                rewritten=False,
-                reason="Cohere API key not configured",
-            )
+            raise ProviderNotApprovedError("Query rewriting provider is not configured.")
 
         # Build formatted prompt input
         if conversation_context:
@@ -161,12 +161,10 @@ class CohereQueryRewriteProvider(BaseQueryRewriteProvider):
                     raw_text_length=len(raw_text[:200] if raw_text else ""),
                     query_length=len(clean_query),
                 )
-                return RewriteResult(
-                    original_query=clean_query,
-                    retrieval_query=clean_query,
-                    rewritten=False,
-                    reason="Invalid provider response format",
-                )
+                raise ProviderInvalidResponseError("Invalid query rewrite response format.")
+
+            if type(data.get("rewrite_needed")) is not bool or not isinstance(data.get("query"), str) or set(data) - {"rewrite_needed", "query", "reason"}:
+                raise ProviderInvalidResponseError("Invalid query rewrite decision fields.")
 
             rewrite_needed = bool(data.get("rewrite_needed", False))
             candidate_query = str(data.get("query", "")).strip()
@@ -212,30 +210,20 @@ class CohereQueryRewriteProvider(BaseQueryRewriteProvider):
 
         except ProviderError:
             raise
-        except TimeoutError:
+        except TimeoutError as exc:
             logger.warning(
-                "Cohere query rewrite timed out; falling back to original query",
+                "Cohere query rewrite timed out",
                 timeout=self.timeout_seconds,
                 query_length=len(clean_query),
             )
-            return RewriteResult(
-                original_query=clean_query,
-                retrieval_query=clean_query,
-                rewritten=False,
-                reason="Cohere request timed out",
-            )
+            raise ProviderTimeoutError("Query rewriting timed out.") from exc
         except Exception as exc:
             logger.warning(
-                "Cohere query rewrite failed; falling back to original query",
+                "Cohere query rewrite failed",
                 error_type=type(exc).__name__,
                 query_length=len(clean_query),
             )
-            return RewriteResult(
-                original_query=clean_query,
-                retrieval_query=clean_query,
-                rewritten=False,
-                reason="Cohere request failed",
-            )
+            raise ProviderError("Query rewriting is unavailable.") from exc
 
 
 class QueryRewriter:
@@ -247,7 +235,7 @@ class QueryRewriter:
     - Apply context limiting (respecting QUERY_REWRITE_MAX_CONTEXT_MESSAGES);
     - Skip rewrite when context is absent or query is already standalone;
     - Delegate execution to BaseQueryRewriteProvider;
-    - Fall back safely to original query on any provider error or timeout.
+    - Preserve provider failure codes; clarify unresolved or rejected rewrites.
     """
 
     def __init__(
@@ -380,16 +368,11 @@ class QueryRewriter:
             raise
         except Exception as exc:
             logger.error(
-                "Unexpected error during query rewriting; falling back to original query",
+                "Unexpected error during query rewriting",
                 error_type=type(exc).__name__,
                 query_length=len(clean_query),
             )
-            return RewriteResult(
-                original_query=clean_query,
-                retrieval_query=clean_query,
-                rewritten=False,
-                reason="Unexpected rewrite provider failure",
-            )
+            raise ProviderError("Query rewriting is unavailable.") from exc
 
 
 # Global cached query rewriter instance for dependency injection

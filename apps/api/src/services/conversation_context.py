@@ -10,7 +10,8 @@ from sqlalchemy import or_, select
 from src.models.conversation import Conversation
 from src.models.document_chunk import DocumentChunk
 from src.models.message import Message
-from src.schemas.search import ConversationMessage
+from src.processing.models.search import RerankedSearchResult
+from src.schemas.search import ConversationMessage, RewriteResult
 from src.security.conversation_access import conversation_query
 
 _DIRECT = re.compile(r"^(?:hi|hello|hey|good (?:morning|evening|afternoon)|thanks?|thank you|bye|you['’]?re welcome|happy to help|ok(?:ay)?|got it)[!.\s]*$", re.I)
@@ -50,11 +51,17 @@ async def message_evidence(db, access, message):
         row = (await db.execute(access.chunk_query().where(
             DocumentChunk.document_id == source["document_id"], DocumentChunk.chunk_index == source["chunk_index"],
         ))).scalar_one_or_none()
-        # Existing messages store the exact source text. Missing provenance is
-        # not permission to substitute a new chunk at an old chunk index.
-        if row is None or not source.get("content") or source["content"] != row.content:
+        if row is None:
             return None
-        verified[row.point_id] = hashlib.sha256(row.content.encode()).hexdigest()
+        digest = hashlib.sha256(row.content.encode()).hexdigest()
+        # New delegated references retain IDs/hashes instead of copying passages.
+        # Legacy native references must still match their exact source text.
+        if source.get("content_sha256"):
+            if source["content_sha256"] != digest or source.get("chunk_id") != row.point_id or source.get("chunk_row_id") != str(row.id):
+                return None
+        elif not source.get("content") or source["content"] != row.content:
+            return None
+        verified[row.point_id] = digest
     return verified
 
 
@@ -136,3 +143,35 @@ async def select_conversation_context(access, query):
         access.evidence.update(references)
     await access.validate()
     return selection
+
+
+async def resolve_query_context(access, query, rewriter):
+    """Shared context-first preparation; callers never supply provider history."""
+    selection = await select_conversation_context(access, query)
+    if access is not None:
+        access.history = selection.history
+        access.selected_message_ids = selection.message_ids
+        access.requires_history = selection.requires_history
+    unchanged = RewriteResult(original_query=query, retrieval_query=query, rewritten=False)
+    if selection.clarification or selection.exact_previous_answer is not None:
+        return selection, unchanged
+    result = await rewriter.rewrite(query=query, conversation_context=selection.history)
+    if selection.requires_history and not result.rewritten:
+        selection.clarification = "Please specify the topic or policy for this follow-up."
+    return selection, result
+
+
+async def prior_answer_chunks(access):
+    """Refetch exact prior evidence in its original citation order, without search."""
+    if access is None or not access.evidence:
+        return []
+    await access.validate()
+    async with access.sessions() as db:
+        rows = (await db.execute(access.chunk_query().where(DocumentChunk.point_id.in_(list(access.evidence))))).scalars().all()
+    by_id = {row.point_id: row for row in rows}
+    return [RerankedSearchResult(point_id=row.point_id, document_id=row.document_id, chunk_index=row.chunk_index,
+        content=row.content, token_count=row.token_count, start_page=row.start_page, end_page=row.end_page,
+        page_numbers=row.page_numbers, block_types=row.block_types, rerank_score=1.0, rank=index + 1,
+        client_id=row.client_id, tenant_id=row.tenant_id, collection_id=row.collection_id, owner_subject_id=row.owner_subject_id,
+        patient_id=row.patient_id, source_system=row.source_system, file_name=row.file_name, document_type=row.document_type)
+        for index, point_id in enumerate(access.evidence) if (row := by_id.get(point_id)) is not None]

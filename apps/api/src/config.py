@@ -115,7 +115,7 @@ class Settings(BaseSettings):
     COHERE_API_KEY: str | None = None
     QUERY_REWRITE_MODEL: str = "command-a-03-2025"
     QUERY_REWRITE_ENABLED: bool = True
-    QUERY_REWRITE_TIMEOUT_SECONDS: float = 5.0
+    QUERY_REWRITE_TIMEOUT_SECONDS: float = 20.0
     QUERY_REWRITE_MAX_CONTEXT_MESSAGES: int = 5
 
     # Grounded RAG Answer Generation (Cohere)

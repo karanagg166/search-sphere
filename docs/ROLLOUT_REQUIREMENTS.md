@@ -557,3 +557,34 @@ Its post-deployment contract run
 [42235359854](https://github.com/karanagg166/ExamArena/actions/runs/42235359854) passed.
 Neither consumer contract run substitutes for the required authenticated Search
 Sphere journey. Backend production remains `8288c9d`; full rollout remains open.
+
+### Versioned answer context and completion wiring
+
+`GenericRagService` now shares selective authorized history preparation with native
+query paths. Client `conversation_history` and `system_prompt` compatibility fields
+are ignored; grounding remains server-owned. Completed versioned turns and their
+source references commit together to PostgreSQL. Follow-ups expose history selection
+and rewrite metadata; unresolved references clarify before retrieval. Native and
+versioned exact previous-answer requests load that response and refetch its current
+sources in original citation order without an embedding/reranking search.
+
+Versioned SSE buffers generation, checks current access, and only then emits metadata,
+answer, citations and a completion event with the saved message ID. Provider failures
+emit a safe terminal error and never tokens, success completion, a retry, or a saved
+answer. Source revocation after generation prevents persistence and return. Full
+claim-to-source support validation and the other streaming routes remain open.
+
+The shared gateway distinguishes provider timeout from network unavailability, quota,
+and approval failure. Rewrite provider/format/key failures remain explicit instead
+of appearing as clarification. The default rewrite deadline is 20 seconds, bounded
+by the existing 15-second HTTP/20-second admission deadline. A single actual Cohere
+trial-key probe using only public synthetic maternity-policy history passed the
+“What about interns?” standalone rewrite in 5.93 seconds; this is one observed call,
+not a P95 or capacity estimate. No sensitive source content was sent.
+
+[Search Sphere #47](https://github.com/karanagg166/search-sphere/pull/47) merged at
+`2a57f6c9286aef06827011f15bab84376a1040d3`; all required jobs passed in
+[42236051089](https://github.com/karanagg166/search-sphere/actions/runs/42236051089).
+The clinical compatibility history/actor forwarding, validated complete intent router,
+citation support checks, memory, caching, versions, index cutover and authenticated
+live journeys remain open. Backend production is still `8288c9d`.

@@ -127,3 +127,28 @@ async def test_context_change_or_evidence_replacement_denies_next_provider_call(
     fresh.conversation_id = access.conversation_id
     selected = await select_conversation_context(fresh, "What about interns?")
     assert selected.clarification and not selected.history
+
+
+@pytest.mark.asyncio
+async def test_native_exact_summary_uses_prior_response_and_sources_without_new_retrieval(fixture):
+    from types import SimpleNamespace
+
+    from src.models.user import User
+    from src.schemas.answer import AnswerRequest
+    from src.services.answer_service import AnswerService
+    from src.services.search_service import SearchService
+
+    _, row = await indexed_document(fixture)
+    access, messages = await conversation(fixture, row)
+    retriever = SimpleNamespace(search=AsyncMock(side_effect=AssertionError("Exact summary must not search")))
+    rewriter = SimpleNamespace(rewrite=AsyncMock(side_effect=AssertionError("Exact summary must not rewrite")))
+    async def generate(query, chunks, conversation_context):
+        assert conversation_context[-1].content == messages[1].content
+        return "The prior policy answer covers interns [1].", chunks
+    generator = SimpleNamespace(generate_answer=AsyncMock(side_effect=generate))
+    async with fixture.sessions() as db, query_inference(access):
+        user = await db.get(User, fixture.owner_id)
+        service = AnswerService(SearchService(db, retriever, rewriter), generator)
+        result = await service.generate_answer(AnswerRequest(query="Summarize your previous answer", conversation_id=access.conversation_id), user)
+    assert result.requires_history and result.sources[0].document_id == row.document_id
+    assert result.sources[0].content == row.content

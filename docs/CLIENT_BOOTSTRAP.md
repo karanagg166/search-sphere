@@ -57,7 +57,9 @@ source evidence and withholds an old answer when its source changed or was remov
 messages. An omitted actor is rejected; an out-of-scope ID returns 404.
 
 The `conversation_id` field on versioned search/answer requests is checked before
-query processing starts, including SSE. The storage/authorization foundation is
-implemented; wiring complete turn persistence, selective context, routing and memory
-into every delegated answer route is the following rollout phase. Until then, clients
-must not treat this foundation as a completed multi-turn answer contract.
+query processing starts, including SSE. Versioned answers select history from that
+conversation and persist completed turns. Source references retain chunk/row IDs and
+content hashes instead of copying passages; later use re-fetches current evidence.
+Caller `conversation_history` and `system_prompt` fields are accepted for compatibility
+and ignored. Clinical compatibility wiring, full intent routing, memory, and complete
+claim/citation validation remain open rollout phases.

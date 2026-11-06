@@ -11,6 +11,7 @@ from src.security.service_auth import get_service_context
 from src.security.service_context import ServiceContext
 from src.services.answer_generator import AnswerGenerator, get_answer_generator
 from src.services.generic_rag_service import GenericRagService
+from src.services.query_rewriter import QueryRewriter, get_query_rewriter
 from src.services.search_service import get_retriever
 
 logger = structlog.get_logger()
@@ -31,8 +32,9 @@ async def generate_answer(
     db: AsyncSession = Depends(get_db),
     retriever: RerankedHybridRetriever = Depends(get_retriever),
     answer_generator: AnswerGenerator = Depends(get_answer_generator),
+    query_rewriter: QueryRewriter = Depends(get_query_rewriter),
 ) -> AnswerResponse:
-    service = GenericRagService(db, retriever, answer_generator)
+    service = GenericRagService(db, retriever, answer_generator, query_rewriter)
     return await service.answer(context, body)
 
 
@@ -47,8 +49,9 @@ async def stream_answer(
     db: AsyncSession = Depends(get_db),
     retriever: RerankedHybridRetriever = Depends(get_retriever),
     answer_generator: AnswerGenerator = Depends(get_answer_generator),
+    query_rewriter: QueryRewriter = Depends(get_query_rewriter),
 ) -> StreamingResponse:
-    service = GenericRagService(db, retriever, answer_generator)
+    service = GenericRagService(db, retriever, answer_generator, query_rewriter)
     return StreamingResponse(
         service.answer_stream(context, body),
         media_type="text/event-stream",
