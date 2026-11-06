@@ -7,7 +7,7 @@ services:
     plan: free
     region: singapore
     healthCheckPath: /health
-    autoDeploy: true
+    autoDeploy: false
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -36,9 +36,17 @@ services:
       - key: RATE_LIMIT_ENABLED
         value: "false"
       - key: ENABLE_IMAGE_CAPTIONING
-        value: "false"
+        value: "true"
       - key: IMAGE_CAPTION_MODEL
-        value: "disabled"
+        value: command-a-vision-07-2025
+      - key: VECTOR_STORE_BACKEND
+        value: supabase
+      - key: EMBEDDING_MODEL
+        value: embed-english-light-v3.0
+      - key: SEMANTIC_CHUNKING_MODEL
+        value: embed-english-light-v3.0
+      - key: RERANKER_MODEL_NAME
+        value: rerank-v3.5
       - key: DATABASE_URL
         sync: false
       - key: DATABASE_URL_SYNC
@@ -47,9 +55,11 @@ services:
         sync: false
       - key: COHERE_API_KEY
         sync: false
-      - key: QDRANT_URL
+      - key: COHERE_TRIAL_KEY_SHA256
         sync: false
-      - key: QDRANT_API_KEY
-        sync: false
+      - key: COHERE_MONTHLY_CALL_LIMIT
+        value: "900"
+      - key: COHERE_APPROVED_DATA_CLASSIFICATIONS
+        value: '["public","synthetic"]'
       - key: GOOGLE_CLIENT_SECRET
         sync: false

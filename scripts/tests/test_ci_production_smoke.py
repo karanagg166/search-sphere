@@ -255,61 +255,39 @@ def test_real_rag_pipeline_search_and_answer(monkeypatch):
     assert any("Cross-encoder reranking verification" in r for r in smoke.RESULTS)
 
 
-def test_check_diagnostics_detects_remote_qdrant_and_healthy_models(monkeypatch):
-    monkeypatch.setattr(
-        smoke,
-        "http",
-        lambda *args, **kwargs: (
-            200,
-            {},
-            {
-                "database": "ok",
-                "fastembed": "ok (384 dims, 4.2ms)",
-                "cross_encoder": "ok (TextCrossEncoder, score=0.8921, 8.1ms)",
-                "qdrant": "ok (remote, collection 'documents', 12 points)",
-            },
-        ),
-    )
+def hosted_diagnostics():
+    return {
+        "database": "ok", "vector_store": "supabase", "local_model_weights": False,
+        "inference": {
+            "provider": "cohere", "mode": "hosted",
+            "embedding_model": "embed-english-light-v3.0", "rerank_model": "rerank-v3.5",
+        },
+    }
+
+
+def test_check_diagnostics_requires_hosted_cohere_and_postgres(monkeypatch):
+    monkeypatch.setattr(smoke, "http", lambda *args, **kwargs: (200, {}, hosted_diagnostics()))
     smoke.check_diagnostics()
-    assert any("Diagnostic probe" in r and "remote" in r for r in smoke.RESULTS)
+    assert any("Diagnostic probe" in r and "hosted Cohere" in r for r in smoke.RESULTS)
 
 
-def test_check_diagnostics_fails_on_embedded_fallback(monkeypatch):
-    monkeypatch.setattr(
-        smoke,
-        "http",
-        lambda *args, **kwargs: (
-            200,
-            {},
-            {
-                "database": "ok",
-                "fastembed": "ok",
-                "cross_encoder": "ok",
-                "qdrant": "ok (embedded, collection 'documents', 0 points)",
-            },
-        ),
-    )
-    with pytest.raises(AssertionError, match="ephemeral embedded fallback mode"):
+@pytest.mark.parametrize("backend", ["qdrant", "embedded", "unknown"])
+def test_check_diagnostics_rejects_other_vector_backends(monkeypatch, backend):
+    payload = hosted_diagnostics()
+    payload["vector_store"] = backend
+    monkeypatch.setattr(smoke, "http", lambda *args, **kwargs: (200, {}, payload))
+    with pytest.raises(AssertionError, match="PostgreSQL/pgvector"):
         smoke.check_diagnostics()
 
 
-def test_check_diagnostics_fails_on_cross_encoder_error(monkeypatch):
-    monkeypatch.setattr(
-        smoke,
-        "http",
-        lambda *args, **kwargs: (
-            200,
-            {},
-            {
-                "database": "ok",
-                "fastembed": "ok",
-                "cross_encoder": "error: Model cross-encoder/ms-marco-MiniLM-L-6-v2 is not supported",
-                "qdrant": "ok (remote, collection 'documents', 12 points)",
-            },
-        ),
-    )
-    with pytest.raises(AssertionError, match="cross-encoder reranker error"):
+@pytest.mark.parametrize("field,value", [("provider", "other"), ("mode", "local"), ("embedding_model", "different"), ("rerank_model", "unknown")])
+def test_check_diagnostics_rejects_unexpected_inference_configuration(monkeypatch, field, value):
+    payload = hosted_diagnostics()
+    payload["inference"][field] = value
+    monkeypatch.setattr(smoke, "http", lambda *args, **kwargs: (200, {}, payload))
+    with pytest.raises(AssertionError, match="Hosted-only"):
         smoke.check_diagnostics()
+
 
 
 def test_ensure_synthetic_document_rejects_zero_or_missing_chunk_count(monkeypatch):

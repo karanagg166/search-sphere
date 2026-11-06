@@ -76,6 +76,6 @@ def test_cross_encoder_alias_resolution():
     from src.services.model_manager import RERANKER_MODEL_ALIASES
 
     reranker = CrossEncoderReranker(model_name="cross-encoder/ms-marco-MiniLM-L-6-v2")
-    assert reranker.model_name == "Xenova/ms-marco-MiniLM-L-6-v2"
+    assert reranker.model_name == "rerank-v3.5"
 
-    assert RERANKER_MODEL_ALIASES["ms-marco-MiniLM-L-6-v2"] == "Xenova/ms-marco-MiniLM-L-6-v2"
+    assert RERANKER_MODEL_ALIASES["ms-marco-MiniLM-L-6-v2"] == "rerank-v3.5"

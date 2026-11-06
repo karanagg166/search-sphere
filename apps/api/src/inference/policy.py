@@ -101,3 +101,10 @@ def authorize_cohere(api_key: str) -> InferenceScope:
             "Sensitive-content provider approval is not recorded."
         )
     return scope
+
+
+def current_inference_scope() -> InferenceScope:
+    value = _scope.get()
+    if value is None:
+        raise ProviderNotApprovedError("An authorized inference scope is required.")
+    return value

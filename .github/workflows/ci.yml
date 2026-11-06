@@ -35,23 +35,13 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: "apps/api/requirements.txt"
-
-      - name: Install system dependencies (Poppler & Tesseract)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            tesseract-ocr \
-            poppler-utils \
-            libsm6 \
-            libxext6
+          cache-dependency-path: "apps/api/requirements-production.txt"
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install --extra-index-url https://download.pytorch.org/whl/cpu torch torchvision
-          pip install -r apps/api/requirements.txt
-          pip install pytest pytest-asyncio pytest-cov ruff
+          pip install -r apps/api/requirements-production.txt
+          pip install pytest pytest-asyncio pytest-cov ruff aiosqlite
 
       - name: Lint with Ruff
         run: |
@@ -97,13 +87,29 @@ jobs:
       - name: Verify hosted inference eligibility and bounded failures
         env:
           PYTHONPATH: "apps/api"
-        run: pytest scripts/tests/test_cohere_gateway.py -v
+        run: pytest scripts/tests/test_cohere_gateway.py scripts/tests/test_hosted_runtime.py -v
 
       - name: Run Monitor & Keep-Alive Safety Suite
         env:
           PYTHONPATH: "."
         run: |
           pytest scripts/tests/test_monitor.py scripts/tests/test_ci_production_smoke.py -v
+
+  hosted-runtime-image:
+    name: Hosted Runtime Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production image
+        run: docker build -t search-sphere-hosted:ci apps/api
+      - name: Verify hosted-only image without network access
+        run: >-
+          docker run --rm --network none --memory 512m
+          -e ENVIRONMENT=test -e STORAGE_BACKEND=local
+          -e PYTHONPATH=/app
+          -e DATABASE_URL=postgresql+asyncpg://synthetic:synthetic@localhost/search_sphere_test
+          -v "$PWD/scripts/check_hosted_image.py:/check_hosted_image.py:ro"
+          search-sphere-hosted:ci python /check_hosted_image.py
 
   worker-test:
     name: Worker Ingestion & Extraction Tests

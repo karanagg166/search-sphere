@@ -69,13 +69,13 @@ class Settings(BaseSettings):
     QDRANT_TIMEOUT_SECONDS: float = 10.0
 
     # Embeddings
-    EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+    EMBEDDING_MODEL: str = "embed-english-light-v3.0"
     EMBEDDING_BATCH_SIZE: int = 32
     EMBEDDING_DEVICE: str = "cpu"
     FASTEMBED_CACHE_PATH: str = "/app/.fastembed_cache"
 
     # Sparse Retrieval (BM25)
-    SPARSE_MODEL: str = "Qdrant/bm25"
+    SPARSE_MODEL: str = "postgresql-tsvector"
     QDRANT_SPARSE_VECTOR_NAME: str = "bm25"
     SPARSE_SEARCH_TOP_K: int = 10
     SPARSE_SEARCH_MAX_TOP_K: int = 100
@@ -86,7 +86,7 @@ class Settings(BaseSettings):
     HYBRID_SEARCH_MAX_TOP_K: int = 100
 
     # Cross-Encoder Reranking
-    RERANKER_MODEL_NAME: str = "Xenova/ms-marco-MiniLM-L-6-v2"
+    RERANKER_MODEL_NAME: str = "rerank-v3.5"
     RERANKER_BATCH_SIZE: int = 32
     RERANKER_TOP_K: int = 5
     RERANKER_MAX_TOP_K: int = 100
@@ -97,14 +97,14 @@ class Settings(BaseSettings):
 
     # OCR & Image Processing
     TESSERACT_CMD: str | None = None
-    IMAGE_CAPTION_MODEL: str = "Salesforce/blip-image-captioning-base"
+    IMAGE_CAPTION_MODEL: str = "command-a-vision-07-2025"
     ENABLE_IMAGE_CAPTIONING: bool = False
 
     # Chunking
     CHUNK_TARGET_TOKENS: int = 500
     CHUNK_MAX_TOKENS: int = 700
     CHUNK_OVERLAP_TOKENS: int = 60
-    SEMANTIC_CHUNKING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+    SEMANTIC_CHUNKING_MODEL: str = "embed-english-light-v3.0"
     SEMANTIC_DISTANCE_THRESHOLD: float = 0.5
     SEMANTIC_SIMILARITY_PERCENTILE: float = 80.0
     CHUNK_SIZE: int = 500

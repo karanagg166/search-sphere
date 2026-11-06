@@ -5,10 +5,11 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import Any
 
-import cohere
 import structlog
 
 from src.config import settings
+from src.inference.chat_adapter import CohereChatAdapter
+from src.inference.policy import ProviderError
 from src.schemas.search import ConversationMessage
 
 logger = structlog.get_logger()
@@ -259,10 +260,7 @@ class CohereAnswerProvider(BaseAnswerProvider):
     def _get_client(self) -> Any:
         if self._client is not None:
             return self._client
-        return cohere.AsyncClient(
-            api_key=self.api_key,
-            timeout=self.timeout_seconds,
-        )
+        return CohereChatAdapter(api_key=self.api_key)
 
     async def generate(
         self,
@@ -341,6 +339,8 @@ class CohereAnswerProvider(BaseAnswerProvider):
             )
             return clean_answer
 
+        except ProviderError:
+            raise
         except TimeoutError as exc:
             logger.error(
                 "Cohere answer generation timed out",
@@ -472,6 +472,8 @@ class CohereAnswerProvider(BaseAnswerProvider):
                 direct_text = getattr(direct_resp, "text", "")
                 if direct_text:
                     yield direct_text
+        except ProviderError:
+            raise
         except TimeoutError as exc:
             logger.error("Cohere stream timed out", timeout=self.timeout_seconds, query=clean_query)
             raise AnswerGenerationTimeoutError(

@@ -4,10 +4,11 @@ import re
 from abc import ABC, abstractmethod
 from typing import Any
 
-import cohere
 import structlog
 
 from src.config import settings
+from src.inference.chat_adapter import CohereChatAdapter
+from src.inference.policy import ProviderError
 from src.schemas.search import ConversationMessage, RewriteResult
 
 logger = structlog.get_logger()
@@ -86,10 +87,7 @@ class CohereQueryRewriteProvider(BaseQueryRewriteProvider):
     def _get_client(self) -> Any:
         if self._client is not None:
             return self._client
-        return cohere.AsyncClient(
-            api_key=self.api_key,
-            timeout=self.timeout_seconds,
-        )
+        return CohereChatAdapter(api_key=self.api_key)
 
     async def rewrite(
         self,
@@ -199,6 +197,8 @@ class CohereQueryRewriteProvider(BaseQueryRewriteProvider):
                 reason=reason,
             )
 
+        except ProviderError:
+            raise
         except TimeoutError:
             logger.warning(
                 "Cohere query rewrite timed out; falling back to original query",
@@ -360,6 +360,8 @@ class QueryRewriter:
             )
             return result
 
+        except ProviderError:
+            raise
         except Exception as exc:
             logger.exception(
                 "Unexpected error during query rewriting; falling back to original query",

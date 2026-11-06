@@ -13,6 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.config import settings
 from src.db import AsyncSessionLocal, engine
+from src.inference.policy import ProviderError
 from src.routers.answer import router as answer_router
 from src.routers.auth import router as auth_router
 from src.routers.conversations import router as conversations_router
@@ -131,6 +132,15 @@ app = FastAPI(
     redoc_url="/redoc",
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(ProviderError)
+async def provider_failure_response(request: Request, error: ProviderError):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Model inference is unavailable for this request.", "error_code": error.code},
+        headers={"Retry-After": "10"} if error.retryable else None,
+    )
 
 # Request Correlation ID Middleware
 app.add_middleware(RequestCorrelationMiddleware)
@@ -255,59 +265,32 @@ async def readiness_check():
 
 @app.get("/diag", tags=["Health"])
 async def diagnostic_check():
-    """Diagnostic check of FastEmbed models and Qdrant connectivity."""
-    import time
+    """Lightweight metadata/connectivity only; never loads models or uses quota."""
+    from src.inference.cohere_gateway import (
+        EMBEDDING_MODEL,
+        GENERATION_MODEL,
+        RERANK_MODEL,
+        VISION_MODEL,
+    )
 
-    from src.services.model_manager import model_manager
-
-    res: dict = {
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+    except Exception:
+        return JSONResponse(status_code=503, content={"database": "unavailable"})
+    return {
         "database": "ok",
-        "fastembed": "unknown",
-        "cross_encoder": "unknown",
-        "qdrant": "unknown",
+        "vector_store": settings.VECTOR_STORE_BACKEND,
+        "inference": {
+            "provider": "cohere",
+            "mode": "hosted",
+            "embedding_model": EMBEDDING_MODEL,
+            "rerank_model": RERANK_MODEL,
+            "generation_model": GENERATION_MODEL,
+            "vision_model": VISION_MODEL,
+        },
+        "local_model_weights": False,
     }
-    try:
-        t0 = time.perf_counter()
-        emb = model_manager.get_dense_embedder()
-        vecs = list(emb.embed(["ping"]))
-        res["fastembed"] = f"ok ({len(vecs[0])} dims, {(time.perf_counter() - t0)*1000:.1f}ms)"
-    except Exception as exc:
-        res["fastembed"] = f"error: {exc}"
-
-    try:
-        t0 = time.perf_counter()
-        reranker = model_manager.get_reranker()
-        if hasattr(reranker, "rerank"):
-            scores = list(reranker.rerank("ping", ["pong"]))
-            score_val = float(scores[0]) if scores else 0.0
-        elif hasattr(reranker, "predict"):
-            scores = reranker.predict([("ping", "pong")])
-            score_val = float(scores[0]) if len(scores) > 0 else 0.0
-        else:
-            score_val = 0.0
-        res["cross_encoder"] = f"ok ({type(reranker).__name__}, score={score_val:.4f}, {(time.perf_counter() - t0)*1000:.1f}ms)"
-    except Exception as exc:
-        res["cross_encoder"] = f"error: {exc}"
-    finally:
-        # In memory-constrained environments (512 MiB limit), unload cross-encoder model
-        # after diagnostic verification so document indexing and worker tasks have ample headroom.
-        model_manager.unload_model("reranker")
-
-    try:
-        from src.config import settings
-        from src.vector_store import get_vector_store
-        store = get_vector_store()
-        await store.ensure_collection()
-        backend_name = getattr(settings, "VECTOR_STORE_BACKEND", "supabase")
-        count = await store.count_document_points()
-        status_msg = f"ok ({backend_name}, {count} chunks)"
-        res["vector_store"] = status_msg
-        res["qdrant"] = status_msg
-    except Exception as exc:
-        res["vector_store"] = f"error: {exc}"
-        res["qdrant"] = f"error: {exc}"
-
-    return res
 
 
 @app.get("/", tags=["Root"])

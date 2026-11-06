@@ -6,6 +6,7 @@ from typing import Any
 import structlog
 
 from src.config import settings
+from src.inference.policy import ProviderError
 from src.processing.models.search import RerankedSearchResult
 
 logger = structlog.get_logger()
@@ -180,7 +181,7 @@ class CrossEncoderReranker:
             score_duration_ms = (time.perf_counter() - start_score) * 1000
             logger.info(
                 "Cross-encoder reranking completed successfully",
-                query=clean_query,
+                query_length=len(clean_query),
                 candidate_count=len(candidates),
                 duration_ms=round(score_duration_ms, 2),
                 model_name=self.model_name,
@@ -201,6 +202,8 @@ class CrossEncoderReranker:
                 deduplicate=deduplicate,
                 similarity_threshold=similarity_threshold,
             )
+        except ProviderError:
+            raise
         except Exception as exc:
             score_duration_ms = (time.perf_counter() - start_score) * 1000
             logger.warning(
@@ -539,7 +542,7 @@ class CrossEncoderReranker:
                     f"Model of type {type(model)} does not provide a 'predict' or 'rerank' "
                     f"method and is not callable."
                 )
-        except RerankingError:
+        except (RerankingError, ProviderError):
             raise
         except Exception as exc:
             logger.exception(
@@ -609,56 +612,13 @@ class CrossEncoderReranker:
             self._model = CrossEncoderReranker._cached_model
             return self._model
 
-        # 1. Prefer FastEmbed TextCrossEncoder via centralized ModelManager (threads=1)
-        try:
-            from src.services.model_manager import model_manager
+        from src.services.model_manager import model_manager
 
-            loaded_model = model_manager.get_reranker(self.model_name)
-            CrossEncoderReranker._cached_model = loaded_model
-            CrossEncoderReranker._cached_model_name = self.model_name
-            self._model = loaded_model
-            return self._model
-        except Exception as fe_exc:
-            logger.warning(
-                "ModelManager FastEmbed TextCrossEncoder unavailable or failed to load",
-                error=str(fe_exc),
-            )
-            if getattr(settings, "ENVIRONMENT", "").lower() == "production":
-                raise RerankingError(
-                    f"FastEmbed TextCrossEncoder failed in production: {fe_exc}"
-                ) from fe_exc
-
-        # 2. Fallback to SentenceTransformer CrossEncoder
-        logger.info(
-            "Loading sentence-transformer cross-encoder model fallback",
-            model_name=self.model_name,
-            device=self.device,
-        )
-
-        try:
-            from sentence_transformers import CrossEncoder
-
-            loaded_model = CrossEncoder(self.model_name, device=self.device)
-            CrossEncoderReranker._cached_model = loaded_model
-            CrossEncoderReranker._cached_model_name = self.model_name
-            self._model = loaded_model
-
-            logger.info(
-                "Cross-encoder model loaded and cached",
-                model_name=self.model_name,
-                device=self.device,
-            )
-            return self._model
-
-        except Exception as exc:
-            logger.warning(
-                "Failed to load sentence-transformer cross-encoder model",
-                model_name=self.model_name,
-                error=str(exc),
-            )
-            raise RerankingError(
-                f"Failed to load cross-encoder model '{self.model_name}': {exc}"
-            ) from exc
+        loaded_model = model_manager.get_reranker(self.model_name)
+        CrossEncoderReranker._cached_model = loaded_model
+        CrossEncoderReranker._cached_model_name = self.model_name
+        self._model = loaded_model
+        return loaded_model
 
     @classmethod
     def _clear_cache(cls) -> None:

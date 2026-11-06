@@ -4,6 +4,7 @@ from typing import Any
 import structlog
 
 from src.config import settings
+from src.inference.policy import ProviderError
 from src.processing.models.document import (
     ChunkedDocument,
     EmbeddedChunk,
@@ -15,6 +16,7 @@ logger = structlog.get_logger()
 DEFAULT_EMBEDDING_DIMENSION = 384
 
 KNOWN_MODEL_DIMENSIONS: dict[str, int] = {
+    "embed-english-light-v3.0": DEFAULT_EMBEDDING_DIMENSION,
     "sentence-transformers/all-MiniLM-L6-v2": DEFAULT_EMBEDDING_DIMENSION,
     "all-MiniLM-L6-v2": DEFAULT_EMBEDDING_DIMENSION,
 }
@@ -200,12 +202,19 @@ class DenseEmbedder:
         )
         return raw_vectors
 
-    def _encode_texts(self, texts: list[str]) -> list[list[float]]:
+    def embed_query(self, query: str) -> list[list[float]]:
+        vectors = self._encode_texts([query], query=True)
+        validate_vectors(vectors, expected_count=1, expected_dimension=self.dimension)
+        return vectors
+
+    def _encode_texts(self, texts: list[str], *, query=False) -> list[list[float]]:
         """Run batched model inference and convert outputs to float lists."""
         model = self._get_model()
 
         try:
-            if hasattr(model, "embed"):
+            if query and hasattr(model, "query_embed"):
+                embeddings = list(model.query_embed(texts))
+            elif hasattr(model, "embed"):
                 # FastEmbed returns a generator yielding numpy arrays
                 batch_sz = self.batch_size if self.batch_size else 32
                 embeddings = list(model.embed(texts, batch_size=batch_sz))
@@ -223,7 +232,7 @@ class DenseEmbedder:
                     f"Model of type {type(model)} does not provide an "
                     f"'embed' or 'encode' method and is not callable."
                 )
-        except DenseEmbeddingError:
+        except (DenseEmbeddingError, ProviderError):
             raise
         except Exception as exc:
             logger.exception(
@@ -265,51 +274,13 @@ class DenseEmbedder:
             self._model = DenseEmbedder._cached_model
             return self._model
 
-        # 1. Prefer centralized ModelManager (FastEmbed ONNX Runtime with threads=1)
-        try:
-            from src.services.model_manager import model_manager
+        from src.services.model_manager import model_manager
 
-            loaded_model = model_manager.get_dense_embedder(self.model_name)
-            DenseEmbedder._cached_model = loaded_model
-            DenseEmbedder._cached_model_name = self.model_name
-            self._model = loaded_model
-            return self._model
-        except Exception as fastembed_exc:
-            logger.warning(
-                "ModelManager FastEmbed unavailable or failed to initialize",
-                model_name=self.model_name,
-                error=str(fastembed_exc),
-            )
-            if getattr(settings, "ENVIRONMENT", "").lower() == "production":
-                raise DenseEmbeddingError(
-                    f"FastEmbed failed to initialize in production: {fastembed_exc}"
-                ) from fastembed_exc
-
-        # 2. Fallback to SentenceTransformer
-        logger.info(
-            "Loading sentence-transformer embedding model fallback",
-            model_name=self.model_name,
-            device=self.device,
-        )
-
-        try:
-            from sentence_transformers import SentenceTransformer
-
-            loaded_model = SentenceTransformer(self.model_name, device=self.device)
-            DenseEmbedder._cached_model = loaded_model
-            DenseEmbedder._cached_model_name = self.model_name
-            self._model = loaded_model
-            return self._model
-
-        except Exception as exc:
-            logger.exception(
-                "Failed to load sentence-transformer model",
-                model_name=self.model_name,
-                error=str(exc),
-            )
-            raise DenseEmbeddingError(
-                f"Failed to load dense embedding model '{self.model_name}': {exc}"
-            ) from exc
+        loaded_model = model_manager.get_dense_embedder(self.model_name)
+        DenseEmbedder._cached_model = loaded_model
+        DenseEmbedder._cached_model_name = self.model_name
+        self._model = loaded_model
+        return loaded_model
 
     @classmethod
     def _clear_cache(cls) -> None:

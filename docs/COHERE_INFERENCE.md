@@ -34,6 +34,9 @@ same key outside this database; Cohere's trial rejection remains authoritative.
 The gateway makes one request, has a 15s timeout and 3s connection timeout, rejects
 redirects, validates responses, and never retries implicitly. Quota, eligibility,
 invalid responses and transient unavailability have separate safe error codes.
+The runtime shares two concurrent HTTP slots per process, with a 20s deadline
+covering slot admission, budget verification and the request. No quota is reserved
+while waiting for a slot. A cancelled/timed-out sent request retains its reservation.
 Database budget failures deny inference before network transmission. Counters store
 only a key fingerprint, counts and expiry, never input or output text.
 

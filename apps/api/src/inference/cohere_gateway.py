@@ -1,8 +1,10 @@
 """Cohere-only hosted inference with eligibility, quotas and validated responses."""
 
+import asyncio
 import base64
 import math
 from typing import Any
+from weakref import WeakKeyDictionary
 
 import httpx
 
@@ -21,6 +23,7 @@ EMBEDDING_TOKEN_LIMIT = 512
 RERANK_MODEL = "rerank-v3.5"
 GENERATION_MODEL = "command-a-03-2025"
 VISION_MODEL = "command-a-vision-07-2025"
+_request_slots: WeakKeyDictionary = WeakKeyDictionary()
 
 
 class CohereGateway:
@@ -41,22 +44,28 @@ class CohereGateway:
         self, endpoint: str, payload: dict, purpose: str, units: int = 1
     ) -> dict:
         authorize_cohere(self.api_key)  # Before reserving quota or sending any content.
-        await self.budget.reserve(self.api_key, purpose, units)
         try:
-            async with httpx.AsyncClient(
+            loop = asyncio.get_running_loop()
+            slots = _request_slots.setdefault(loop, asyncio.Semaphore(2))
+            async with asyncio.timeout(20), slots:
+                await self.budget.reserve(self.api_key, purpose, units)
+                return await self._request(endpoint, payload)
+        except (TimeoutError, httpx.TimeoutException, httpx.NetworkError) as exc:
+            raise ProviderError("Cohere request timed out or is unavailable.") from exc
+
+    async def _request(self, endpoint: str, payload: dict) -> dict:
+        async with httpx.AsyncClient(
                 base_url="https://api.cohere.com",
                 transport=self.transport,
                 timeout=httpx.Timeout(15.0, connect=3.0),
                 limits=httpx.Limits(max_connections=2),
                 follow_redirects=False,
-            ) as client:
-                response = await client.post(
-                    endpoint,
-                    json=payload,
-                    headers={"Authorization": f"Bearer {self.api_key}"},
-                )
-        except (httpx.TimeoutException, httpx.NetworkError) as exc:
-            raise ProviderError("Cohere request timed out or is unavailable.") from exc
+        ) as client:
+            response = await client.post(
+                endpoint,
+                json=payload,
+                headers={"Authorization": f"Bearer {self.api_key}"},
+            )
         if response.status_code == 429:
             raise ProviderQuotaExceededError(
                 "Cohere trial quota or rate limit reached."
