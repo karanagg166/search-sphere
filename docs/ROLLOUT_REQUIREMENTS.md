@@ -397,3 +397,27 @@ observed recall loss. Initial settings are 400/480/60 plus mandatory exact hoste
 verification. Results and limits are recorded in `docs/HOSTED_CHUNK_BENCHMARK.md`.
 This does not complete the broader hybrid/rerank, citation, answer, refusal, P95,
 capacity, or production cold-start evaluation requirements.
+
+### Native structured tables
+
+`native_tables.py` uses deterministic PyMuPDF grid detection (`lines_strict`,
+`use_layout=False`) and accepts only consistent rectangular tables with complete,
+unique headers. It preserves cells verbatim, captions, units, row/page references,
+coordinates, and a stable table identity. Structured table/header/caption lines are
+excluded from prose extraction. Cross-page continuations merge only with adjacent
+pages, matching headers and normalized columns, matching captions, and bottom/top
+margin alignment. Merged/missing cells remain for hosted layout recognition.
+
+`structured_chunks.py` keeps small tables in one chunk and splits large tables at
+row boundaries using exact hosted token counts, repeats headers, and records stable
+table IDs and row intervals. An oversized single row fails for review instead of
+silently dropping cells. Prose retains semantic chunking independently.
+
+Migration 016 adds RLS-protected `document_evidence` for full structured tables,
+separate from row-group retrieval chunks. Publication/reindexing replaces evidence
+and vectors in the same ingestion transaction; deletion removes both. Native and
+`/api/v1` full-evidence routes authorize the live document before returning a table.
+Unit fixtures cover grid extraction, units/identifiers, duplicate exclusion, row
+splitting, and continuation rejection. Real PostgreSQL checks cover table/chunk
+links, idempotent reindex identity, and complete deletion. Hosted scanned/complex
+tables, chart extraction, private crop persistence, and versioned cutover remain open.

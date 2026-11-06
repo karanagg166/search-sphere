@@ -17,7 +17,7 @@ def split_text_columns(block):
     lines = block.get("lines", [])
     if block.get("type") != 0 or len(lines) < 2:
         return [block]
-    indexed = [{**line, "source_line_index": index} for index, line in enumerate(lines)]
+    indexed = [{**line, "source_line_index": line.get("source_line_index", index)} for index, line in enumerate(lines)]
 
     def partition(group, depth=0):
         if depth >= 16:

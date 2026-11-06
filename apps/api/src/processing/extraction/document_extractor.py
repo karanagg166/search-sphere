@@ -11,6 +11,11 @@ from src.processing.extraction.image_captioner import (
     ImageCaptioner,
     ImageCaptioningError,
 )
+from src.processing.extraction.native_tables import (
+    continue_tables,
+    native_tables,
+    table_text,
+)
 from src.processing.extraction.ocr_processor import (
     OcrProcessingError,
     OcrProcessor,
@@ -136,6 +141,7 @@ class DocumentExtractor:
 
                 pages.append(extracted_page)
 
+            continue_tables(pages)
             extracted_document = ExtractedDocument(pages=pages)
 
             logger.info(
@@ -180,7 +186,28 @@ class DocumentExtractor:
                 bbox = item.get("bbox", ())
                 if len(bbox) != 4 or not all(math.isfinite(float(value)) for value in bbox) or bbox[2] < bbox[0] or bbox[3] < bbox[1]:
                     raise DocumentExtractionError("PDF page contains invalid layout coordinates.")
-        blocks = [{**block, "original_order": index} for index, block in enumerate(blocks)]
+        try:
+            tables = native_tables(page, page_number, source_sha256)
+        except Exception as exc:
+            raise DocumentExtractionError("Native table inspection failed.") from exc
+        filtered = []
+        masks = [fitz.Rect(bbox) for table in tables for bbox in table["masks"]]
+        for index, block in enumerate(blocks):
+            if block.get("type") != self.TEXT_BLOCK_TYPE:
+                filtered.append({**block, "original_order": index})
+                continue
+            lines = []
+            for line_index, line in enumerate(block.get("lines", [])):
+                rect = fitz.Rect(line["bbox"])
+                if any((rect & mask).get_area() >= rect.get_area() * 0.6 for mask in masks):
+                    continue
+                lines.append({**line, "source_line_index": line_index})
+            if lines:
+                rect = fitz.Rect(lines[0]["bbox"])
+                for line in lines[1:]:
+                    rect |= fitz.Rect(line["bbox"])
+                filtered.append({**block, "lines": lines, "bbox": tuple(rect), "original_order": index})
+        blocks = filtered + [{**table, "original_order": len(blocks) + index} for index, table in enumerate(tables)]
         blocks = [part for block in blocks for part in split_text_columns(block)]
         if len(blocks) > 4096:
             raise DocumentExtractionError("PDF page exceeds the layout block limit.")
@@ -196,7 +223,7 @@ class DocumentExtractor:
                 "bbox": [float(value) for value in block.get("bbox", (0, 0, 0, 0))],
                 "original_order": block["original_order"],
                 "source_line_indices": block.get("source_line_indices", list(range(len(block.get("lines", []))))),
-                "source_kind": "native_pdf" if block_type == self.TEXT_BLOCK_TYPE else "hosted_ocr_vision",
+                "source_kind": "native_pdf" if block_type in (self.TEXT_BLOCK_TYPE, "table") else "hosted_ocr_vision",
                 "reading_order_method": "whitespace_partitions",
                 "coordinate_space": "unrotated_pdf_points",
                 "page_size": [float(page.cropbox.width), float(page.cropbox.height)],
@@ -204,6 +231,10 @@ class DocumentExtractor:
             }
             if block_type == self.IMAGE_BLOCK_TYPE:
                 provenance.update({"ocr_review_required": True, "caption_is_description": True})
+
+            if block_type == "table":
+                extracted_blocks.append(ExtractedBlock("table", table_text(block["structured"]), provenance, block["structured"]))
+                continue
 
             if block_type == self.TEXT_BLOCK_TYPE:
                 text = self._extract_text_block(block)
