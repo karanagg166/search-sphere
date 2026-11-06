@@ -174,6 +174,7 @@ class IngestionQueue:
             "invalid_document",
             "empty_document",
             "provider_unavailable",
+            "provider_timeout",
             "provider_quota",
             "provider_not_approved",
             "provider_rate_limit",
