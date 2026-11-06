@@ -11,6 +11,7 @@ from src.retrieval.hybrid_retriever import (
     HybridRetrievalError,
     HybridRetriever,
 )
+from src.retrieval.permission_cache import PermissionRetrievalCache
 from src.retrieval.reranker import (
     CrossEncoderReranker,
     RerankingError,
@@ -178,6 +179,20 @@ class RerankedHybridRetriever:
         resolved_candidate_k = min(resolved_candidate_k, 32)
         start_total = time.perf_counter()
 
+        access = current_query_access()
+        cache = await PermissionRetrievalCache.prepare(access, {
+            "query": clean_query, "top_k": resolved_top_k, "candidate_k": resolved_candidate_k,
+            "document_id": resolved_doc_id, "document_ids": resolved_doc_ids, "filters": filters,
+            "score_threshold": score_threshold if score_threshold is not None else getattr(self.reranker, "default_score_threshold", settings.RERANKER_SCORE_THRESHOLD),
+            "deduplicate": deduplicate if deduplicate is not None else getattr(self.reranker, "default_deduplicate", settings.CHUNK_DEDUPLICATION_ENABLED),
+            "similarity_threshold": getattr(self.reranker, "default_similarity_threshold", settings.CHUNK_SIMILARITY_THRESHOLD),
+        }) if access is not None else None
+        if cache is not None:
+            cached = await cache.get()
+            if cached is not None:
+                logger.info("Authorized retrieval cache hit", result_count=len(cached))
+                return cached
+
         # 5. Hybrid retrieval stage (fetch top candidate_k chunks)
         start_hybrid = time.perf_counter()
         try:
@@ -214,7 +229,6 @@ class RerankedHybridRetriever:
             ) from exc
         hybrid_duration_ms = (time.perf_counter() - start_hybrid) * 1000
 
-        access = current_query_access()
         if access is not None:
             candidates = await access.authorize_candidates(candidates[:32])
         elif self._requires_query_access or settings.ENVIRONMENT == "production":
@@ -222,6 +236,8 @@ class RerankedHybridRetriever:
 
         # Return empty list cleanly if hybrid search yielded no candidates
         if not candidates:
+            if cache is not None:
+                await cache.put([])
             total_duration_ms = (time.perf_counter() - start_total) * 1000
             logger.info(
                 "Two-stage retrieval completed with 0 candidates",
@@ -280,4 +296,6 @@ class RerankedHybridRetriever:
             total_latency_ms=round(total_duration_ms, 2),
         )
 
+        if cache is not None:
+            await cache.put(results)
         return results

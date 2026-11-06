@@ -792,3 +792,33 @@ cutover and all three authenticated production journeys remain open.
 [Search Sphere #53](https://github.com/karanagg166/search-sphere/pull/53) merged at
 `bf15e50850afc4750bb2d22a162ca9cbc4f97ea4`; required CI passed in
 [42259891811](https://github.com/karanagg166/search-sphere/actions/runs/42259891811).
+
+[Search Sphere #54](https://github.com/karanagg166/search-sphere/pull/54) merged at
+`6278e3a50c429d409adeb1bb818ee7f078759540`; required CI passed in
+[42262102153](https://github.com/karanagg166/search-sphere/actions/runs/42262102153)
+and main [42262756951](https://github.com/karanagg166/search-sphere/actions/runs/42262756951).
+The hard-isolated canonical worker runner passed all 96 tests; it forces a synthetic
+SQLite database and test key even if invoked from a deployment-configured shell.
+
+## Permission-aware retrieval reuse (implementation; production pending)
+
+Migration 020 adds private, RLS-protected `retrieval_cache` references. The shared
+`retrieval/reranked_retriever.py` checks `retrieval/permission_cache.py` before
+embedding/reranking. Entries contain signed IDs, hashes and scores, no raw queries,
+passages, answers or history. Keys bind client/tenant/actor/resource/conversation,
+selected context, current authorized dataset manifest, classification, policy,
+provider eligibility, query options and pinned models. Every hit refetches and
+reauthorizes source text. Delegated requests without actors and scopes above 10,000
+chunks skip caching. Publication/deletion invalidate the affected client/tenant in
+their own transaction. TTL is 15 minutes; concurrent writes enforce 128 entries
+globally, at most 16 KiB/20 references each. See `docs/RETRIEVAL_CACHE.md`.
+
+Verified nine new real-PostgreSQL tests, plus the query-access, cleanup and ingestion
+suites (31 passed together). They cover actual repeat-search call avoidance, actor/
+conversation/context isolation, newly added evidence, changed bytes, user/client/
+policy/trial revocation, expiry/tampering, deletion, rollback and concurrent bounds.
+All API tests passed with the existing isolated-live-service skip; all-source Ruff
+and diff checks passed. Synthetic adapters demonstrate skipped embedding/reranking
+work, not production latency. Document-version replacement/cutover, full labeled
+evaluation and the three authenticated production journeys remain open. No new
+production migrations or Search Sphere runtime deployment occurred in this phase.
