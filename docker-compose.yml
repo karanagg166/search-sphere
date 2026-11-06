@@ -3,7 +3,7 @@ services:
   # 1. PostgreSQL Relational Metadata Database
   # ============================================================================
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: search_sphere_postgres
     restart: unless-stopped
     ports:
@@ -27,6 +27,7 @@ services:
   # 2. Redis Cache & Data Store
   # ============================================================================
   redis:
+    profiles: [legacy]
     image: redis:7-alpine
     container_name: search_sphere_redis
     restart: unless-stopped
@@ -46,6 +47,7 @@ services:
   # 3. RabbitMQ Message Broker (Dramatiq Queue)
   # ============================================================================
   rabbitmq:
+    profiles: [legacy]
     image: rabbitmq:3-management-alpine
     container_name: search_sphere_rabbitmq
     restart: unless-stopped
@@ -70,6 +72,7 @@ services:
   # 4. Qdrant Vector Database
   # ============================================================================
   qdrant:
+    profiles: [legacy]
     image: qdrant/qdrant:v1.11.0
     container_name: search_sphere_qdrant
     restart: unless-stopped
@@ -118,45 +121,46 @@ services:
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://localhost:8000/auth/github/callback}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
       COHERE_API_KEY: ${COHERE_API_KEY:-}
       QUERY_REWRITE_MODEL: ${QUERY_REWRITE_MODEL:-command-a-03-2025}
       RAG_GENERATION_MODEL: ${RAG_GENERATION_MODEL:-command-a-03-2025}
+      RUN_INGESTION_WORKER: "false"
     volumes:
       - ./apps/api:/app
-      - ./apps/worker:/worker:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 10s
-    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+    command: sh -c "alembic upgrade head && uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 1"
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - search_sphere_network
 
   # ============================================================================
-  # 6. Asynchronous Background Worker Service (Dramatiq + RabbitMQ)
+  # 6. Independent PostgreSQL ingestion/cleanup worker (canonical hosted runtime)
   # ============================================================================
   worker:
     build:
-      context: ./apps/worker
-      dockerfile: Dockerfile
+      context: ./apps/api
+      dockerfile: ../worker/Dockerfile
     container_name: search_sphere_worker
     restart: unless-stopped
     env_file:
       - .env
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/search_sphere}
-      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:-postgresql://postgres:postgres@postgres:5432/search_sphere}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
-      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
-      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
       ENVIRONMENT: ${ENVIRONMENT:-development}
+      TIKTOKEN_CACHE_DIR: /opt/tokenizer-cache
     volumes:
-      - ./apps/worker:/app
-    command: dramatiq --processes 2 --threads 2 --watch src src.main
+      - ./apps/api:/app
+    command: python -m src.services.ingestion_worker
+    depends_on:
+      api:
+        condition: service_healthy
     networks:
       - search_sphere_network
 

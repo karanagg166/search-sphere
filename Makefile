@@ -32,7 +32,7 @@ logs: ## View and stream logs from all services
 logs-api: ## View and stream logs from the FastAPI backend service
 	docker compose logs -f api
 
-logs-worker: ## View and stream logs from the Dramatiq worker service
+logs-worker: ## View and stream logs from the PostgreSQL worker service
 	docker compose logs -f worker
 
 logs-web: ## View and stream logs from the Next.js frontend service
@@ -56,8 +56,8 @@ eval: ## Run RAG evaluation framework benchmark
 test: ## Run test suite in the API container
 	docker compose exec api pytest
 
-test-worker: ## Run test suite for the worker service
-	docker compose run --rm worker pytest
+test-worker: ## Run canonical hosted worker regressions in an ephemeral container
+	docker compose run --no-deps --rm -v "$(CURDIR):/workspace:ro" -w /workspace -e DATABASE_URL=sqlite+aiosqlite:////tmp/ss_worker_test.db -e ENVIRONMENT=test -e STORAGE_BACKEND=local -e COHERE_API_KEY=synthetic-unit-test-key -e SUPABASE_SECRET_KEY= worker sh -c 'pip install pytest pytest-asyncio aiosqlite && python scripts/run_worker_checks.py'
 
 test-all: test test-worker ## Run both API and Worker test suites
 

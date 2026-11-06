@@ -763,3 +763,32 @@ legacy-worker retirement, broader evaluation and all three live journeys remain 
 The Vercel management credential still returns 403; the browser dashboard opens the
 Vercel login page, so billing-tier verification remains pending owner confirmation
 or reconnection. No paid resource or upgrade was requested or created.
+
+### Canonical worker image and deterministic regression gate
+
+The independent worker image now uses the same API source, hosted dependencies,
+baked deterministic tokenizer vocabulary and PostgreSQL worker command. Its historical
+RabbitMQ entry point no longer registers actors; the local-model requirement list is
+replaced by the canonical manifest. Compose uses pgvector, starts API migrations before
+the worker, disables the duplicate in-process worker for that local two-process setup,
+and places Redis/RabbitMQ/Qdrant services under an optional legacy profile. Existing
+free Render remains a single API/in-process-worker service; no paid worker is created.
+
+A test configuration issue was caught before accepting the result: the old worker
+pytest configuration can silently select its own legacy `src` package even with API
+PYTHONPATH set. The new runner explicitly sets configuration, root, import mode and
+path, and an assertion checks actual source module paths and forbidden packages.
+Ninety-six preserved deterministic processing/hosted adapter/token-limit regressions
+then passed against canonical source. Real PostgreSQL ingestion/claim/recovery/reindex/
+cleanup gates remain separate and required. The old system OCR/Torch installation
+job is replaced by this canonical gate and an offline worker-image build/check.
+
+The independent worker image passed network-disabled import/tokenizer/health checks
+under 512 MiB at 182.4 MiB peak RSS; its default command is the PostgreSQL worker CLI.
+Compose configuration and diff/lint checks pass. This is not a throughput or live
+cold-start capacity measurement. Broader evaluation, caching, document versions/index
+cutover and all three authenticated production journeys remain open.
+
+[Search Sphere #53](https://github.com/karanagg166/search-sphere/pull/53) merged at
+`bf15e50850afc4750bb2d22a162ca9cbc4f97ea4`; required CI passed in
+[42259891811](https://github.com/karanagg166/search-sphere/actions/runs/42259891811).

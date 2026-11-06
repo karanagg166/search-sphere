@@ -1,5 +1,7 @@
 # Search Sphere
 
+Current runtime: Supabase PostgreSQL/pgvector and private Storage, Cohere hosted inference, and a durable PostgreSQL worker. [Runtime guide](docs/CANONICAL_WORKER.md) and [rollout ledger](docs/ROLLOUT_REQUIREMENTS.md) supersede the historical local-model/RabbitMQ/Qdrant descriptions and scores below. The complete production rollout remains open.
+
 > **Search Sphere** is an enterprise-grade document semantic-search and grounded Retrieval-Augmented Generation (RAG) system. It combines hybrid dense-sparse vector retrieval, cross-encoder reranking, and conversational query rewriting to deliver hallucination-resistant answers with verifiable, chunk-level citations. Engineered with strict multi-tenant isolation, real-time Server-Sent Events (SSE) streaming, and an automated evaluation benchmark framework.
 
 ---
@@ -181,6 +183,8 @@ Run `make eval` to regenerate a temporary local report. Remove generated reports
 
 ## ⚡ Quick Start & Local Setup
 
+The hosted PostgreSQL runtime and [rollout ledger](docs/ROLLOUT_REQUIREMENTS.md) supersede historical local-model/RabbitMQ/Qdrant descriptions and benchmark claims elsewhere in this README. Those scores are not hosted-stack release measurements.
+
 ### 1. Prerequisites
 - Docker Engine & Docker Compose (`docker compose version` $\ge$ 2.20)
 - Node.js 20+ & pnpm (for local frontend development)
@@ -195,7 +199,7 @@ Update `.env` with your API keys (e.g. `COHERE_API_KEY`, Supabase or local DB cr
 
 ### 3. Start Local Full Stack
 ```bash
-# Build and start all 7 services (web, api, worker, postgres, redis, rabbitmq, qdrant)
+# Build/start web, API, PostgreSQL+pgvector, and the canonical PostgreSQL worker
 make build
 make up
 
@@ -207,7 +211,7 @@ make migrate
 - **Next.js Web UI**: [http://localhost:3000](http://localhost:3000)
 - **FastAPI OpenAPI Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
 - **FastAPI Health Probe**: [http://localhost:8000/health](http://localhost:8000/health)
-- **RabbitMQ Management UI**: [http://localhost:15672](http://localhost:15672) (guest:guest)
+- Redis/RabbitMQ/Qdrant containers are retained only under the optional `legacy` profile; the canonical path does not use them. See [worker/runtime configuration](docs/CANONICAL_WORKER.md).
 
 ---
 
@@ -218,7 +222,7 @@ make migrate
 make test
 # or: docker compose exec api pytest
 
-# Run worker test suite (330+ tests for OCR, chunking, and vector indexing)
+# Run preserved deterministic processing and hosted-adapter tests against the canonical source
 make test-worker
 
 # Run RAG evaluation benchmark
