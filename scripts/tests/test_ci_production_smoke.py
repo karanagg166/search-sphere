@@ -3,7 +3,6 @@
 These never contact the production backend.
 """
 import io
-import subprocess
 import sys
 from pathlib import Path
 
@@ -23,7 +22,10 @@ except ModuleNotFoundError:
 
 
 @pytest.fixture(autouse=True)
-def clean_state(monkeypatch):
+def clean_state(monkeypatch, tmp_path):
+    smoke.SYNTHETIC_DOCUMENT_IDS.clear()
+    monkeypatch.setenv("PROD_SMOKE_FIXTURE_KEY", "synthetic-signing-key-for-offline-tests-only")
+    monkeypatch.setattr(smoke, "fixture_manager", smoke.FixtureManager(tmp_path / "manifest.json", "a" * 32))
     smoke.RESULTS.clear()
     for key in (
         "PROD_SMOKE_BEARER_TOKEN",
@@ -51,12 +53,6 @@ def test_backend_sha_allows_exact_match(monkeypatch):
 
 def test_backend_sha_rejects_runtime_drift(monkeypatch):
     monkeypatch.setattr(smoke, "EXPECTED_SHA", "b" * 40)
-    returns = iter([0, 1])
-
-    def fake_run(*args, **kwargs):
-        return subprocess.CompletedProcess(args[0], next(returns))
-
-    monkeypatch.setattr(smoke.subprocess, "run", fake_run)
     assert not smoke.compatible_backend_sha("a" * 40)
 
 
@@ -168,7 +164,7 @@ def test_ensure_synthetic_document_polls_until_indexed(monkeypatch):
     monkeypatch.setattr(smoke, "http_upload", fake_upload)
     monkeypatch.setattr(smoke, "http", fake_http)
 
-    doc_id, was_created = smoke.ensure_synthetic_document("token_xyz", "MARKER-123")
+    doc_id, was_created = smoke.ensure_synthetic_document("token_xyz", "MARKER-123", user_id="user-1")
     assert upload_called
     assert doc_id == "doc-synth-001"
     assert was_created is True
@@ -182,7 +178,7 @@ def test_cleanup_synthetic_document(monkeypatch):
         if kwargs.get("method") == "DELETE":
             deleted = True
             return 204, {}, {}
-        return 404, {}, {}
+        return 200, {}, cleanup_receipt("doc-synth-001")
 
     monkeypatch.setattr(smoke, "http", fake_http)
     smoke.cleanup_synthetic_document("token_xyz", "doc-synth-001")
@@ -234,16 +230,16 @@ def test_real_rag_pipeline_search_and_answer(monkeypatch):
             }
         if url.endswith("/answer"):
             return 200, {}, {
-                "answer": f"The verification code is {marker}.",
-                "sources": [{"document_id": doc_id}],
+                "answer": f"The verification code is {marker}. [1]",
+                "sources": [valid_source(doc_id, marker)],
             }
         return 404, {}, {}
 
     fake_sse = [
         ("metadata", {"query": "test"}),
-        ("source", {"sources": [{"document_id": doc_id}]}),
-        ("token", {"token": f"Code is {marker}"}),
-        ("done", {"answer": f"Code is {marker}"}),
+        ("source", {"sources": [valid_source(doc_id, marker)]}),
+        ("token", {"token": f"Code is {marker}. [1]"}),
+        ("done", {"answer": f"Code is {marker}. [1]"}),
     ]
     monkeypatch.setattr(smoke, "http", fake_http)
     monkeypatch.setattr(smoke, "read_sse_stream", lambda *args, **kwargs: fake_sse)
@@ -297,12 +293,12 @@ def test_ensure_synthetic_document_rejects_zero_or_missing_chunk_count(monkeypat
     # Test chunk_count = 0
     monkeypatch.setattr(smoke, "http", lambda *args, **kwargs: (200, {}, {"status": "indexed", "chunk_count": 0}))
     with pytest.raises(AssertionError, match="chunk_count=0"):
-        smoke.ensure_synthetic_document("token_xyz", "MARKER")
+        smoke.ensure_synthetic_document("token_xyz", "MARKER", user_id="user-1")
 
     # Test missing chunk_count
     monkeypatch.setattr(smoke, "http", lambda *args, **kwargs: (200, {}, {"status": "indexed"}))
     with pytest.raises(AssertionError, match="chunk_count is missing"):
-        smoke.ensure_synthetic_document("token_xyz", "MARKER")
+        smoke.ensure_synthetic_document("token_xyz", "MARKER", user_id="user-1")
 
 
 def test_cleanup_synthetic_document_checks_vector_purge(monkeypatch):
@@ -311,9 +307,122 @@ def test_cleanup_synthetic_document_checks_vector_purge(monkeypatch):
             return 204, {}, {}
         if url.endswith("/search"):
             return 200, {}, {"results": []}
-        return 404, {}, {}
+        return 200, {}, cleanup_receipt("doc-001")
 
     monkeypatch.setattr(smoke, "http", fake_http)
     smoke.cleanup_synthetic_document("token_xyz", "doc-001", marker="MARKER-123")
     assert any("purged synthetic document" in r for r in smoke.RESULTS)
     assert any("Vector deletion verification" in r for r in smoke.RESULTS)
+
+
+def cleanup_receipt(document_id):
+    return {"document_id": document_id, "status": "complete", "vectors_remaining": 0, "object_deleted": True}
+
+
+def valid_source(document_id, marker):
+    return {"document_id": document_id, "source_id": 1, "start_page": 1, "end_page": 1, "content": marker}
+
+
+def test_offset_pagination_reads_second_page(monkeypatch):
+    calls = []
+    def fake_http(url, **kwargs):
+        calls.append(url)
+        offset = 0 if "offset=0&" in url else 50
+        docs = [{"id": str(i)} for i in range(offset, min(offset + 50, 51))]
+        return 200, {}, {"documents": docs, "total": 51}
+    monkeypatch.setattr(smoke, "http", fake_http)
+    assert len(smoke.get_all_documents("token")) == 51
+    assert "offset=50&limit=50" in calls[1]
+    assert all("page=" not in url for url in calls)
+
+
+@pytest.mark.parametrize("status,payload", [(503, {}), (200, {}), (200, {"documents": [], "total": 2})])
+def test_listing_fails_on_errors_or_incomplete_page(monkeypatch, status, payload):
+    monkeypatch.setattr(smoke, "http", lambda *a, **kw: (status, {}, payload))
+    with pytest.raises(AssertionError, match="Fixture listing"):
+        smoke.get_all_documents("token")
+
+
+def test_listing_fails_if_api_ignores_offset(monkeypatch):
+    monkeypatch.setattr(smoke, "http", lambda *a, **kw: (200, {}, {
+        "documents": [{"id": str(i)} for i in range(50)], "total": 51,
+    }))
+    with pytest.raises(AssertionError, match="repeated"):
+        smoke.get_all_documents("token")
+
+
+@pytest.mark.parametrize("status,payload", [(503, {}), (200, {"results": [{"document_id": "doc-001"}]})])
+def test_deletion_search_outage_or_remaining_results_fail(monkeypatch, status, payload):
+    smoke.SYNTHETIC_DOCUMENT_IDS.add("doc-001")
+    monkeypatch.setattr(smoke, "http", lambda *a, **kw: (204, {}, {}) if kw.get("method") == "DELETE" else (status, {}, payload))
+    with pytest.raises(AssertionError, match="Deletion access verification"):
+        smoke.cleanup_synthetic_document("token", "doc-001", marker="MARKER")
+    assert "doc-001" in smoke.SYNTHETIC_DOCUMENT_IDS
+    assert not any("purged synthetic document" in r for r in smoke.RESULTS)
+
+
+@pytest.mark.parametrize("receipt", [None, {}, {"document_id": "doc-001", "status": "complete", "vectors_remaining": 1, "object_deleted": True},
+                                     {"document_id": "doc-001", "status": "complete", "vectors_remaining": 0, "object_deleted": False},
+                                     {"document_id": "another-document", "status": "complete", "vectors_remaining": 0, "object_deleted": True}])
+def test_physical_cleanup_cannot_pass_without_scoped_receipt(monkeypatch, receipt):
+    monkeypatch.setattr(smoke, "http", lambda *a, **kw: (204, {}, {}) if kw.get("method") == "DELETE" else (200, {}, receipt))
+    with pytest.raises(AssertionError, match="Physical deletion verification"):
+        smoke.cleanup_synthetic_document("token", "doc-001")
+
+
+def test_sweep_accepts_signed_same_owner_fixture_after_lost_manifest(monkeypatch):
+    from smoke_fixtures import signed_filename
+    docs = [
+        {"id": "trusted", "user_id": "owner", "filename": signed_filename("owner", "a" * 32)},
+        {"id": "wrong-owner", "user_id": "other", "filename": signed_filename("owner", "b" * 32)},
+        {"id": "name-only", "user_id": "owner", "filename": "ci_smoke_test.pdf"},
+        {"id": "forged", "user_id": "owner", "filename": signed_filename("other", "c" * 32)},
+    ]
+    deleted = []
+    monkeypatch.setattr(smoke, "get_all_documents", lambda *_: docs)
+    monkeypatch.setattr(smoke, "cleanup_synthetic_document", lambda token, doc_id: deleted.append(doc_id))
+    smoke.sweep_dangling_synthetic_documents("token", user_id="owner")
+    assert deleted == ["trusted"]
+
+
+def test_corrupt_manifest_fails_instead_of_resetting(tmp_path):
+    path = tmp_path / "manifest.json"
+    path.write_text("invalid")
+    with pytest.raises(AssertionError, match="manifest"):
+        smoke.FixtureManager(path, "run").load_manifest()
+
+
+def test_missing_credentials_fail_required_journey(monkeypatch):
+    monkeypatch.setattr(smoke, "acquire_ci_auth", lambda: None)
+    with pytest.raises(AssertionError, match="credentials are required"):
+        smoke.run_rag_suite()
+
+
+@pytest.mark.parametrize("answer,sources", [
+    ("Unrelated answer [1]", [{"document_id": "doc", "source_id": 1, "start_page": 1, "end_page": 1, "content": "MARKER"}]),
+    ("MARKER [99]", [{"document_id": "doc", "source_id": 1, "start_page": 1, "end_page": 1, "content": "MARKER"}]),
+    ("MARKER [1]", [{"document_id": "other", "source_id": 1, "start_page": 1, "end_page": 1, "content": "MARKER"}]),
+    ("MARKER [1]", [{"document_id": "doc", "source_id": 1, "start_page": 2, "end_page": 2, "content": "MARKER"}]),
+    ("MARKER [1]", [{"document_id": "doc", "source_id": 1, "start_page": 1, "end_page": 1, "content": "unrelated"}]),
+])
+def test_grounding_assertions_reject_wrong_answer_or_citations(answer, sources):
+    with pytest.raises(AssertionError):
+        smoke.verify_grounded_marker(answer, sources, "doc", "MARKER", "grounding")
+
+
+@pytest.mark.parametrize("events", [
+    [("metadata", {}), ("token", {"token": "MARKER [1]"})],
+    [("metadata", {}), ("error", {"code": "provider_unavailable"}), ("done", {"answer": "MARKER [1]"})],
+    [("metadata", {}), ("done", {"answer": "MARKER [1]"}), ("done", {"answer": "MARKER [1]"})],
+    [("metadata", {}), ("source", {"sources": [{"document_id": "doc", "source_id": 1, "start_page": 1, "end_page": 1, "content": "MARKER"}]}),
+     ("token", {"token": "different answer"}), ("done", {"answer": "MARKER [1]"})],
+])
+def test_sse_requires_successful_matching_completion(monkeypatch, events):
+    def fake_http(url, **kwargs):
+        if url.endswith('/search'):
+            return 200, {}, {"results": [{"document_id": "doc", "content": "MARKER", "rerank_score": 0.8}]}
+        return 200, {}, {"answer": "MARKER [1]", "sources": [valid_source("doc", "MARKER")]}
+    monkeypatch.setattr(smoke, 'http', fake_http)
+    monkeypatch.setattr(smoke, 'read_sse_stream', lambda *a, **kw: events)
+    with pytest.raises(AssertionError, match="SSE answer streaming"):
+        smoke.run_real_rag_pipeline("token", "doc", "MARKER", do_answer=True)
