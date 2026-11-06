@@ -457,21 +457,10 @@ class CohereAnswerProvider(BaseAnswerProvider):
                         tokens_yielded += 1
                         yield text_val
 
-            # Fallback if streaming completed without yielding tokens
+            # A completed empty response is an explicit failure, never a second
+            # billable generation attempt or a switch of grounding policy.
             if tokens_yielded == 0:
-                logger.warning(
-                    "Cohere stream completed without yielding tokens; falling back to direct chat",
-                    query_length=len(clean_query),
-                )
-                direct_resp = await client.chat(
-                    message=user_message,
-                    preamble=ANSWER_SYSTEM_PREAMBLE,
-                    model=self.model,
-                    temperature=self.temperature,
-                )
-                direct_text = getattr(direct_resp, "text", "")
-                if direct_text:
-                    yield direct_text
+                raise AnswerGenerationUnavailableError("Provider returned an empty stream.")
         except ProviderError:
             raise
         except TimeoutError as exc:
@@ -486,6 +475,13 @@ class CohereAnswerProvider(BaseAnswerProvider):
             raise AnswerGenerationUnavailableError(
                 f"Cohere answer streaming provider failed: {exc}"
             ) from exc
+
+
+def provider_arguments(method, **kwargs):
+    parameters=inspect.signature(method).parameters
+    if any(parameter.kind==inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()):
+        return kwargs
+    return {name:value for name,value in kwargs.items() if name in parameters}
 
 
 class AnswerGenerator:
@@ -556,21 +552,9 @@ class AnswerGenerator:
             )
             return fallback, []
 
-        try:
-            answer_text = await self.provider.generate(
-                query=clean_query,
-                context_chunks=usable_chunks,
-                conversation_context=conversation_context,
-                preamble=preamble,
-                context_formatter=context_formatter,
-                no_results_answer=no_results_answer,
-            )
-        except TypeError:
-            answer_text = await self.provider.generate(
-                query=clean_query,
-                context_chunks=usable_chunks,
-                conversation_context=conversation_context,
-            )
+        answer_text=await self.provider.generate(**provider_arguments(self.provider.generate,
+            query=clean_query,context_chunks=usable_chunks,conversation_context=conversation_context,
+            preamble=preamble,context_formatter=context_formatter,no_results_answer=no_results_answer))
 
         return answer_text, usable_chunks
 
@@ -605,21 +589,10 @@ class AnswerGenerator:
 
             return empty_stream(), []
 
-        try:
-            stream = self.provider.generate_stream(
-                query=clean_query,
-                context_chunks=usable_chunks,
-                conversation_context=conversation_context,
-                preamble=preamble,
-                context_formatter=context_formatter,
-                no_results_answer=no_results_answer,
-            )
-        except TypeError:
-            stream = self.provider.generate_stream(
-                query=clean_query,
-                context_chunks=usable_chunks,
-                conversation_context=conversation_context,
-            )
+        stream=self.provider.generate_stream(**provider_arguments(self.provider.generate_stream,
+            query=clean_query,context_chunks=usable_chunks,conversation_context=conversation_context,
+            preamble=preamble,context_formatter=context_formatter,no_results_answer=no_results_answer))
+
         return stream, usable_chunks
 
 

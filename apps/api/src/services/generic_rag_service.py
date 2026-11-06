@@ -25,6 +25,7 @@ from src.schemas.v1.search import (
     SearchResponse,
 )
 from src.security.query_access import current_query_access
+from src.security.response_stream import authorized_frames
 from src.security.service_context import ServiceContext
 from src.services.answer_generator import (
     ANSWER_SYSTEM_PREAMBLE,
@@ -373,8 +374,7 @@ class GenericRagService:
             yield "data: [DONE]\n\n"
             return
         payload = result.model_dump()
-        yield f"data: {json.dumps({'event': 'metadata', 'requires_history': result.requires_history, 'route': result.route, 'retrieval_query': result.retrieval_query, 'rewritten': result.rewritten, 'context_message_ids': result.context_message_ids})}\n\n"
-        yield f"data: {json.dumps({'event': 'token', 'text': result.answer})}\n\n"
-        yield f"data: {json.dumps({'event': 'citations', 'citations': payload['citations']})}\n\n"
-        yield f"data: {json.dumps({'event': 'done', **payload})}\n\n"
-        yield "data: [DONE]\n\n"
+        metadata={key:payload[key] for key in ['requires_history','route','retrieval_query','rewritten','context_message_ids']}
+        frames=[("metadata",metadata),("token",{"text":result.answer}),("citations",{"citations":payload["citations"]}),("done",payload)]
+        async for frame in authorized_frames(frames,versioned=True):
+            yield frame

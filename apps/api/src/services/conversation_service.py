@@ -5,6 +5,7 @@ import structlog
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.inference.policy import ProviderError
 from src.models.user import User
 from src.repositories.conversation_repository import ConversationRepository
 from src.schemas.answer import AnswerRequest, AnswerSource
@@ -15,10 +16,11 @@ from src.schemas.conversation import (
     ConversationSummaryResponse,
     MessageResponse,
 )
-from src.schemas.search import SearchRequest
 from src.security.query_access import current_query_access
-from src.services.answer_generator import NO_RESULTS_ANSWER, sanitize_citations
+from src.security.response_stream import authorized_frames
+from src.services.answer_generator import NO_RESULTS_ANSWER
 from src.services.answer_service import AnswerService
+from src.services.delegated_conversations import append_turn
 
 logger = structlog.get_logger()
 
@@ -164,6 +166,7 @@ class ConversationService:
         conversation_id: str,
         request: ConversationAnswerRequest,
         user: User,
+        *, buffer_stream: bool = False,
     ) -> ConversationAnswerResponse:
         """
         Ask a question within an existing conversation, incorporating recent chat history.
@@ -178,21 +181,6 @@ class ConversationService:
                 detail="Conversation not found.",
             )
 
-        # 3. Persist the user's question as a user message
-        await self.repo.create_message(
-            conversation_id=conversation_id,
-            role="user",
-            content=request.query,
-            original_query=request.query,
-        )
-
-        # 4. If conversation still has default title, set title from first question
-        if conv.title in ("New Conversation", ""):
-            auto_title = request.query[:50].strip()
-            if len(request.query) > 50:
-                auto_title += "..."
-            await self.repo.update_title(conversation_id, user.id, auto_title)
-
         # 5. Delegate RAG answer generation to existing AnswerService
         answer_req = AnswerRequest(
             query=request.query,
@@ -203,22 +191,17 @@ class ConversationService:
             document_id=request.document_id,
             score_threshold=request.score_threshold,
         )
-        answer_resp = await self.answer_service.generate_answer(
-            request=answer_req,
-            user=user,
-        )
-
-        # 6. Persist assistant answer and source citations
-        sources_payload = [s.model_dump() for s in answer_resp.sources]
-        assistant_msg = await self.repo.create_message(
-            conversation_id=conversation_id,
-            role="assistant",
-            content=answer_resp.answer,
-            original_query=answer_resp.query,
-            retrieval_query=answer_resp.retrieval_query,
-            rewritten=answer_resp.rewritten,
-            sources=sources_payload,
-        )
+        answer_resp = await self.answer_service.generate_answer(request=answer_req,user=user,buffer_stream=buffer_stream)
+        access=current_query_access()
+        if access is None:
+            raise HTTPException(status_code=403,detail="Conversation authorization is required.")
+        sources_payload=[source.model_dump() for source in answer_resp.sources]
+        assistant_msg=await append_turn(self.db,access,request.query,answer_resp.answer,sources_payload,
+            answer_resp.retrieval_query,answer_resp.rewritten)
+        if conv.title in ("New Conversation", ""):
+            conv.title=request.query[:50].strip()+("..." if len(request.query)>50 else "")
+        await self.db.commit()
+        await access.validate()
 
         msg_resp = MessageResponse(
             id=assistant_msg.id,
@@ -255,136 +238,18 @@ class ConversationService:
         Stream SSE formatted events for a question in a conversation.
         Only commits the final assistant message if generation finishes without error.
         """
-        # 1. Enforce tenant isolation and verify existence
-        conv = await self.repo.get_by_id(
-            conversation_id, user.id, include_messages=False
-        )
-        if not conv:
-            yield f"event: error\ndata: {json.dumps({'error': 'Conversation not found.'})}\n\n"
-            return
-
-        # 3. Persist the user's question
-        await self.repo.create_message(
-            conversation_id=conversation_id,
-            role="user",
-            content=request.query,
-            original_query=request.query,
-        )
-
-        # 4. If conversation still has default title, set title from first question
-        if conv.title in ("New Conversation", ""):
-            auto_title = request.query[:50].strip()
-            if len(request.query) > 50:
-                auto_title += "..."
-            await self.repo.update_title(conversation_id, user.id, auto_title)
-
-        # 5. Search & retrieve chunks
-        search_req = SearchRequest(
-            query=request.query,
-            conversation_id=conversation_id,
-            conversation_context=None,
-            top_k=request.top_k,
-            candidate_k=request.candidate_k,
-            document_id=request.document_id,
-            score_threshold=request.score_threshold,
-        )
-        search_response = await self.answer_service.search_service.search(
-            request=search_req,
-            user=user,
-        )
-
-        metadata_payload = {
-            "query": search_response.query,
-            "retrieval_query": search_response.retrieval_query,
-            "rewritten": search_response.rewritten,
-            "requires_history": search_response.requires_history,
-            "route": search_response.route,
-            "context_message_ids": search_response.context_message_ids,
-        }
-        yield f"event: metadata\ndata: {json.dumps(metadata_payload)}\n\n"
-
-        if not search_response.results:
-            no_results = search_response.response or search_response.clarification or NO_RESULTS_ANSWER
-            yield f"event: source\ndata: {json.dumps({'sources': []})}\n\n"
-            yield f"event: token\ndata: {json.dumps({'token': no_results})}\n\n"
-            msg = await self.repo.create_message(
-                conversation_id=conversation_id,
-                role="assistant",
-                content=no_results,
-                original_query=search_response.query,
-                retrieval_query=search_response.retrieval_query,
-                rewritten=search_response.rewritten,
-                sources=[],
-            )
-            yield f"event: done\ndata: {json.dumps({'message_id': msg.id, 'answer': no_results, 'sources': []})}\n\n"
-            return
-
-        usable_chunks = search_response.results[: self.answer_service.answer_generator.max_context_chunks]
-        sources = [
-            AnswerSource(
-                source_id=idx + 1,
-                document_id=chunk.document_id,
-                chunk_index=chunk.chunk_index,
-                start_page=chunk.start_page,
-                end_page=chunk.end_page,
-                content=chunk.content,
-                rerank_score=chunk.rerank_score,
-            )
-            for idx, chunk in enumerate(usable_chunks)
-        ]
-        sources_payload = [s.model_dump() for s in sources]
-        yield f"event: source\ndata: {json.dumps({'sources': sources_payload})}\n\n"
-
-        accumulated_tokens: list[str] = []
-        stream_completed = False
         try:
-            token_iter, _ = await self.answer_service.answer_generator.generate_answer_stream(
-                query=search_response.query,
-                chunks=search_response.results,
-                conversation_context=current_query_access().history if current_query_access() else None,
-            )
-            async for token in token_iter:
-                accumulated_tokens.append(token)
-                yield f"event: token\ndata: {json.dumps({'token': token})}\n\n"
-            stream_completed = True
-        except Exception as exc:
-            logger.error("Streaming conversation answer failed", error_type=type(exc).__name__, user_id=user.id)
-            yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
+            result=await self.answer_in_conversation(conversation_id,request,user,buffer_stream=True)
+            access=current_query_access()
+            if access is not None:
+                await access.validate()
+        except (ProviderError,HTTPException) as exc:
+            code=exc.code if isinstance(exc,ProviderError) else "answer_unavailable"
+            yield f"event: error\ndata: {json.dumps({'code':code,'error':'Unable to generate answer.'})}\n\n"
             return
-
-        if stream_completed:
-            raw_answer = "".join(accumulated_tokens).strip()
-            # If tokens were empty, attempt non-streaming fallback
-            if not raw_answer:
-                logger.warning(
-                    "Stream completed with empty tokens; invoking non-streaming fallback",
-                    user_id=user.id,
-                )
-                try:
-                    fallback_answer, _ = await self.answer_service.answer_generator.generate_answer(
-                        query=search_response.query,
-                        chunks=usable_chunks,
-                        conversation_context=current_query_access().history if current_query_access() else None,
-                    )
-                    raw_answer = fallback_answer.strip() if fallback_answer else ""
-                    if raw_answer:
-                        yield f"event: token\ndata: {json.dumps({'token': raw_answer})}\n\n"
-                except Exception as fb_exc:
-                    logger.error("Fallback generation failed", error_type=type(fb_exc).__name__)
-
-            if not raw_answer:
-                raw_answer = NO_RESULTS_ANSWER
-                yield f"event: token\ndata: {json.dumps({'token': raw_answer})}\n\n"
-
-            clean_answer = sanitize_citations(raw_answer, max_source_id=len(sources))
-            assistant_msg = await self.repo.create_message(
-                conversation_id=conversation_id,
-                role="assistant",
-                content=clean_answer,
-                original_query=search_response.query,
-                retrieval_query=search_response.retrieval_query,
-                rewritten=search_response.rewritten,
-                sources=sources_payload,
-            )
-            yield f"event: done\ndata: {json.dumps({'message_id': assistant_msg.id, 'answer': clean_answer, 'sources': sources_payload})}\n\n"
-
+        payload=result.model_dump(mode="json")
+        metadata={key:payload[key] for key in ['query','retrieval_query','rewritten','requires_history','route','context_message_ids']}
+        frames=[("metadata",metadata),("source",{"sources":payload["sources"]}),("token",{"token":result.answer}),
+                ("done",{"message_id":result.message.id,"answer":result.answer,"sources":payload["sources"]})]
+        async for frame in authorized_frames(frames):
+            yield frame

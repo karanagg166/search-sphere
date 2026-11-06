@@ -9,6 +9,7 @@ from src.models.user import User
 from src.schemas.answer import AnswerRequest, AnswerResponse, AnswerSource
 from src.schemas.search import SearchRequest
 from src.security.query_access import current_query_access
+from src.security.response_stream import authorized_frames
 from src.services.answer_generator import (
     NO_RESULTS_ANSWER,
     AnswerGenerationConfigError,
@@ -17,7 +18,6 @@ from src.services.answer_generator import (
     AnswerGenerationUnavailableError,
     AnswerGenerator,
     get_answer_generator,
-    sanitize_citations,
 )
 from src.services.search_service import SearchService
 
@@ -50,6 +50,7 @@ class AnswerService:
         self,
         request: AnswerRequest,
         user: User,
+        *, buffer_stream: bool = False,
     ) -> AnswerResponse:
         """
         Execute grounded RAG workflow for the authenticated user.
@@ -103,13 +104,29 @@ class AnswerService:
 
         # 3. Generate grounded answer from retrieved top chunks
         try:
-            answer_text, used_chunks = (
-                await self.answer_generator.generate_answer(
-                    query=search_response.query,
-                    chunks=search_response.results,
-                    conversation_context=current_query_access().history if current_query_access() else None,
-                )
-            )
+            if buffer_stream:
+                tokens, used_chunks = await self.answer_generator.generate_answer_stream(
+                    query=search_response.query,chunks=search_response.results,
+                    conversation_context=current_query_access().history if current_query_access() else None)
+                pieces = []
+                size = 0
+                async for token in tokens:
+                    if not isinstance(token,str):
+                        raise AnswerGenerationError("Invalid streaming token.")
+                    size += len(token)
+                    if size > 16000:
+                        raise AnswerGenerationError("Answer exceeds the bounded output limit.")
+                    pieces.append(token)
+                answer_text = "".join(pieces)
+                if not answer_text.strip():
+                    raise AnswerGenerationError("Provider returned an empty answer.")
+            else:
+                answer_text, used_chunks = await self.answer_generator.generate_answer(
+                    query=search_response.query,chunks=search_response.results,
+                    conversation_context=current_query_access().history if current_query_access() else None)
+            access = current_query_access()
+            if access is not None:
+                await access.validate()
         except AnswerGenerationTimeoutError as exc:
             logger.error(
                 "Answer generation timed out",
@@ -201,106 +218,18 @@ class AnswerService:
         """
         Stream SSE formatted events: metadata, source, token, done, error.
         """
-        search_req = SearchRequest(
-            query=request.query,
-            conversation_id=request.conversation_id,
-            conversation_context=None,
-            top_k=request.top_k,
-            candidate_k=request.candidate_k,
-            document_id=request.document_id,
-            score_threshold=request.score_threshold,
-        )
-        search_response = await self.search_service.search(
-            request=search_req,
-            user=user,
-        )
-
-        metadata_payload = {
-            "query": search_response.query,
-            "retrieval_query": search_response.retrieval_query,
-            "rewritten": search_response.rewritten,
-            "requires_history": search_response.requires_history,
-            "route": search_response.route,
-            "context_message_ids": search_response.context_message_ids,
-        }
-        yield f"event: metadata\ndata: {json.dumps(metadata_payload)}\n\n"
-
-        if not search_response.results:
-            yield f"event: source\ndata: {json.dumps({'sources': []})}\n\n"
-            yield f"event: token\ndata: {json.dumps({'token': search_response.response or search_response.clarification or NO_RESULTS_ANSWER})}\n\n"
-            yield f"event: done\ndata: {json.dumps({'answer': search_response.response or search_response.clarification or NO_RESULTS_ANSWER, 'sources': []})}\n\n"
-            return
-
-        usable_chunks = search_response.results[: self.answer_generator.max_context_chunks]
-        sources = [
-            AnswerSource(
-                source_id=idx + 1,
-                document_id=chunk.document_id,
-                chunk_index=chunk.chunk_index,
-                start_page=chunk.start_page,
-                end_page=chunk.end_page,
-                content=chunk.content,
-                rerank_score=chunk.rerank_score,
-            )
-            for idx, chunk in enumerate(usable_chunks)
-        ]
-        sources_payload = [s.model_dump() for s in sources]
-        yield f"event: source\ndata: {json.dumps({'sources': sources_payload})}\n\n"
-
-        accumulated_tokens: list[str] = []
         try:
-            token_iter, _ = await self.answer_generator.generate_answer_stream(
-                query=search_response.query,
-                chunks=search_response.results,
-                conversation_context=current_query_access().history if current_query_access() else None,
-            )
-            async for token in token_iter:
-                accumulated_tokens.append(token)
-                yield f"event: token\ndata: {json.dumps({'token': token})}\n\n"
-
-            raw_answer = "".join(accumulated_tokens).strip()
-            if not raw_answer:
-                logger.warning(
-                    "Stream completed with empty tokens; invoking non-streaming fallback",
-                    user_id=user.id,
-                )
-                try:
-                    fallback_answer, _ = await self.answer_generator.generate_answer(
-                        query=search_response.query,
-                        chunks=usable_chunks,
-                        conversation_context=current_query_access().history if current_query_access() else None,
-                    )
-                    raw_answer = fallback_answer.strip() if fallback_answer else ""
-                    if raw_answer:
-                        yield f"event: token\ndata: {json.dumps({'token': raw_answer})}\n\n"
-                except ProviderError:
-                    raise
-                except Exception as fb_exc:
-                    logger.error("Fallback generation failed", error_type=type(fb_exc).__name__)
-
-            if not raw_answer:
-                raw_answer = NO_RESULTS_ANSWER
-                yield f"event: token\ndata: {json.dumps({'token': raw_answer})}\n\n"
-
-            clean_answer = sanitize_citations(raw_answer, max_source_id=len(sources))
-            yield f"event: done\ndata: {json.dumps({'answer': clean_answer, 'sources': sources_payload})}\n\n"
-        except ProviderError:
-            raise
-        except Exception as exc:
-            logger.error("Streaming answer failed", error_type=type(exc).__name__, user_id=user.id)
-            try:
-                fallback_answer, _ = await self.answer_generator.generate_answer(
-                    query=search_response.query,
-                    chunks=usable_chunks,
-                    conversation_context=current_query_access().history if current_query_access() else None,
-                )
-                raw_answer = fallback_answer.strip() if fallback_answer else NO_RESULTS_ANSWER
-                clean_answer = sanitize_citations(raw_answer, max_source_id=len(sources))
-                yield f"event: token\ndata: {json.dumps({'token': clean_answer})}\n\n"
-                yield f"event: done\ndata: {json.dumps({'answer': clean_answer, 'sources': sources_payload})}\n\n"
-            except ProviderError:
-                raise
-            except Exception as fb_exc:
-                logger.error("Non-streaming fallback failed", error_type=type(fb_exc).__name__)
-                yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
-
+            result = await self.generate_answer(request,user,buffer_stream=True)
+            access = current_query_access()
+            if access is not None:
+                await access.validate()
+        except (ProviderError,HTTPException) as exc:
+            code = exc.code if isinstance(exc,ProviderError) else "answer_unavailable"
+            yield f"event: error\ndata: {json.dumps({'code':code,'error':'Unable to generate answer.'})}\n\n"
+            return
+        payload=result.model_dump()
+        metadata={key:payload[key] for key in ['query','retrieval_query','rewritten','requires_history','route','context_message_ids']}
+        frames=[("metadata",metadata),("source",{"sources":payload["sources"]}),("token",{"token":result.answer}),
+                ("done",{"answer":result.answer,"sources":payload["sources"]})]
+        async for frame in authorized_frames(frames):
+            yield frame

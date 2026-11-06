@@ -656,3 +656,31 @@ journeys remain open.
 [42253283898](https://github.com/karanagg166/Quick-Clinic/actions/runs/42253283898)
 and merged. Exact new consumer deployment verification continues; the backend remains
 on the last verified production `8288c9d` until the pinned rollout gates run.
+
+### Native response buffering and atomic turns
+
+Native answer/conversation SSE now buffers one bounded provider result before any
+source or answer frame. Empty streams and provider failures cannot trigger another
+generation attempt. Adapter compatibility is decided from the method signature before
+inference, avoiding retries when an in-flight provider raises TypeError. Completed
+native conversation question/answer pairs commit atomically after validation; failed
+turns do not leave a purported assistant response or a dangling question. JSON and SSE
+share that completion/persistence path.
+
+`security/response_stream.py` rechecks current authorization before every content and
+completion frame across native, versioned, and medical SSE. Revocation after metadata
+prevents later source/token output. Error frames contain safe codes, never provider
+exception text; general request exception logs likewise record types instead of raw
+diagnostics. Tokens concatenate exactly to the completion answer. Full claim-to-source
+validation remains a following phase; buffering alone is not an entailment guarantee.
+
+Five real PostgreSQL native-stream cases cover partial-provider failure, empty-result
+no-retry behavior, mid-delivery source revocation, and atomic successful conversation
+completion. The combined native/versioned/medical stream/context suite passed 17
+PostgreSQL tests; 27 gateway/runtime checks and 30 focused API checks also passed.
+The full API suite passed before the final two no-retry regressions were added.
+
+Quick-Clinic #163 merged at `4ba7f6f61dfa6ded1b3738dff12b762bff6298cc`, and live web
+health now reports exactly that revision. Its trusted contract workflow
+[42254878720](https://github.com/karanagg166/Quick-Clinic/actions/runs/42254878720)
+was dispatched after deployment. Full Search Sphere patient journeys remain open.
