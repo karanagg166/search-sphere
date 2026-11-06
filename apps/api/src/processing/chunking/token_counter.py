@@ -72,12 +72,19 @@ class TokenCounter:
                 # If the single word itself exceeds max_tokens, split it token-by-token
                 if self.count(word) > max_tokens:
                     word_tokens = self.encoding.encode(word)
-                    for i in range(0, len(word_tokens), max_tokens):
-                        chunk_str = self.encoding.decode(
-                            word_tokens[i : i + max_tokens]
-                        ).strip()
-                        if chunk_str:
-                            segments.append(chunk_str)
+                    start = 0
+                    while start < len(word_tokens):
+                        end = min(start + max_tokens, len(word_tokens))
+                        while end > start:
+                            try:
+                                chunk_str = self.encoding.decode_bytes(word_tokens[start:end]).decode("utf-8")
+                                break
+                            except UnicodeDecodeError:
+                                end -= 1
+                        else:
+                            raise ValueError("Token budget cannot preserve a complete Unicode character")
+                        segments.append(chunk_str)
+                        start = end
                 else:
                     current_words.append(word)
 

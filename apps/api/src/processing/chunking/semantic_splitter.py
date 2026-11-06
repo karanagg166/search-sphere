@@ -153,7 +153,12 @@ class SemanticEmbedder:
 
         model = self._get_model()
 
-        # Check if model has embed method (FastEmbed)
+        from src.inference.sync_adapter import CohereSyncAdapter
+
+        if isinstance(model, CohereSyncAdapter):
+            return model.semantic_embed(texts)
+
+        # Injected deterministic test models retain their small embed interface.
         if hasattr(model, "embed"):
             embeddings = list(model.embed(texts))
             return [
@@ -265,6 +270,13 @@ class SemanticSplitter:
         if len(texts) < 2:
             return []
 
+        if len(texts) > 32:
+            # Bound trial usage to 16 actual adjacent comparisons, spread across
+            # the document. Unmeasured seams retain prose/heading/token rules.
+            seams = sorted({round(index * (len(texts) - 2) / 15) for index in range(16)})
+            selected = sorted({index for seam in seams for index in (seam, seam + 1)})
+            vectors = dict(zip(selected, self.embedder.embed([texts[index] for index in selected]), strict=True))
+            return [cosine_distance(vectors[index], vectors[index + 1]) if index in seams else 0.0 for index in range(len(texts) - 1)]
         embeddings = self.embedder.embed(texts)
         distances: list[float] = []
 

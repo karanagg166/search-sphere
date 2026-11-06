@@ -93,7 +93,7 @@ jobs:
       - name: Verify hosted inference eligibility and bounded failures
         env:
           PYTHONPATH: "apps/api"
-        run: pytest scripts/tests/test_cohere_gateway.py scripts/tests/test_hosted_runtime.py -v
+        run: pytest scripts/tests/test_cohere_gateway.py scripts/tests/test_hosted_runtime.py scripts/tests/test_hosted_token_limits.py -v
 
       - name: Run Monitor & Keep-Alive Safety Suite
         env:

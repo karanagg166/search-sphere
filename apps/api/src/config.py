@@ -102,8 +102,8 @@ class Settings(BaseSettings):
     ENABLE_IMAGE_CAPTIONING: bool = False
 
     # Chunking
-    CHUNK_TARGET_TOKENS: int = 500
-    CHUNK_MAX_TOKENS: int = 700
+    CHUNK_TARGET_TOKENS: int = 400
+    CHUNK_MAX_TOKENS: int = 480
     CHUNK_OVERLAP_TOKENS: int = 60
     SEMANTIC_CHUNKING_MODEL: str = "embed-english-light-v3.0"
     SEMANTIC_DISTANCE_THRESHOLD: float = 0.5

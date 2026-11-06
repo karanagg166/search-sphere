@@ -19,7 +19,7 @@ class CohereSyncAdapter:
     def __init__(self, gateway=None):
         self.gateway = gateway or CohereGateway()
 
-    def run(self, operation):
+    def run(self, operation, *, timeout=60):
         scope = current_inference_scope()
         try:
             running_loop = asyncio.get_running_loop()
@@ -30,7 +30,7 @@ class CohereSyncAdapter:
         # Schedule DB quota operations on the owning loop, never a new thread loop.
         pending = asyncio.run_coroutine_threadsafe(operation(), scope.loop)
         try:
-            return pending.result(timeout=60)
+            return pending.result(timeout=timeout)
         except FutureTimeoutError:
             pending.cancel()
             raise ProviderError("Hosted inference exceeded the operation deadline.") from None
@@ -42,6 +42,9 @@ class CohereSyncAdapter:
         if isinstance(texts, str):
             texts = [texts]
         return self.run(lambda: self.gateway.embed(list(texts), query=True))
+
+    def semantic_embed(self, texts):
+        return self.run(lambda: self.gateway.semantic_embed(list(texts)), timeout=180)
 
     def rerank(self, query, documents):
         return self.run(lambda: self.gateway.rerank(query, list(documents)))
