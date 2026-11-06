@@ -19,6 +19,7 @@ assert not Path("/app/.env").exists(), "Environment file copied into image"
 
 from src.inference.policy import ProviderNotApprovedError
 from src.main import app
+from src.processing.chunking.token_counter import TokenCounter
 from src.services.model_manager import model_manager
 
 adapter = model_manager.get_dense_embedder()
@@ -29,6 +30,7 @@ except ProviderNotApprovedError:
 else:
     raise AssertionError("Missing scope must deny inference")
 assert not any(name in sys.modules for name in FORBIDDEN_PACKAGES)
+assert TokenCounter().count("PUBLIC SYNTHETIC OFFLINE TOKENIZER") > 0
 
 
 async def verify_health():

@@ -49,11 +49,14 @@ async def fixture(tmp_path, monkeypatch):
 
     async def public_provider(self, endpoint, payload):
         calls.append((endpoint, payload["model"]))
+        if endpoint == "/v1/tokenize":
+            return {"tokens": list(range(max(1, len(payload["text"].split()))))}
         assert endpoint == "/v2/embed"  # This fixture never invokes a real provider.
         return {"embeddings": {"float": [[1.0] + [0.0] * 383 for _ in payload["texts"]]}}
 
     monkeypatch.setattr(CohereGateway, "_request", public_provider)
     monkeypatch.setattr("src.inference.cohere_gateway.CohereUsageBudget.reserve", AsyncMock())
+    monkeypatch.setattr("src.inference.cohere_gateway.CohereUsageBudget.wait_for_tokenize_slot", AsyncMock())
     storage = LocalStorage(str(tmp_path), "synthetic-fixtures")
     async with sessions() as db, db.begin():
         await db.execute(delete(IngestionJob))  # Dedicated synthetic test DB only.

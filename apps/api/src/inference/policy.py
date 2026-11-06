@@ -6,7 +6,7 @@ import hmac
 from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from src.config import settings
@@ -50,6 +50,7 @@ class InferenceScope:
     tenant_id: str
     loop: asyncio.AbstractEventLoop
     validator: Callable[[], Awaitable[None]] | None = None
+    token_counts: dict[str, int] = field(default_factory=dict, repr=False)
 
 
 _scope: ContextVar[InferenceScope | None] = ContextVar("inference_scope", default=None)

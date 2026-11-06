@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import hashlib
 import math
 from typing import Any
 from weakref import WeakKeyDictionary
@@ -13,6 +14,7 @@ from src.inference.policy import (
     ProviderError,
     ProviderInvalidResponseError,
     ProviderQuotaExceededError,
+    ProviderRateLimitError,
     authorize_cohere,
 )
 from src.inference.usage import CohereUsageBudget
@@ -89,6 +91,50 @@ class CohereGateway:
             raise ProviderInvalidResponseError(
                 "Invalid Cohere response format."
             ) from exc
+
+    async def token_count(self, text: str, *, background=False) -> int:
+        """Exact selected-model count; cache only digests/counts within one scope."""
+        scope = authorize_cohere(self.api_key)
+        if not text.strip() or len(text) > 65536:
+            raise ValueError("Tokenizer input must contain 1 to 65536 characters")
+        digest = hashlib.sha256(text.encode()).hexdigest()
+        if digest in scope.token_counts:
+            if scope.validator is not None:
+                await scope.validator()
+            return scope.token_counts[digest]
+        for attempt in range(2):
+            admission = getattr(self.budget, "wait_for_tokenize_slot", None)
+            if background and admission is not None:
+                await admission(self.api_key)
+            try:
+                data = await self._post("/v1/tokenize", {"model": EMBEDDING_MODEL, "text": text}, "tokenize")
+                break
+            except ProviderRateLimitError:
+                # Reservation failed before any HTTP request. A provider error or
+                # quota response is never retried here.
+                if not background or attempt == 1:
+                    raise
+        tokens = data.get("tokens")
+        if not isinstance(tokens, list) or not tokens or any(type(token) is not int or token < 0 for token in tokens):
+            raise ProviderInvalidResponseError("Invalid Cohere tokenizer response.")
+        count = len(tokens)
+        if len(scope.token_counts) < 2048:
+            scope.token_counts[digest] = count
+        return count
+
+    async def semantic_embed(self, texts: list[str]) -> list[list[float]]:
+        """Bound semantic-boundary features; evidence text itself is never truncated."""
+        features = []
+        for text in texts:
+            feature = text
+            for _ in range(12):
+                if await self.token_count(feature, background=True) <= EMBEDDING_TOKEN_LIMIT:
+                    break
+                feature = feature[:max(1, len(feature) // 2)]
+            else:
+                raise ProviderInvalidResponseError("Semantic unit exceeds the token limit.")
+            features.append(feature)
+        return await self.embed(features)
 
     async def embed(
         self, texts: list[str], *, query: bool = False

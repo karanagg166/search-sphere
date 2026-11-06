@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 from datetime import UTC, datetime, timedelta
 
@@ -17,6 +18,26 @@ MINUTE_LIMITS = {"embed": 1500, "rerank": 8, "chat": 15, "tokenize": 80}
 class CohereUsageBudget:
     def __init__(self, session_factory=AsyncSessionLocal):
         self.sessions = session_factory
+
+    async def wait_for_tokenize_slot(self, api_key):
+        """Background ingestion may wait for a new minute without making an API call."""
+        try:
+            async with asyncio.timeout(65):
+                while True:
+                    now = datetime.now(UTC)
+                    fingerprint = hashlib.sha256(api_key.encode()).hexdigest()
+                    bucket = f"cohere:{fingerprint}:minute:tokenize:{now:%Y-%m-%dT%H:%M}"
+                    async with self.sessions() as db:
+                        row = await db.get(ProviderUsage, bucket)
+                        if row is None or row.used < MINUTE_LIMITS["tokenize"]:
+                            return
+                    await asyncio.sleep(min(60.0, 60 - now.second - now.microsecond / 1_000_000 + 0.05))
+        except TimeoutError:
+            raise ProviderRateLimitError("Background tokenizer admission deadline reached.") from None
+        except ProviderError:
+            raise
+        except Exception:
+            raise ProviderError("Provider budget verification is unavailable.") from None
 
     async def reserve(self, api_key: str, purpose: str, units: int = 1) -> None:
         if purpose not in MINUTE_LIMITS or units <= 0:

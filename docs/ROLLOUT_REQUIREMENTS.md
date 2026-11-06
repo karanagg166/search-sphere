@@ -377,3 +377,23 @@ This confirms availability of the selected embedding tokenizer; the exact-limit
 chunking benchmark is the next implementation slice. Structured table/chart parsing,
 private crops, table row-group storage, cross-page continuation, final token tuning,
 versioned cutover, and live verification remain open.
+
+### Hosted token-limit verification and initial tuning
+
+`CohereGateway.token_count`, `processing/chunking/hosted_token_limits.py` and the
+shared ingestion pipeline verify final chunks with the pinned embedding model's
+hosted tokenizer. Evidence is split with source links intact; no silent embedding
+truncation is allowed. Unicode hard splits preserve complete characters. Coarse
+vocabulary is baked into the image and tested without network access. Token counts
+are cached only within the authorized job/request, reauthorize on cache hits, and
+use the same trial eligibility and PostgreSQL budget. Background admission waits
+are bounded and do not repeat provider failures or quota responses.
+
+The public synthetic benchmark compared 500/700/60, 350/400/60, and 400/480/60 at
+cosine distance 0.5 / percentile 80. All scored 4/4 dense marker Recall@1 on the small
+policy/class fixture. The 700-token stress chunk exceeded the real 512 limit; fitting
+split it safely. 400/480 used three stress chunks versus four for 350/400, with no
+observed recall loss. Initial settings are 400/480/60 plus mandatory exact hosted
+verification. Results and limits are recorded in `docs/HOSTED_CHUNK_BENCHMARK.md`.
+This does not complete the broader hybrid/rerank, citation, answer, refusal, P95,
+capacity, or production cold-start evaluation requirements.
