@@ -1,6 +1,8 @@
+import hashlib
+import math
 from io import BytesIO
 
-import fitz
+import pymupdf as fitz
 import structlog
 from PIL import Image
 
@@ -13,6 +15,7 @@ from src.processing.extraction.ocr_processor import (
     OcrProcessingError,
     OcrProcessor,
 )
+from src.processing.extraction.reading_order import reading_order, split_text_columns
 from src.processing.models.document import (
     ExtractedBlock,
     ExtractedDocument,
@@ -71,7 +74,11 @@ class DocumentExtractor:
             text = self.ocr_processor.extract_text(image_bytes)
             clean_text = text.strip() if text else ""
             blocks = (
-                [ExtractedBlock(block_type="text", content=clean_text)]
+                [ExtractedBlock(block_type="image", content=f"[Image text: {clean_text}]", provenance={
+                    "block_id": hashlib.sha256(image_bytes).hexdigest() + ":1:0", "page_number": 1,
+                    "original_order": 0, "source_kind": "hosted_ocr", "ocr_review_required": True,
+                    "document_sha256": hashlib.sha256(image_bytes).hexdigest(),
+                })]
                 if clean_text
                 else []
             )
@@ -116,6 +123,7 @@ class DocumentExtractor:
         try:
             if document.needs_pass or document.page_count > 100:
                 raise DocumentExtractionError("PDF is encrypted or exceeds the 100-page processing limit.")
+            source_sha256 = hashlib.sha256(content_bytes).hexdigest()
             for page_number, page in enumerate(
                 document,
                 start=1,
@@ -123,6 +131,7 @@ class DocumentExtractor:
                 extracted_page = self._extract_page(
                     page=page,
                     page_number=page_number,
+                    source_sha256=source_sha256,
                 )
 
                 pages.append(extracted_page)
@@ -144,6 +153,7 @@ class DocumentExtractor:
         self,
         page: fitz.Page,
         page_number: int,
+        source_sha256: str = "",
     ) -> ExtractedPage:
         """
         Extract a page while preserving block order.
@@ -163,16 +173,37 @@ class DocumentExtractor:
             ) from exc
 
         blocks = page_dict.get("blocks", [])
-
-        ordered_blocks = sorted(
-            blocks,
-            key=self._reading_order_key,
-        )
+        if len(blocks) > 4096:
+            raise DocumentExtractionError("PDF page exceeds the layout block limit.")
+        for block in blocks:
+            for item in [block, *block.get("lines", [])]:
+                bbox = item.get("bbox", ())
+                if len(bbox) != 4 or not all(math.isfinite(float(value)) for value in bbox) or bbox[2] < bbox[0] or bbox[3] < bbox[1]:
+                    raise DocumentExtractionError("PDF page contains invalid layout coordinates.")
+        blocks = [{**block, "original_order": index} for index, block in enumerate(blocks)]
+        blocks = [part for block in blocks for part in split_text_columns(block)]
+        if len(blocks) > 4096:
+            raise DocumentExtractionError("PDF page exceeds the layout block limit.")
+        ordered_blocks = reading_order(blocks, float(page.cropbox.width))
 
         extracted_blocks: list[ExtractedBlock] = []
 
         for block in ordered_blocks:
             block_type = block.get("type")
+            provenance = {
+                "block_id": f"{source_sha256}:{page_number}:{block['original_order']}:{block.get('source_part', 0)}",
+                "document_sha256": source_sha256, "page_number": page_number,
+                "bbox": [float(value) for value in block.get("bbox", (0, 0, 0, 0))],
+                "original_order": block["original_order"],
+                "source_line_indices": block.get("source_line_indices", list(range(len(block.get("lines", []))))),
+                "source_kind": "native_pdf" if block_type == self.TEXT_BLOCK_TYPE else "hosted_ocr_vision",
+                "reading_order_method": "whitespace_partitions",
+                "coordinate_space": "unrotated_pdf_points",
+                "page_size": [float(page.cropbox.width), float(page.cropbox.height)],
+                "page_rotation": int(page.rotation),
+            }
+            if block_type == self.IMAGE_BLOCK_TYPE:
+                provenance.update({"ocr_review_required": True, "caption_is_description": True})
 
             if block_type == self.TEXT_BLOCK_TYPE:
                 text = self._extract_text_block(block)
@@ -182,6 +213,7 @@ class DocumentExtractor:
                         ExtractedBlock(
                             block_type="text",
                             content=text,
+                            provenance=provenance,
                         )
                     )
 
@@ -196,6 +228,7 @@ class DocumentExtractor:
                         ExtractedBlock(
                             block_type="image",
                             content=image_content,
+                            provenance=provenance,
                         )
                     )
 

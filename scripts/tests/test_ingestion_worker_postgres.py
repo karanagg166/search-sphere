@@ -44,6 +44,9 @@ async def test_native_upload_outbox_processing_and_status_are_durable(fixture):
         assert current.job.status == "SUCCEEDED" and current.job.attempts == 1
         rows = (await db.execute(select(DocumentChunk).where(DocumentChunk.document_id == document.id))).scalars().all()
         assert rows and all(row.metadata_json["embedding_model"] == "embed-english-light-v3.0" for row in rows)
+        provenance = rows[0].metadata_json["provenance"]
+        assert provenance and provenance[0]["page_number"] == 1
+        assert len(provenance[0]["bbox"]) == 4 and len(provenance[0]["document_sha256"]) == 64
     assert fixture.calls and not await worker.run_once()
 
 

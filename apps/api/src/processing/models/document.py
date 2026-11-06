@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -13,6 +14,7 @@ class ExtractedBlock:
 
     block_type: str
     content: str
+    provenance: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,7 @@ class CleanedBlock:
 
     block_type: str
     content: str
+    provenance: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -101,6 +104,7 @@ class DocumentChunk:
     end_page: int
     page_numbers: list[int]
     block_types: list[str]
+    provenance: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -140,6 +144,7 @@ class EmbeddedChunk:
     page_numbers: list[int]
     block_types: list[str]
     embedding: list[float]
+    provenance: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

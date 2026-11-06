@@ -63,7 +63,7 @@ class DocumentService:
         sanitized_filename = Path(raw_filename).name
 
         try:
-            content = await file.read()
+            content = await file.read(settings.MAX_UPLOAD_SIZE_BYTES + 1)
         except Exception as exc:
             logger.error("Failed to read uploaded file", error=str(exc))
             raise HTTPException(

@@ -23,7 +23,10 @@ from src.schemas.v1.documents import (
 )
 from src.security.service_auth import get_service_context
 from src.security.service_context import ServiceContext
-from src.services.generic_document_service import GenericDocumentService
+from src.services.generic_document_service import (
+    MAX_GENERIC_DOC_SIZE_BYTES,
+    GenericDocumentService,
+)
 from src.storage.object_storage import ObjectStorage, get_object_storage
 from src.vector_store import get_vector_store
 
@@ -50,7 +53,7 @@ async def upload_document_file(
     db: AsyncSession = Depends(get_db),
     storage: ObjectStorage = Depends(get_object_storage),
 ) -> DocumentUploadResponse:
-    file_bytes = await file.read()
+    file_bytes = await file.read(MAX_GENERIC_DOC_SIZE_BYTES + 1)
     service = GenericDocumentService(db, storage)
     storage_key, mime_type, file_size = await service.upload_file(
         context=context,

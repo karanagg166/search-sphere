@@ -287,7 +287,7 @@ class SupabaseVectorStore:
                 owner_subject_id=owner_subject_id,
                 document_type=doc_type,
                 file_name=file_name,
-                metadata_json=extra_meta,
+                metadata_json={**extra_meta, "provenance": [dict(item) for item in getattr(chunk, "provenance", [])]},
             )
             chunks_to_insert.append(row)
 

@@ -153,7 +153,7 @@ async def upload_medical_document(
     _auth = bind_patient(_auth, clean_patient_id)
     clean_document_id = sanitize_identifier(document_id, "document_id")
 
-    data = await file.read()
+    data = await file.read(MAX_MEDICAL_DOC_SIZE_BYTES + 1)
     if len(data) == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

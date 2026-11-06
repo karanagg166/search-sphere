@@ -353,3 +353,27 @@ client/tenant collisions, receipt authorization, delayed delivery, concurrent cl
 storage failures, and restart recovery. This foundation is not deployed yet and does
 not complete the pending versioned replacement, old-citation authorization, or live
 three-app verification requirements.
+
+### Native PDF layout and evidence provenance foundation
+
+`processing/extraction/reading_order.py` separates whitespace-defined columns and
+wide header/footer bands, including disconnected columns PyMuPDF placed in a single
+text block. `DocumentExtractor` retains the original PDF block/line indices, stable
+source hash/block ID, page number, unrotated bounding box, page dimensions/rotation,
+and extraction method. The inferred reading order is separate from original order.
+Ambiguous overlapping layouts retain deterministic visual order; complex hosted
+layout recognition is still pending.
+
+Provenance survives cleaning, prose/image chunking, dense embedding, and the existing
+`document_chunks.metadata_json` column without adding a table. OCR uncertainty is
+flagged for review; captions remain descriptions. Image cleaning preserves embedded
+`[unreadable]` markers and subsequent numeric values. Native, medical, and generic
+uploads now read at most their configured size limit plus one byte before validation.
+
+Native layout, mixed image OCR/caption, identifier preservation, and full provenance
+propagation have synthetic regressions. A real hosted public-synthetic probe of
+Cohere `/v1/tokenize` with `embed-english-light-v3.0` returned HTTP 200 (14 tokens).
+This confirms availability of the selected embedding tokenizer; the exact-limit
+chunking benchmark is the next implementation slice. Structured table/chart parsing,
+private crops, table row-group storage, cross-page continuation, final token tuning,
+versioned cutover, and live verification remain open.
