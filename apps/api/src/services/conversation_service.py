@@ -48,7 +48,7 @@ class ConversationService:
             "Conversation created",
             conversation_id=conv.id,
             user_id=user_id,
-            title=conv.title,
+            title_length=len(conv.title),
         )
         return ConversationSummaryResponse(
             id=conv.id,
@@ -348,7 +348,7 @@ class ConversationService:
                 yield f"event: token\ndata: {json.dumps({'token': token})}\n\n"
             stream_completed = True
         except Exception as exc:
-            logger.error("Streaming conversation answer failed", error=str(exc), user_id=user.id)
+            logger.error("Streaming conversation answer failed", error_type=type(exc).__name__, user_id=user.id)
             yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
             return
 
@@ -370,7 +370,7 @@ class ConversationService:
                     if raw_answer:
                         yield f"event: token\ndata: {json.dumps({'token': raw_answer})}\n\n"
                 except Exception as fb_exc:
-                    logger.error("Fallback generation failed", error=str(fb_exc))
+                    logger.error("Fallback generation failed", error_type=type(fb_exc).__name__)
 
             if not raw_answer:
                 raw_answer = NO_RESULTS_ANSWER

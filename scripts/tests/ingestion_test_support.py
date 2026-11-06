@@ -16,6 +16,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from src.config import settings
 from src.inference.cohere_gateway import CohereGateway
+from src.models.conversation import Conversation
 from src.models.document import Document
 from src.models.document_chunk import DocumentChunk
 from src.models.document_deletion import DocumentDeletion
@@ -67,6 +68,7 @@ async def fixture(tmp_path, monkeypatch):
         yield value
     finally:
         async with sessions() as db, db.begin():
+            await db.execute(delete(Conversation).where(Conversation.client_id == owner_id))
             native_ids = select(Document.id).where(Document.user_id == owner_id)
             await db.execute(delete(DocumentChunk).where(DocumentChunk.document_id.in_(native_ids)))
             await db.execute(delete(DocumentChunk).where(DocumentChunk.client_id == owner_id))

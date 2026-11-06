@@ -45,6 +45,7 @@ async def _authenticate_service_context(
     x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
     x_subject_id: str | None = Header(None, alias="X-Subject-ID"),
     x_collection_id: str | None = Header(None, alias="X-Collection-ID"),
+    x_actor_id: str | None = Header(None, alias="X-Actor-ID", min_length=1, max_length=255),
     session: AsyncSession = Depends(get_db),
 ) -> ServiceContext:
     """
@@ -108,6 +109,7 @@ async def _authenticate_service_context(
             subject_id=x_subject_id.strip() if x_subject_id else None,
             collection_id=x_collection_id.strip() if x_collection_id else None,
             scopes=scopes,
+            actor_id=x_actor_id.strip() if isinstance(x_actor_id, str) else None,
             client_name="Quick Clinic Legacy Client",
             is_service_client=True,
         )
@@ -161,6 +163,7 @@ async def _authenticate_service_context(
         subject_id=x_subject_id.strip() if x_subject_id else None,
         collection_id=x_collection_id.strip() if x_collection_id else None,
         scopes=set(client.allowed_scopes),
+        actor_id=x_actor_id.strip() if isinstance(x_actor_id, str) else None,
         client_name=client.name,
         is_service_client=True,
     )
@@ -180,6 +183,7 @@ class ServiceContextDependency:
         x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
         x_subject_id: str | None = Header(None, alias="X-Subject-ID"),
         x_collection_id: str | None = Header(None, alias="X-Collection-ID"),
+        x_actor_id: str | None = Header(None, alias="X-Actor-ID", min_length=1, max_length=255),
         session: AsyncSession = Depends(get_db),
     ) -> ServiceContext:
         context = await _authenticate_service_context(
@@ -189,6 +193,7 @@ class ServiceContextDependency:
             x_tenant_id=x_tenant_id,
             x_subject_id=x_subject_id,
             x_collection_id=x_collection_id,
+            x_actor_id=x_actor_id,
             session=session,
         )
         for scope in self.required_scopes:

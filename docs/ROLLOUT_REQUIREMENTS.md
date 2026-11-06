@@ -524,3 +524,36 @@ SHA. Its trusted post-deployment deployment-contract workflow
 passed. This verifies deployment contracts only; the mandatory authenticated Search
 Sphere patient journey remains open. ExamArena PR #30's abbreviated-SHA test fixture
 was corrected after CI rejected it; full CI/review/deployment verification continues.
+
+### Delegated conversation identity foundation
+
+Migration 017 reuses existing `conversations` and `messages`. A conversation has
+one native user owner or a delegated client/tenant/actor identity, with collection,
+subject, and external reference. A check constraint prevents mixed identities;
+scoped uniqueness and a PostgreSQL advisory lock make concurrent registration
+idempotent. Downgrade refuses to erase delegated conversations. The migration keeps
+existing native ownership and works in the SQLite migration regression as well as
+real PostgreSQL; backend table grants/RLS remain restricted.
+
+`X-Actor-ID` is independent from the evidence subject. Versioned conversation
+registration/read/delete and offset-paginated messages enforce all five delegated
+identity/resource dimensions. Answer/search conversation IDs are authorized before
+JSON/SSE processing. The shared history selector and fresh inference revalidation
+accept the same delegated scope. A completed-turn helper commits messages together;
+old delegated answers are withheld when source access/version changes.
+
+Six real PostgreSQL regressions cover concurrent idempotency, actor/patient/tenant/
+collection/client isolation, missing actors, atomic turns/rollback, source and client
+revocation, cascade deletion, and the authenticated HTTP contract. Turn persistence,
+context/routing integration in all external answer routes, Quick-Clinic actor/thread
+forwarding, compact memory, and complete query guardrails remain the next phase.
+
+[Search Sphere #46](https://github.com/karanagg166/search-sphere/pull/46) merged at
+`468421bae23136b4a4db464298194be13ce7aef4`, with all required jobs passing in
+[42234508762](https://github.com/karanagg166/search-sphere/actions/runs/42234508762).
+[ExamArena #30](https://github.com/karanagg166/ExamArena/pull/30) merged at
+`84ede3356aa149080aba71caa04f09ffba5aaf16`; live API health reports exactly that SHA.
+Its post-deployment contract run
+[42235359854](https://github.com/karanagg166/ExamArena/actions/runs/42235359854) passed.
+Neither consumer contract run substitutes for the required authenticated Search
+Sphere journey. Backend production remains `8288c9d`; full rollout remains open.

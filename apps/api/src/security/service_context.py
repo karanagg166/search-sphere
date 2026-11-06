@@ -25,6 +25,7 @@ class ServiceContext:
     client_name: str | None = None
     is_service_client: bool = True
     user_id: str | None = None  # Populated for native Search-Sphere users
+    actor_id: str | None = None  # Delegated authenticated caller, distinct from evidence subject.
 
     def has_scope(self, scope: str) -> bool:
         """Checks if the context possesses the requested scope or wildcard '*'."""

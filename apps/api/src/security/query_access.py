@@ -25,6 +25,7 @@ from src.models.external_document import ExternalDocument
 from src.models.message import Message
 from src.models.service_client import ServiceClient
 from src.models.user import User
+from src.security.conversation_access import conversation_query
 from src.security.jwt import get_current_user
 from src.security.medical_context import bind_patient, get_medical_context
 from src.security.service_auth import (
@@ -86,10 +87,10 @@ class QueryAccess:
                     Document.id == self.document_id, Document.user_id == context.user_id,
                 ))).scalar_one_or_none() is None:
                     raise ProviderNotApprovedError("Selected document access was revoked.")
-                if self.conversation_id and (await db.execute(select(Conversation.id).where(
-                    Conversation.id == self.conversation_id, Conversation.user_id == context.user_id,
-                ))).scalar_one_or_none() is None:
-                    raise ProviderNotApprovedError("Conversation access was revoked.")
+            if self.conversation_id and (await db.execute(conversation_query(context).where(
+                Conversation.id == self.conversation_id,
+            ))).scalar_one_or_none() is None:
+                raise ProviderNotApprovedError("Conversation access was revoked.")
             if self.history_hashes:
                 messages = (await db.execute(select(Message).where(
                     Message.conversation_id == self.conversation_id, Message.id.in_(list(self.history_hashes)),
@@ -225,7 +226,12 @@ async def delegated_query_inference(request: Request, context=Depends(_authentic
     context.require_scope("answers:generate" if "answers" in request.url.path else "search:execute")
     access = QueryAccess(async_sessionmaker(db.bind, expire_on_commit=False), context,
         "answers:generate" if "answers" in request.url.path else "search:execute",
-        key_hash=hash_api_key(request.headers.get("Authorization", "")[7:].strip()))
+        key_hash=hash_api_key(request.headers.get("Authorization", "")[7:].strip()),
+        conversation_id=scope_value(body, "conversation_id", 36))
+    if access.conversation_id and (await db.execute(conversation_query(context).where(
+        Conversation.id == access.conversation_id,
+    ))).scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
     async with query_inference(access):
         yield
 
