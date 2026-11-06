@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import hmac
+from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -48,13 +49,14 @@ class InferenceScope:
     client_id: str
     tenant_id: str
     loop: asyncio.AbstractEventLoop
+    validator: Callable[[], Awaitable[None]] | None = None
 
 
 _scope: ContextVar[InferenceScope | None] = ContextVar("inference_scope", default=None)
 
 
 @contextmanager
-def inference_scope(classification: DataClassification, client_id: str, tenant_id: str):
+def inference_scope(classification: DataClassification, client_id: str, tenant_id: str, *, validator=None):
     """Enter only after deriving classification and resource scope from PostgreSQL."""
     if not client_id.strip() or not tenant_id.strip():
         raise ProviderNotApprovedError("A client and tenant scope are required.")
@@ -63,6 +65,7 @@ def inference_scope(classification: DataClassification, client_id: str, tenant_i
         client_id,
         tenant_id,
         asyncio.get_running_loop(),
+        validator,
     )
     token = _scope.set(value)
     try:
@@ -77,6 +80,8 @@ def authorize_cohere(api_key: str) -> InferenceScope:
         raise ProviderNotApprovedError(
             "An authorized data scope is required for model inference."
         )
+    if settings.ENVIRONMENT == "production" and scope.validator is None:
+        raise ProviderNotApprovedError("PostgreSQL authorization is required for production inference.")
     fingerprint = hashlib.sha256(api_key.encode()).hexdigest()
     approved_key = settings.COHERE_TRIAL_KEY_SHA256
     if (

@@ -43,11 +43,13 @@ class CohereGateway:
     async def _post(
         self, endpoint: str, payload: dict, purpose: str, units: int = 1
     ) -> dict:
-        authorize_cohere(self.api_key)  # Before reserving quota or sending any content.
+        scope = authorize_cohere(self.api_key)  # Before reserving quota or sending any content.
         try:
             loop = asyncio.get_running_loop()
             slots = _request_slots.setdefault(loop, asyncio.Semaphore(2))
             async with asyncio.timeout(20), slots:
+                if scope.validator is not None:
+                    await scope.validator()
                 await self.budget.reserve(self.api_key, purpose, units)
                 return await self._request(endpoint, payload)
         except (TimeoutError, httpx.TimeoutException, httpx.NetworkError) as exc:
@@ -69,6 +71,10 @@ class CohereGateway:
         if response.status_code == 429:
             raise ProviderQuotaExceededError(
                 "Cohere trial quota or rate limit reached."
+            )
+        if response.status_code in {400, 401, 403, 404, 410, 422, 498}:
+            raise ProviderInvalidResponseError(
+                f"Cohere rejected the request with HTTP {response.status_code}."
             )
         if response.status_code != 200:
             raise ProviderError(

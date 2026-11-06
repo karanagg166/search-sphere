@@ -148,7 +148,7 @@ async def test_rerank_restores_candidate_order_and_rejects_duplicate_indices():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status", [429, 503])
+@pytest.mark.parametrize("status", [400, 429, 503])
 async def test_provider_errors_are_bounded_and_do_not_leak_the_response(status):
     requests = []
 
@@ -157,7 +157,7 @@ async def test_provider_errors_are_bounded_and_do_not_leak_the_response(status):
         return httpx.Response(status, text="PRIVATE-RESPONSE-SENTINEL")
 
     client = gateway(response)
-    expected = ProviderQuotaExceededError if status == 429 else ProviderError
+    expected = {400: ProviderInvalidResponseError, 429: ProviderQuotaExceededError}.get(status, ProviderError)
     with (
         inference_scope(DataClassification.SYNTHETIC, "fixture", "fixture"),
         pytest.raises(expected) as error,
@@ -201,4 +201,29 @@ async def test_non_png_image_cannot_be_mislabeled_or_sent_to_provider():
         pytest.raises(ValueError, match="PNG"),
     ):
         await client.inspect_image(b"%PDF synthetic placeholder", "Read visible text")
+    client.budget.reserve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_production_scope_requires_a_postgres_authorization_validator(monkeypatch):
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    client = gateway(lambda request: pytest.fail("must not transmit content"))
+    with (
+        inference_scope(DataClassification.SYNTHETIC, "fixture", "fixture"),
+        pytest.raises(ProviderNotApprovedError, match="PostgreSQL authorization"),
+    ):
+        await client.embed(["PUBLIC SYNTHETIC FIXTURE"])
+    client.budget.reserve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_revoked_scope_is_revalidated_before_quota_or_transmission():
+    client = gateway(lambda request: pytest.fail("must not transmit content"))
+    validator = AsyncMock(side_effect=ProviderNotApprovedError("Synthetic scope revoked"))
+    with (
+        inference_scope(DataClassification.SYNTHETIC, "fixture", "fixture", validator=validator),
+        pytest.raises(ProviderNotApprovedError),
+    ):
+        await client.embed(["PUBLIC SYNTHETIC FIXTURE"])
+    validator.assert_awaited_once()
     client.budget.reserve.assert_not_awaited()
