@@ -54,6 +54,17 @@ jobs:
           DATABASE_URL: ${{ secrets.RELEASE_DATABASE_URL }}
           PYTHONPATH: .
         run: python "$RUNNER_TEMP/search-sphere-release-gate.py" migrate
+      - name: Provision the signed synthetic smoke identity and its narrow provider policy
+        working-directory: apps/api
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          DATABASE_URL: ${{ secrets.RELEASE_DATABASE_URL }}
+          RELEASE_SMOKE_EMAIL: ${{ secrets.RELEASE_SMOKE_EMAIL }}
+          RELEASE_SMOKE_PASSWORD: ${{ secrets.RELEASE_SMOKE_PASSWORD }}
+          RELEASE_SMOKE_KEY: ${{ secrets.RELEASE_SMOKE_KEY }}
+          PYTHONPATH: .
+        run: python "$RUNNER_TEMP/search-sphere-release-gate.py" seed
 
   deployment:
     name: Deploy exact revision to existing free Render service

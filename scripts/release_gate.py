@@ -159,6 +159,18 @@ def migrate():
     asyncio.run(verify_database())
 
 
+async def seed_identity():
+    from src.db import AsyncSessionLocal, engine
+    from src.services.release_identity import provision_release_identity
+
+    try:
+        async with AsyncSessionLocal() as db, db.begin():
+            await provision_release_identity(db, require("RELEASE_SMOKE_EMAIL"), require("RELEASE_SMOKE_PASSWORD"), require("RELEASE_SMOKE_KEY"))
+        print(json.dumps({"synthetic_release_identity_ready": True, "provider_scope": "dedicated-synthetic-account-only"}))
+    finally:
+        await engine.dispose()
+
+
 def deploy(sha):
     render_preflight()
     token = require("RENDER_API_KEY")
@@ -189,12 +201,15 @@ def deploy(sha):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=["preflight", "migrate", "deploy"])
+    parser.add_argument("phase", choices=["preflight", "migrate", "seed", "deploy"])
     phase = parser.parse_args().phase
     sha = require("EXPECTED_SHA")
     trusted_ci(sha)
     if phase == "migrate":
         migrate()
+    elif phase == "seed":
+        validate_database_url(require("DATABASE_URL"))
+        asyncio.run(seed_identity())
     elif phase == "deploy":
         deploy(sha)
     else:

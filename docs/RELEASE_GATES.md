@@ -24,8 +24,11 @@ PostgreSQL/pgvector, plus consumer-independent API and hosted-image checks.
 Protected environment secrets are `RELEASE_RENDER_API_KEY`, `RELEASE_DATABASE_URL`,
 `RELEASE_COHERE_TRIAL_SHA256`, and the existing `RELEASE_SMOKE_EMAIL`,
 `RELEASE_SMOKE_PASSWORD`, `RELEASE_SMOKE_KEY`. Values stay in the secret manager.
-The operator provisions only the dedicated synthetic account and scoped data policy;
-ordinary medical/company content remains ineligible for the trial provider.
+The pre-deployment phase provisions only the dedicated signed synthetic account and
+its exact user/tenant provider policy. It refuses an existing unrelated, changed or
+revoked identity/policy. Approval expires after 30 days and is refreshed only by a
+trusted release. It never selects stored password hashes. Ordinary medical/company
+content remains ineligible for the trial provider.
 
 `scripts/release_gate.py` targets fixed approved resources. It does not alter Render
 configuration. The migration runtime is selected from the admitted release, while

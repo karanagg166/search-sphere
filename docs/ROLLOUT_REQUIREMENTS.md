@@ -908,3 +908,22 @@ the entire response on failure. It uses catalog metadata, validates citation num
 preserves chunk/version IDs and replaces uncited upstream claims with a deterministic
 no-evidence response. Six regressions reproduced the original failures; 26 focused
 unit and 17 local-PostgreSQL HTTP tests passed. Its review/CI/deployment is still open.
+
+ExamArena #31 subsequently merged at `d96fe305a871d8560e89a0bd320cfcf742f51cd0`;
+required backend/frontend/worker/full-stack checks passed in
+[42268241921](https://github.com/karanagg166/ExamArena/actions/runs/42268241921).
+
+The release controller is [Search Sphere #58](https://github.com/karanagg166/search-sphere/pull/58).
+Its 71 offline release/smoke checks passed. A production preflight initially refused
+the service because `STORAGE_BACKEND` was implicit in the image; configured explicit
+Supabase storage and the already verified hosted-model/trial settings without
+triggering deployment. Live Render preflight now passes on the existing free service.
+The protected main-only environment now holds the required release SQL connection,
+Render credential and approved trial fingerprint; values were never logged.
+
+Added dedicated synthetic release identity provisioning after migrations and before
+deployment. Only the fixed signed fixture account receives a tenant/user-specific
+synthetic policy; changed or revoked ownership/policy is refused, and approval expires
+after 30 days. Existing hashes and unrelated user/record contents are never selected.
+Two real PostgreSQL identity cases plus the 21 release-admission cases passed (23
+together). No new production migration or Search Sphere deployment has occurred yet.
