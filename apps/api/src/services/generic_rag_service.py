@@ -36,6 +36,7 @@ from src.services.answer_generator import (
 from src.services.conversation_context import prior_answer_chunks, resolve_query_context
 from src.services.delegated_conversations import append_turn
 from src.services.query_rewriter import get_query_rewriter
+from src.services.query_routes import execute_non_rag
 from src.services.workload_scheduler import workload_scheduler
 
 logger = structlog.get_logger()
@@ -144,6 +145,11 @@ class GenericRagService:
 
         access = current_query_access()
         selection, rewrite = await resolve_query_context(access, clean_query, self.query_rewriter)
+        if access and access.intent.route != QueryRoute.RAG:
+            answer = await execute_non_rag(access.intent, clean_query, access)
+            return SearchResponse(query=clean_query,retrieval_query=rewrite.retrieval_query,rewritten=rewrite.rewritten,
+                total=0,results=[],duration_ms=0,route=access.intent.route,response=answer,requires_history=selection.requires_history,
+                context_message_ids=selection.message_ids,clarification=selection.clarification)
         if selection.clarification:
             return SearchResponse(query=clean_query, retrieval_query=clean_query, total=0, results=[], duration_ms=0,
                 route=QueryRoute.CLARIFICATION, clarification=selection.clarification, requires_history=selection.requires_history,
@@ -228,6 +234,13 @@ class GenericRagService:
 
         access = current_query_access()
         selection, rewrite = await resolve_query_context(access, clean_query, self.query_rewriter)
+        if access and access.intent.route != QueryRoute.RAG:
+            answer = await execute_non_rag(access.intent, clean_query, access)
+            result = AnswerResponse(answer=answer,citations=[],retrieved_chunk_count=0,duration_ms=0,route=access.intent.route,
+                requires_history=selection.requires_history,context_message_ids=selection.message_ids,retrieval_query=rewrite.retrieval_query,
+                rewritten=rewrite.rewritten)
+            await self._persist(access,clean_query,result,[])
+            return result
         if selection.clarification:
             result = AnswerResponse(answer=selection.clarification, citations=[], retrieved_chunk_count=0, duration_ms=0,
                 route=QueryRoute.CLARIFICATION, requires_history=selection.requires_history, context_message_ids=selection.message_ids,

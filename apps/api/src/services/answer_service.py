@@ -94,7 +94,7 @@ class AnswerService:
                 query=search_response.query,
                 retrieval_query=search_response.retrieval_query,
                 rewritten=search_response.rewritten,
-                answer=search_response.clarification or NO_RESULTS_ANSWER,
+                answer=search_response.response or search_response.clarification or NO_RESULTS_ANSWER,
                 sources=[],
                 requires_history=search_response.requires_history,
                 route=search_response.route,
@@ -227,8 +227,8 @@ class AnswerService:
 
         if not search_response.results:
             yield f"event: source\ndata: {json.dumps({'sources': []})}\n\n"
-            yield f"event: token\ndata: {json.dumps({'token': search_response.clarification or NO_RESULTS_ANSWER})}\n\n"
-            yield f"event: done\ndata: {json.dumps({'answer': search_response.clarification or NO_RESULTS_ANSWER, 'sources': []})}\n\n"
+            yield f"event: token\ndata: {json.dumps({'token': search_response.response or search_response.clarification or NO_RESULTS_ANSWER})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'answer': search_response.response or search_response.clarification or NO_RESULTS_ANSWER, 'sources': []})}\n\n"
             return
 
         usable_chunks = search_response.results[: self.answer_generator.max_context_chunks]

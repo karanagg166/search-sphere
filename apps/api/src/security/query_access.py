@@ -29,6 +29,7 @@ from src.models.user import User
 from src.security.conversation_access import conversation_query
 from src.security.jwt import get_current_user
 from src.security.medical_context import bind_patient, get_medical_context
+from src.security.query_policy import read_policy
 from src.security.service_auth import (
     LEGACY_MEDICAL_SCOPES,
     _authenticate_service_context,
@@ -67,6 +68,9 @@ class QueryAccess:
     selected_message_ids: list[str] = field(default_factory=list)
     requires_history: bool = False
     exact_previous_answer: str | None = field(default=None, repr=False)
+    intent: object = field(default=None, repr=False)
+    routing_policy_hash: str | None = None
+    required_operations: set[str] = field(default_factory=set)
 
     async def validate(self):
         async with self.sessions() as db:
@@ -81,6 +85,7 @@ class QueryAccess:
                 else:
                     allowed = client.is_active() and client.is_tenant_authorized(context.tenant_id) and client.has_scope(self.operation)
                     allowed = allowed and (legacy or hmac.compare_digest(client.api_key_hash, self.key_hash or ""))
+                    allowed = allowed and all(client.has_scope(scope) for scope in self.required_operations)
                 if not allowed:
                     raise ProviderNotApprovedError("Delegated query authorization was revoked.")
             else:
@@ -105,6 +110,8 @@ class QueryAccess:
                 ):
                     raise ProviderNotApprovedError("Selected conversation context changed.")
             rows = []
+            if self.routing_policy_hash and (await read_policy(db, context)).fingerprint() != self.routing_policy_hash:
+                raise ProviderNotApprovedError("Query routing policy changed.")
             if self.observation_evidence:
                 observations = (await db.execute(observation_query(context).where(
                     MedicalObservation.id.in_(list(self.observation_evidence)),

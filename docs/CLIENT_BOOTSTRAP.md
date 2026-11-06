@@ -63,3 +63,25 @@ content hashes instead of copying passages; later use re-fetches current evidenc
 Caller `conversation_history` and `system_prompt` fields are accepted for compatibility
 and ignored. Clinical compatibility wiring, full intent routing, memory, and complete
 claim/citation validation remain open rollout phases.
+
+## Server-owned query routes
+
+All default scopes use document-grounded `RAG`. Greetings/thanks use deterministic
+`DIRECT`; unresolved references, ambiguous targets and unregistered actions use
+`CLARIFICATION`. `requires_history` is separate and is resolved before intent.
+
+An operator can add a `query_policies` row for the exact `client_id`/`tenant_id` using
+backend SQL. `general_enabled` and `semantic_routing_enabled` default false;
+`allowed_tools` defaults to an empty list. These are not request fields or client
+prompt instructions. General answers can be explicitly requested with
+`general knowledge: ...` only when enabled, with no private retrieval or history.
+The data-classification/provider approval still applies. Optional semantic routing
+uses strict hosted JSON, an enum, and a confidence threshold of 0.75; low confidence
+asks a focused clarification. Every inference rechecks the policy fingerprint.
+
+The only registered tool is `document.status`: read-only current PostgreSQL state
+for an explicit document ID. Enable its name in `allowed_tools`; delegated clients
+also need `documents:read`. Code checks client, tenant, subject/collection or native
+ownership before execution and rechecks the credential/read scope. Other tools,
+URLs, SQL, and side effects are unavailable. Future write tools must define an
+explicit authorization and idempotency contract before registration.

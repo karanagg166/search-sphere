@@ -304,7 +304,7 @@ class ConversationService:
         yield f"event: metadata\ndata: {json.dumps(metadata_payload)}\n\n"
 
         if not search_response.results:
-            no_results = search_response.clarification or NO_RESULTS_ANSWER
+            no_results = search_response.response or search_response.clarification or NO_RESULTS_ANSWER
             yield f"event: source\ndata: {json.dumps({'sources': []})}\n\n"
             yield f"event: token\ndata: {json.dumps({'token': no_results})}\n\n"
             msg = await self.repo.create_message(

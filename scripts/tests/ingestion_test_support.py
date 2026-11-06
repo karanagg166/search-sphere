@@ -25,6 +25,7 @@ from src.models.external_document import ExternalDocument
 from src.models.inference_data_policy import InferenceDataPolicy
 from src.models.ingestion_job import IngestionJob
 from src.models.medical_observation import MedicalObservation
+from src.models.query_policy import QueryPolicy
 from src.models.service_client import ServiceClient
 from src.models.user import User
 from src.processing.chunking.semantic_splitter import SemanticEmbedder
@@ -83,6 +84,7 @@ async def fixture(tmp_path, monkeypatch):
             await db.execute(delete(DocumentEvidence).where((DocumentEvidence.tenant_id == owner_id) | (DocumentEvidence.client_id == owner_id) | (DocumentEvidence.subject_id == owner_id)))
             await db.execute(delete(DocumentDeletion).where((DocumentDeletion.tenant_id == owner_id) | (DocumentDeletion.client_id == owner_id) | (DocumentDeletion.subject_id == owner_id)))
             await db.execute(delete(InferenceDataPolicy).where(InferenceDataPolicy.tenant_id == owner_id))
+            await db.execute(delete(QueryPolicy).where((QueryPolicy.client_id == owner_id) | (QueryPolicy.tenant_id == owner_id)))
             await db.execute(delete(InferenceDataPolicy).where(InferenceDataPolicy.client_id == owner_id))
             await db.execute(delete(InferenceDataPolicy).where(InferenceDataPolicy.subject_scope == owner_id))
             await db.execute(delete(ServiceClient).where(ServiceClient.client_id == owner_id))

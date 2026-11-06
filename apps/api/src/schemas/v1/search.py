@@ -48,6 +48,7 @@ class SearchResponse(BaseModel):
     duration_ms: float
     route: QueryRoute = QueryRoute.RAG
     clarification: str | None = None
+    response: str | None = None
     requires_history: bool = False
     context_message_ids: list[str] = Field(default_factory=list)
     retrieval_query: str | None = None
