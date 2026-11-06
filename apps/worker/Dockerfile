@@ -1,33 +1,25 @@
+# Build from the canonical API context: docker build -f apps/worker/Dockerfile apps/api
 FROM python:3.12-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_DEFAULT_TIMEOUT=1000
+    STORAGE_BACKEND=supabase \
+    SUPABASE_STORAGE_BUCKET=documents \
+    UVICORN_WORKERS=1 \
+    WEB_CONCURRENCY=1 \
+    TIKTOKEN_CACHE_DIR=/opt/tokenizer-cache
 
 WORKDIR /app
 
-# Install system dependencies required by OCR (tesseract), document processing (poppler), and OpenCV
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    curl \
-    git \
-    tesseract-ocr \
-    libtesseract-dev \
-    poppler-utils \
-    ffmpeg \
-    libsm6 \
-    libxext6 \
-    && rm -rf /var/lib/apt/lists/*
+COPY requirements-production.txt .
+RUN pip install --no-cache-dir -r requirements-production.txt
+# Deterministic coarse tokenizer vocabulary, not inference weights. No runtime download.
+RUN python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 
-# Copy and install python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu torch torchvision && \
-    pip install --no-cache-dir --default-timeout=1000 --retries=10 -r requirements.txt
+COPY alembic.ini .
+COPY alembic ./alembic
+COPY src ./src
 
-# Copy source code
-COPY . .
-
-CMD ["dramatiq", "--processes", "2", "--threads", "2", "--watch", "src", "src.main"]
+CMD ["python", "-m", "src.services.ingestion_worker"]
