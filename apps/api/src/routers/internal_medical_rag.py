@@ -24,6 +24,7 @@ from src.schemas.internal_medical_rag import (
 from src.schemas.query_route import QueryRoute
 from src.security.medical_context import bind_patient, get_medical_context
 from src.security.query_access import current_query_access, medical_query_inference
+from src.security.response_stream import authorized_frames
 from src.security.service_context import ServiceContext
 from src.security.structured_access import observation_query
 from src.services.answer_generator import (
@@ -771,8 +772,9 @@ async def stream_medical_chat(
             yield f"event: error\ndata: {json.dumps({'code': exc.code})}\n\n"
             return
         citations = [citation.model_dump(by_alias=True) for citation in result.citations]
-        yield f"event: metadata\ndata: {json.dumps({'retrievalQuery': result.retrieval_query, 'rewritten': result.rewritten, 'requiresHistory': result.requires_history, 'contextMessageIds': result.context_message_ids})}\n\n"
-        yield f"event: token\ndata: {json.dumps({'text': result.answer})}\n\n"
-        yield f"event: citations\ndata: {json.dumps({'citations': citations})}\n\n"
-        yield f"event: done\ndata: {json.dumps({'answer': result.answer, 'citations': citations, 'mode': result.answer_mode, 'messageId': result.message_id})}\n\n"
+        frames=[("metadata",{"retrievalQuery":result.retrieval_query,"rewritten":result.rewritten,"requiresHistory":result.requires_history,"contextMessageIds":result.context_message_ids}),
+                ("token",{"text":result.answer}),("citations",{"citations":citations}),
+                ("done",{"answer":result.answer,"citations":citations,"mode":result.answer_mode,"messageId":result.message_id})]
+        async for frame in authorized_frames(frames):
+            yield frame
     return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

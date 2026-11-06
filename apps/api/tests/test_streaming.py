@@ -309,10 +309,42 @@ async def test_stream_error_does_not_persist_partial_assistant_message():
             conv_detail = await client.get(f"/conversations/{conv_id}", headers=headers)
             assert conv_detail.status_code == 200
             messages = conv_detail.json()["messages"]
-            assert len(messages) == 1
-            assert messages[0]["role"] == "user"
-            assert not any(m["role"] == "assistant" for m in messages)
+            assert messages == []
+            assert event_types == ["error"]
+            assert "Simulated LLM stream disconnect" not in resp.text
         finally:
             app.dependency_overrides.pop(get_retriever, None)
             app.dependency_overrides.pop(get_query_rewriter, None)
             app.dependency_overrides.pop(get_answer_generator, None)
+
+
+@pytest.mark.asyncio
+async def test_provider_type_error_is_never_retried_as_a_compatibility_fallback():
+    from types import SimpleNamespace
+    calls=[]
+    async def failed(query,context_chunks,conversation_context=None,**kwargs):
+        calls.append(query)
+        raise TypeError("PRIVATE PROVIDER DIAGNOSTIC")
+    provider=SimpleNamespace(generate=failed)
+    with pytest.raises(TypeError):
+        await AnswerGenerator(provider=provider).generate_answer("PUBLIC SYNTHETIC",[object()])
+    assert calls==["PUBLIC SYNTHETIC"]
+
+
+@pytest.mark.asyncio
+async def test_empty_provider_stream_never_triggers_direct_chat():
+    from types import SimpleNamespace
+
+    from src.services.answer_generator import (
+        AnswerGenerationUnavailableError,
+        CohereAnswerProvider,
+    )
+    async def no_tokens(**kwargs):
+        if False:
+            yield None
+    client=SimpleNamespace(chat_stream=no_tokens,chat=AsyncMock(side_effect=AssertionError("No second generation")))
+    provider=CohereAnswerProvider(api_key="synthetic-key",client=client)
+    chunk=SimpleNamespace(document_id="synthetic",content="PUBLIC SYNTHETIC",start_page=1,end_page=1)
+    with pytest.raises(AnswerGenerationUnavailableError):
+        _=[token async for token in provider.generate_stream("Public question",[chunk])]
+    client.chat.assert_not_called()

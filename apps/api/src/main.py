@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI):
 
         await ingestion_worker.stop()
     except Exception as e:
-        logger.warning("Error stopping durable processor", error=str(e))
+        logger.warning("Error stopping durable processor", error_type=type(e).__name__)
 
     try:
         from src.services.model_manager import model_manager
@@ -85,7 +85,7 @@ async def lifespan(app: FastAPI):
         await engine.dispose()
         logger.info("Database connection pool disposed gracefully.")
     except Exception as e:
-        logger.error("Error disposing database connection pool", error=str(e))
+        logger.error("Error disposing database connection pool", error_type=type(e).__name__)
 
 
 SAFE_REQUEST_ID_REGEX = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.I)
@@ -114,7 +114,7 @@ class RequestCorrelationMiddleware(BaseHTTPMiddleware):
             response.headers["X-Request-ID"] = request_id
             return response
         except Exception as exc:
-            logger.error("Unhandled error in request middleware", error=str(exc), path=request.url.path)
+            logger.error("Unhandled error in request middleware", error_type=type(exc).__name__, path=request.url.path)
             res = JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content={"detail": "An internal server error occurred. Please try again later."},
@@ -175,7 +175,7 @@ app.add_middleware(
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """Global exception handler to mask internal server errors while preserving structured logs."""
-    logger.error("Unhandled internal server error", error=str(exc), path=request.url.path)
+    logger.error("Unhandled internal server error", error_type=type(exc).__name__, path=request.url.path)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": "An internal server error occurred. Please try again later."},
@@ -252,7 +252,7 @@ async def readiness_check():
             "git_commit": os.getenv("RENDER_GIT_COMMIT", os.getenv("GIT_COMMIT", "dev")),
         }
     except Exception as e:
-        logger.error("Readiness check failed", error=str(e))
+        logger.error("Readiness check failed", error_type=type(e).__name__)
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={
