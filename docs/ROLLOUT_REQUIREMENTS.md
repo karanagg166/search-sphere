@@ -874,3 +874,56 @@ group passed 11 tests. The required PostgreSQL CI gate includes these regression
 Schema-only, read-only connection checks succeeded for both consumers' configured
 databases. No medical/student records or credential/hash fields were selected.
 This establishes available setup access, not completed synthetic production journeys.
+
+[Search Sphere #56](https://github.com/karanagg166/search-sphere/pull/56) merged at
+`7865d09ea1967b4f9ebf9b2fd13a0df966bee0de`; required CI passed in
+[42265470832](https://github.com/karanagg166/search-sphere/actions/runs/42265470832).
+All six final version-provenance PostgreSQL cases passed. [#57](https://github.com/karanagg166/search-sphere/pull/57)
+merged at `6c0cb34fb1d5e1fb448d1c1c60382d134821847a`, with required CI
+[42265959786](https://github.com/karanagg166/search-sphere/actions/runs/42265959786) passing.
+
+## Release controller and consumer evidence recheck
+
+`release.yml` and `scripts/release_gate.py` separate exact-main CI admission/production
+migrations, pinned Render deployment, and the standalone authenticated journey.
+Admission checks the authorized existing free service and approved trial model/data
+configuration before changes. Production SQL verification reads migration/grant/RLS/
+bucket metadata only. Driver output is captured and withheld; secret/body values are
+never logged. There is no new infrastructure or automatic plan upgrade. See
+`docs/RELEASE_GATES.md`. Offline release-admission and smoke regressions exercise
+missing configuration, skipped CI, wrong revision/resource/plan/provider/scope,
+redacted failures and bounded HTTP reads. This does not yet establish live success.
+
+Fresh Render management metadata confirms the Search Sphere service remains free,
+in the authorized workspace, with automatic deployment disabled. Search Sphere is
+a public GitHub repository. The protected release environment's branch policy is
+still enabled. Vercel account-plan verification remains open after management API
+403 and an unauthenticated dashboard session; the owner clarification is pending.
+
+During seeded-journey preparation, ExamArena's answer mapper was found to drop a
+cross-school citation while still returning its answer text. [ExamArena #31](https://github.com/karanagg166/ExamArena/pull/31)
+rechecks all result/citation document identities against its fresh PostgreSQL catalog
+(school, subject, class collection, READY state and requested document type), rejecting
+the entire response on failure. It uses catalog metadata, validates citation numbers,
+preserves chunk/version IDs and replaces uncited upstream claims with a deterministic
+no-evidence response. Six regressions reproduced the original failures; 26 focused
+unit and 17 local-PostgreSQL HTTP tests passed. Its review/CI/deployment is still open.
+
+ExamArena #31 subsequently merged at `d96fe305a871d8560e89a0bd320cfcf742f51cd0`;
+required backend/frontend/worker/full-stack checks passed in
+[42268241921](https://github.com/karanagg166/ExamArena/actions/runs/42268241921).
+
+The release controller is [Search Sphere #58](https://github.com/karanagg166/search-sphere/pull/58).
+Its 71 offline release/smoke checks passed. A production preflight initially refused
+the service because `STORAGE_BACKEND` was implicit in the image; configured explicit
+Supabase storage and the already verified hosted-model/trial settings without
+triggering deployment. Live Render preflight now passes on the existing free service.
+The protected main-only environment now holds the required release SQL connection,
+Render credential and approved trial fingerprint; values were never logged.
+
+Added dedicated synthetic release identity provisioning after migrations and before
+deployment. Only the fixed signed fixture account receives a tenant/user-specific
+synthetic policy; changed or revoked ownership/policy is refused, and approval expires
+after 30 days. Existing hashes and unrelated user/record contents are never selected.
+Two real PostgreSQL identity cases plus the 21 release-admission cases passed (23
+together). No new production migration or Search Sphere deployment has occurred yet.

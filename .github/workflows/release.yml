@@ -1,0 +1,127 @@
+name: Pinned Search Sphere Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Full main revision with successful PostgreSQL and image CI
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: search-sphere-production-release
+  cancel-in-progress: false
+
+jobs:
+  pre-deployment:
+    name: Verify release admission and apply production migrations
+    if: github.ref == 'refs/heads/main'
+    environment: search-sphere-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact main CI, free service and hosted-provider configuration
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          RENDER_API_KEY: ${{ secrets.RELEASE_RENDER_API_KEY }}
+          RELEASE_COHERE_TRIAL_SHA256: ${{ secrets.RELEASE_COHERE_TRIAL_SHA256 }}
+        run: python scripts/release_gate.py preflight
+      - name: Select the admitted release's migrations
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          cp scripts/release_gate.py "$RUNNER_TEMP/search-sphere-release-gate.py"
+          git checkout --detach "$EXPECTED_SHA"
+      - name: Install selected migration runtime
+        run: pip install -r apps/api/requirements-production.txt
+      - name: Apply migrations before deployment and verify private SQL/Storage surface
+        working-directory: apps/api
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          DATABASE_URL: ${{ secrets.RELEASE_DATABASE_URL }}
+          PYTHONPATH: .
+        run: python "$RUNNER_TEMP/search-sphere-release-gate.py" migrate
+      - name: Provision the signed synthetic smoke identity and its narrow provider policy
+        working-directory: apps/api
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          DATABASE_URL: ${{ secrets.RELEASE_DATABASE_URL }}
+          RELEASE_SMOKE_EMAIL: ${{ secrets.RELEASE_SMOKE_EMAIL }}
+          RELEASE_SMOKE_PASSWORD: ${{ secrets.RELEASE_SMOKE_PASSWORD }}
+          RELEASE_SMOKE_KEY: ${{ secrets.RELEASE_SMOKE_KEY }}
+          PYTHONPATH: .
+        run: python "$RUNNER_TEMP/search-sphere-release-gate.py" seed
+
+  deployment:
+    name: Deploy exact revision to existing free Render service
+    needs: pre-deployment
+    environment: search-sphere-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 27
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Deploy and verify the serving revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          RENDER_API_KEY: ${{ secrets.RELEASE_RENDER_API_KEY }}
+          RELEASE_COHERE_TRIAL_SHA256: ${{ secrets.RELEASE_COHERE_TRIAL_SHA256 }}
+        run: python scripts/release_gate.py deploy
+
+  post-deployment:
+    name: Authenticated standalone journey after successful deployment
+    needs: deployment
+    environment: search-sphere-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    concurrency:
+      group: search-sphere-production-smoke
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Require protected synthetic credentials
+        env:
+          PROD_SMOKE_USER_EMAIL: ${{ secrets.RELEASE_SMOKE_EMAIL }}
+          PROD_SMOKE_USER_PASSWORD: ${{ secrets.RELEASE_SMOKE_PASSWORD }}
+          PROD_SMOKE_FIXTURE_KEY: ${{ secrets.RELEASE_SMOKE_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          for name in ('PROD_SMOKE_USER_EMAIL','PROD_SMOKE_USER_PASSWORD','PROD_SMOKE_FIXTURE_KEY'):
+              assert os.environ.get(name), 'Required protected credential missing: ' + name
+          assert len(os.environ['PROD_SMOKE_FIXTURE_KEY'].encode()) >= 32
+          PY
+      - name: Upload, index, retrieve marker, answer with citations, complete SSE and verify cleanup
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          PROD_SMOKE_USER_EMAIL: ${{ secrets.RELEASE_SMOKE_EMAIL }}
+          PROD_SMOKE_USER_PASSWORD: ${{ secrets.RELEASE_SMOKE_PASSWORD }}
+          PROD_SMOKE_FIXTURE_KEY: ${{ secrets.RELEASE_SMOKE_KEY }}
+        run: python scripts/ci_production_smoke.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: standalone-release-fixture-receipts-${{ github.run_id }}
+          path: .ci_smoke_manifest.json
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
