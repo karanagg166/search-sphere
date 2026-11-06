@@ -113,7 +113,7 @@ jobs:
         env:
           PYTHONPATH: "."
         run: |
-          pytest scripts/tests/test_monitor.py scripts/tests/test_ci_production_smoke.py -v
+          pytest scripts/tests/test_monitor.py scripts/tests/test_ci_production_smoke.py scripts/tests/test_release_gate.py -v
 
   hosted-runtime-image:
     name: Hosted Runtime Image
