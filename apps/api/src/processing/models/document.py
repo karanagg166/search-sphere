@@ -15,6 +15,7 @@ class ExtractedBlock:
     block_type: str
     content: str
     provenance: dict[str, Any] = field(default_factory=dict)
+    structured: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,7 @@ class CleanedBlock:
     block_type: str
     content: str
     provenance: dict[str, Any] = field(default_factory=dict)
+    structured: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

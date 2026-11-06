@@ -154,3 +154,16 @@ async def reindex_document(
     service = DocumentService(db=db, storage=storage)
     document = await service.reindex_user_document(document_id, current_user.id)
     return DocumentResponse.model_validate(document)
+
+
+@router.get("/{document_id}/evidence/{evidence_id}", summary="Read authorized full structured evidence")
+async def get_document_evidence(
+    document_id: str, evidence_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: ObjectStorage = Depends(get_object_storage),
+) -> dict:
+    from src.services.structured_evidence import read_structured_evidence
+
+    document = await DocumentService(db, storage).get_user_document(document_id, current_user.id)
+    return await read_structured_evidence(db, "standalone", document.id, evidence_id)

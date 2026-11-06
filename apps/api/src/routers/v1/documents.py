@@ -187,3 +187,16 @@ async def get_document_cleanup(
 
     row = await find_deletion(db, "external", context.client_id, context.tenant_id, document_id, context=context)
     return await cleanup_receipt(db, row)
+
+
+@router.get("/{document_id}/evidence/{evidence_id}", summary="Read delegated full structured evidence")
+async def get_document_evidence(
+    document_id: str, evidence_id: str,
+    context: ServiceContext = Depends(get_service_context(required_scopes={"documents:read"})),
+    db: AsyncSession = Depends(get_db),
+    storage: ObjectStorage = Depends(get_object_storage),
+) -> dict:
+    from src.services.structured_evidence import read_structured_evidence
+
+    document = await GenericDocumentService(db, storage).get_document(context, document_id)
+    return await read_structured_evidence(db, "external", document.id, evidence_id)

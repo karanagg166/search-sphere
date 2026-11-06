@@ -88,7 +88,8 @@ jobs:
           scripts/tests/test_client_bootstrap_postgres.py
           scripts/tests/test_inference_data_policy_postgres.py
           scripts/tests/test_ingestion_worker_postgres.py
-          scripts/tests/test_document_cleanup_postgres.py -v
+          scripts/tests/test_document_cleanup_postgres.py
+          scripts/tests/test_document_evidence_postgres.py -v
 
       - name: Verify hosted inference eligibility and bounded failures
         env:

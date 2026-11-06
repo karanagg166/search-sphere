@@ -8,6 +8,7 @@ from sqlalchemy import delete, select
 from src.models.document import Document
 from src.models.document_chunk import DocumentChunk
 from src.models.document_deletion import DocumentDeletion
+from src.models.document_evidence import DocumentEvidence
 from src.models.external_document import ExternalDocument
 from src.models.ingestion_job import IngestionJob
 from src.models.medical_observation import MedicalObservation
@@ -59,6 +60,9 @@ async def delete_registered_document(db, kind, document_id, client_id, tenant_id
     # pgvector and relational metadata share the same transaction. A failed delete
     # rolls everything back; a committed delete immediately hides all evidence.
     await db.execute(delete(DocumentChunk).where(*chunk_scope(row)))
+    await db.execute(delete(DocumentEvidence).where(
+        DocumentEvidence.document_kind == kind, DocumentEvidence.source_record_id == document.id,
+    ))
     if kind == "external":
         await db.execute(delete(MedicalObservation).where(
             MedicalObservation.source_system == client_id, MedicalObservation.tenant_id == tenant_id,

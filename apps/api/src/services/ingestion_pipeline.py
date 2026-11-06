@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from src.config import settings
 from src.processing.chunking import DocumentChunker
-from src.processing.chunking.hosted_token_limits import fit_hosted_chunks
+from src.processing.chunking.structured_chunks import chunk_with_structures
 from src.processing.cleaning import TextCleaner
 from src.processing.embedding.dense_embedder import DenseEmbedder
 from src.processing.extraction.document_extractor import DocumentExtractor
@@ -57,9 +57,8 @@ async def process_ingestion(source, storage, stage):
     # Public-fixture benchmark: 400/480 keeps retrieval quality with fewer hard
     # splits than 350/400. The actual Cohere tokenizer remains authoritative.
     chunker = DocumentChunker(target_tokens=min(settings.CHUNK_TARGET_TOKENS, 400), max_tokens=min(settings.CHUNK_MAX_TOKENS, 480))
-    chunked = await asyncio.to_thread(chunker.chunk_document, cleaned)
     try:
-        chunked = await fit_hosted_chunks(chunked)
+        chunked = await chunk_with_structures(cleaned, chunker)
     except ValueError:
         raise IngestionSourceError("invalid_document") from None
     if not chunked.chunks or len(chunked.chunks) > 1000:
