@@ -7,6 +7,7 @@ from src.models.user import User
 from src.retrieval.reranked_retriever import RerankedHybridRetriever
 from src.schemas.answer import AnswerRequest, AnswerResponse
 from src.security.jwt import get_current_user
+from src.security.query_access import native_query_inference
 from src.security.rate_limiter import rate_limiter
 from src.services.answer_generator import AnswerGenerator, get_answer_generator
 from src.services.answer_service import AnswerService
@@ -16,7 +17,7 @@ from src.services.search_service import SearchService, get_retriever
 router = APIRouter(
     prefix="/answer",
     tags=["Answer"],
-    dependencies=[Depends(rate_limiter.check)],
+    dependencies=[Depends(rate_limiter.check), Depends(native_query_inference)],
 )
 
 

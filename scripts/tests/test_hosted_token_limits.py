@@ -49,7 +49,7 @@ async def test_exact_count_cache_is_request_scoped_and_reauthorizes_hits():
     with inference_scope("synthetic", "client", "tenant", validator=validator):
         assert await client.token_count("PUBLIC SYNTHETIC") == 3
         assert await client.token_count("PUBLIC SYNTHETIC") == 3
-        assert len(calls) == 1 and validator.await_count == 2
+        assert len(calls) == 1 and validator.await_count == 3
         validator.side_effect = ProviderNotApprovedError("Synthetic revocation")
         with pytest.raises(ProviderNotApprovedError):
             await client.token_count("PUBLIC SYNTHETIC")

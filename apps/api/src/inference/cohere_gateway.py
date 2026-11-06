@@ -53,7 +53,10 @@ class CohereGateway:
                 if scope.validator is not None:
                     await scope.validator()
                 await self.budget.reserve(self.api_key, purpose, units)
-                return await self._request(endpoint, payload)
+                data = await self._request(endpoint, payload)
+                if scope.validator is not None:
+                    await scope.validator()
+                return data
         except (TimeoutError, httpx.TimeoutException, httpx.NetworkError) as exc:
             raise ProviderError("Cohere request timed out or is unavailable.") from exc
 

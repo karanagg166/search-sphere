@@ -4,7 +4,7 @@ from typing import Any
 import structlog
 
 from src.config import settings
-from src.inference.policy import ProviderError
+from src.inference.policy import ProviderError, ProviderNotApprovedError
 from src.processing.models.search import RerankedSearchResult
 from src.retrieval.hybrid_retriever import (
     HybridQueryValidationError,
@@ -16,6 +16,7 @@ from src.retrieval.reranker import (
     RerankingError,
     RerankingValidationError,
 )
+from src.security.query_access import current_query_access
 
 logger = structlog.get_logger()
 
@@ -54,6 +55,7 @@ class RerankedHybridRetriever:
     ) -> None:
         self.hybrid_retriever = hybrid_retriever or HybridRetriever()
         self.reranker = reranker or CrossEncoderReranker()
+        self._requires_query_access = reranker is None
         self.default_top_k = (
             default_top_k
             if default_top_k is not None
@@ -172,6 +174,8 @@ class RerankedHybridRetriever:
                 cleaned_ids.append(did.strip())
             resolved_doc_ids = cleaned_ids
 
+        resolved_top_k = min(resolved_top_k, 20)
+        resolved_candidate_k = min(resolved_candidate_k, 32)
         start_total = time.perf_counter()
 
         # 5. Hybrid retrieval stage (fetch top candidate_k chunks)
@@ -191,24 +195,30 @@ class RerankedHybridRetriever:
         except ProviderError:
             raise
         except (HybridRetrievalError, HybridQueryValidationError) as exc:
-            logger.exception(
+            logger.error(
                 "Hybrid retrieval failed during two-stage search",
                 query_length=len(clean_query),
-                error=str(exc),
+                error_type=type(exc).__name__,
             )
             raise RerankedRetrievalError(
                 f"Hybrid retrieval stage failed: {exc}"
             ) from exc
         except Exception as exc:
-            logger.exception(
+            logger.error(
                 "Unexpected error during hybrid retrieval stage",
                 query_length=len(clean_query),
-                error=str(exc),
+                error_type=type(exc).__name__,
             )
             raise RerankedRetrievalError(
                 f"Unexpected error in hybrid retrieval stage: {exc}"
             ) from exc
         hybrid_duration_ms = (time.perf_counter() - start_hybrid) * 1000
+
+        access = current_query_access()
+        if access is not None:
+            candidates = await access.authorize_candidates(candidates[:32])
+        elif self._requires_query_access or settings.ENVIRONMENT == "production":
+            raise ProviderNotApprovedError("Query evidence authorization is required before reranking.")
 
         # Return empty list cleanly if hybrid search yielded no candidates
         if not candidates:
@@ -238,21 +248,21 @@ class RerankedHybridRetriever:
         except ProviderError:
             raise
         except (RerankingError, RerankingValidationError) as exc:
-            logger.exception(
+            logger.error(
                 "Cross-encoder reranking failed during two-stage search",
                 candidate_count=len(candidates),
                 top_k=resolved_top_k,
-                error=str(exc),
+                error_type=type(exc).__name__,
             )
             raise RerankedRetrievalError(
                 f"Cross-encoder reranking stage failed: {exc}"
             ) from exc
         except Exception as exc:
-            logger.exception(
+            logger.error(
                 "Unexpected error during cross-encoder reranking stage",
                 candidate_count=len(candidates),
                 top_k=resolved_top_k,
-                error=str(exc),
+                error_type=type(exc).__name__,
             )
             raise RerankedRetrievalError(
                 f"Unexpected error in reranking stage: {exc}"

@@ -328,7 +328,7 @@ class CohereAnswerProvider(BaseAnswerProvider):
 
             raw_text = getattr(response, "text", "")
             if not raw_text or not raw_text.strip():
-                logger.error("Cohere returned empty answer", query=clean_query)
+                logger.error("Cohere returned empty answer", query_length=len(clean_query))
                 raise AnswerGenerationError(
                     "Cohere returned an empty answer response."
                 )
@@ -345,7 +345,7 @@ class CohereAnswerProvider(BaseAnswerProvider):
             logger.error(
                 "Cohere answer generation timed out",
                 timeout=self.timeout_seconds,
-                query=clean_query,
+                query_length=len(clean_query),
             )
             raise AnswerGenerationTimeoutError(
                 f"Cohere answer generation timed out after {self.timeout_seconds}s."
@@ -359,8 +359,8 @@ class CohereAnswerProvider(BaseAnswerProvider):
         except Exception as exc:
             logger.error(
                 "Cohere answer generation failed with unexpected error",
-                error=str(exc),
-                query=clean_query,
+                error_type=type(exc).__name__,
+                query_length=len(clean_query),
             )
             raise AnswerGenerationUnavailableError(
                 f"Cohere answer generation provider failed: {exc}"
@@ -461,7 +461,7 @@ class CohereAnswerProvider(BaseAnswerProvider):
             if tokens_yielded == 0:
                 logger.warning(
                     "Cohere stream completed without yielding tokens; falling back to direct chat",
-                    query=clean_query,
+                    query_length=len(clean_query),
                 )
                 direct_resp = await client.chat(
                     message=user_message,
@@ -475,14 +475,14 @@ class CohereAnswerProvider(BaseAnswerProvider):
         except ProviderError:
             raise
         except TimeoutError as exc:
-            logger.error("Cohere stream timed out", timeout=self.timeout_seconds, query=clean_query)
+            logger.error("Cohere stream timed out", timeout=self.timeout_seconds, query_length=len(clean_query))
             raise AnswerGenerationTimeoutError(
                 f"Cohere answer streaming timed out after {self.timeout_seconds}s."
             ) from exc
         except (AnswerGenerationTimeoutError, AnswerGenerationConfigError, AnswerGenerationError):
             raise
         except Exception as exc:
-            logger.error("Cohere stream failed", error=str(exc), query=clean_query)
+            logger.error("Cohere stream failed", error_type=type(exc).__name__, query_length=len(clean_query))
             raise AnswerGenerationUnavailableError(
                 f"Cohere answer streaming provider failed: {exc}"
             ) from exc
@@ -535,7 +535,7 @@ class AnswerGenerator:
         if not self.enabled:
             logger.warning(
                 "Answer generation requested but disabled by configuration",
-                query=clean_query,
+                query_length=len(clean_query),
             )
             raise AnswerGenerationError(
                 "RAG answer generation is currently disabled by configuration."
@@ -552,7 +552,7 @@ class AnswerGenerator:
         if not usable_chunks:
             logger.info(
                 "No chunks available for answer generation; returning safe fallback",
-                query=clean_query,
+                query_length=len(clean_query),
             )
             return fallback, []
 

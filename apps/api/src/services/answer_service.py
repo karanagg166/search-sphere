@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 import structlog
 from fastapi import HTTPException, status
 
+from src.inference.policy import ProviderError
 from src.models.user import User
 from src.schemas.answer import AnswerRequest, AnswerResponse, AnswerSource
 from src.schemas.search import SearchRequest
@@ -85,7 +86,7 @@ class AnswerService:
             logger.info(
                 "Search returned 0 results; returning safe no-results answer",
                 user_id=user.id,
-                query=request.query,
+                query_length=len(request.query),
             )
             return AnswerResponse(
                 query=search_response.query,
@@ -108,8 +109,8 @@ class AnswerService:
             logger.error(
                 "Answer generation timed out",
                 user_id=user.id,
-                query=request.query,
-                error=str(exc),
+                query_length=len(request.query),
+                error_type=type(exc).__name__,
             )
             raise HTTPException(
                 status_code=status.HTTP_504_GATEWAY_TIMEOUT,
@@ -122,8 +123,8 @@ class AnswerService:
             logger.error(
                 "Answer generation provider unavailable or unconfigured",
                 user_id=user.id,
-                query=request.query,
-                error=str(exc),
+                query_length=len(request.query),
+                error_type=type(exc).__name__,
             )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -133,19 +134,21 @@ class AnswerService:
             logger.error(
                 "Answer generation failed",
                 user_id=user.id,
-                query=request.query,
-                error=str(exc),
+                query_length=len(request.query),
+                error_type=type(exc).__name__,
             )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to generate answer from document context.",
             ) from exc
+        except ProviderError:
+            raise
         except Exception as exc:
-            logger.exception(
+            logger.error(
                 "Unexpected error during answer generation",
                 user_id=user.id,
-                query=request.query,
-                error=str(exc),
+                query_length=len(request.query),
+                error_type=type(exc).__name__,
             )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -169,7 +172,7 @@ class AnswerService:
         logger.info(
             "Grounded answer generated successfully",
             user_id=user.id,
-            query=request.query,
+            query_length=len(request.query),
             sources_count=len(sources),
             answer_length=len(answer_text),
         )
@@ -258,8 +261,10 @@ class AnswerService:
                     raw_answer = fallback_answer.strip() if fallback_answer else ""
                     if raw_answer:
                         yield f"event: token\ndata: {json.dumps({'token': raw_answer})}\n\n"
+                except ProviderError:
+                    raise
                 except Exception as fb_exc:
-                    logger.error("Fallback generation failed", error=str(fb_exc))
+                    logger.error("Fallback generation failed", error_type=type(fb_exc).__name__)
 
             if not raw_answer:
                 raw_answer = NO_RESULTS_ANSWER
@@ -267,8 +272,10 @@ class AnswerService:
 
             clean_answer = sanitize_citations(raw_answer, max_source_id=len(sources))
             yield f"event: done\ndata: {json.dumps({'answer': clean_answer, 'sources': sources_payload})}\n\n"
+        except ProviderError:
+            raise
         except Exception as exc:
-            logger.error("Streaming answer failed", error=str(exc), user_id=user.id)
+            logger.error("Streaming answer failed", error_type=type(exc).__name__, user_id=user.id)
             try:
                 fallback_answer, _ = await self.answer_generator.generate_answer(
                     query=search_response.query,
@@ -279,7 +286,9 @@ class AnswerService:
                 clean_answer = sanitize_citations(raw_answer, max_source_id=len(sources))
                 yield f"event: token\ndata: {json.dumps({'token': clean_answer})}\n\n"
                 yield f"event: done\ndata: {json.dumps({'answer': clean_answer, 'sources': sources_payload})}\n\n"
+            except ProviderError:
+                raise
             except Exception as fb_exc:
-                logger.error("Non-streaming fallback failed", error=str(fb_exc))
+                logger.error("Non-streaming fallback failed", error_type=type(fb_exc).__name__)
                 yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
 

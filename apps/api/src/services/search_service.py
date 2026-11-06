@@ -2,6 +2,7 @@ import structlog
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.inference.policy import ProviderError
 from src.models.user import User
 from src.repositories.document_repository import DocumentRepository
 from src.retrieval.hybrid_retriever import (
@@ -140,7 +141,7 @@ class SearchService:
                 logger.warning(
                     "Search query validation failed",
                     user_id=user.id,
-                    error=str(exc),
+                    error_type=type(exc).__name__,
                 )
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -150,17 +151,19 @@ class SearchService:
                 logger.error(
                     "Reranked retrieval error during search",
                     user_id=user.id,
-                    error=str(exc),
+                    error_type=type(exc).__name__,
                 )
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Search service encountered an internal retrieval error.",
                 ) from exc
+            except ProviderError:
+                raise
             except Exception as exc:
-                logger.exception(
+                logger.error(
                     "Unexpected error during search execution",
                     user_id=user.id,
-                    error=str(exc),
+                    error_type=type(exc).__name__,
                 )
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -196,8 +199,8 @@ class SearchService:
         logger.info(
             "Semantic search completed successfully",
             user_id=user.id,
-            original_query=request.query,
-            retrieval_query=retrieval_query,
+            original_query_length=len(request.query),
+            retrieval_query_length=len(retrieval_query),
             rewritten=rewrite_result.rewritten,
             results_count=len(result_responses),
             document_scoped=target_document_id is not None,

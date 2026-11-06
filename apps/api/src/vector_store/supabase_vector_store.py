@@ -53,8 +53,10 @@ def _build_sql_filters(
     Builds parameterized SQL WHERE clauses strictly validating filter keys against ALLOWED_CHUNK_FILTER_COLUMNS.
     Never interpolates raw caller values or unallowlisted column names.
     """
-    where_clauses: list[str] = []
-    params: dict[str, Any] = {}
+    from src.security.query_access import current_query_access
+
+    access = current_query_access()
+    where_clauses, params = access.sql_filters() if access else ([], {})
 
     if document_id is not None:
         where_clauses.append("document_id = :doc_id")
@@ -113,6 +115,11 @@ def _apply_sqlite_filters(
     filters: dict[str, Any] | None = None,
 ) -> Any:
     """Applies strict allowlisted filters against SQLAlchemy DocumentChunk expressions for SQLite fallback."""
+    from src.security.query_access import current_query_access
+
+    access = current_query_access()
+    if access is not None:
+        stmt = stmt.where(DocumentChunk.point_id.in_(access.chunk_query().with_only_columns(DocumentChunk.point_id).correlate(None)))
     if document_id is not None:
         stmt = stmt.where(DocumentChunk.document_id == str(document_id).strip())
 

@@ -14,6 +14,7 @@ from src.schemas.conversation import (
     ConversationUpdate,
 )
 from src.security.jwt import get_current_user
+from src.security.query_access import native_query_inference
 from src.security.rate_limiter import rate_limiter
 from src.services.answer_generator import AnswerGenerator, get_answer_generator
 from src.services.answer_service import AnswerService
@@ -133,7 +134,7 @@ async def delete_conversation(
     "/{conversation_id}/answer",
     response_model=ConversationAnswerResponse,
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(rate_limiter.check)],
+    dependencies=[Depends(rate_limiter.check), Depends(native_query_inference)],
     summary="Ask a question within conversation",
 )
 async def answer_in_conversation(
@@ -158,7 +159,7 @@ async def answer_in_conversation(
 @router.post(
     "/{conversation_id}/answer/stream",
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(rate_limiter.check)],
+    dependencies=[Depends(rate_limiter.check), Depends(native_query_inference)],
     summary="Stream answer within conversation via Server-Sent Events (SSE)",
 )
 async def stream_answer_in_conversation(

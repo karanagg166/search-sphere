@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db import get_db
 from src.retrieval.reranked_retriever import RerankedHybridRetriever
 from src.schemas.v1.search import SearchRequest, SearchResponse
+from src.security.query_access import delegated_query_inference
 from src.security.service_auth import get_service_context
 from src.security.service_context import ServiceContext
 from src.services.answer_generator import AnswerGenerator, get_answer_generator
@@ -13,7 +14,7 @@ from src.services.search_service import get_retriever
 
 logger = structlog.get_logger()
 
-router = APIRouter(prefix="/api/v1/search", tags=["V1 Semantic Retrieval"])
+router = APIRouter(prefix="/api/v1/search", tags=["V1 Semantic Retrieval"], dependencies=[Depends(delegated_query_inference)])
 
 
 @router.post(

@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import get_db
+from src.inference.policy import ProviderError
 from src.models.external_document import ExternalDocument
 from src.retrieval.reranked_retriever import RerankedHybridRetriever
 from src.routers.internal_medical_documents import sanitize_identifier
@@ -16,12 +17,13 @@ from src.schemas.internal_medical_retrieval import (
     MedicalRetrievalSearchResponse,
 )
 from src.security.medical_context import bind_patient, get_medical_context
+from src.security.query_access import medical_query_inference
 from src.security.service_context import ServiceContext
 from src.services.search_service import get_retriever
 
 logger = structlog.get_logger()
 
-router = APIRouter(prefix="/internal/medical-retrieval", tags=["Internal Medical Retrieval"])
+router = APIRouter(prefix="/internal/medical-retrieval", tags=["Internal Medical Retrieval"], dependencies=[Depends(medical_query_inference)])
 
 
 @router.post(
@@ -77,11 +79,13 @@ async def search_medical_records(
             candidate_k=candidate_k,
             filters=qdrant_filters,
         )
+    except ProviderError:
+        raise
     except Exception as exc:
-        logger.exception(
+        logger.error(
             "Search Sphere medical retrieval failed",
             patient_id=clean_patient_id,
-            error=str(exc),
+            error_type=type(exc).__name__,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
