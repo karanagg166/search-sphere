@@ -11,6 +11,13 @@ from src.config import settings
 from src.inference.chat_adapter import CohereChatAdapter
 from src.inference.policy import ProviderError
 from src.schemas.search import ConversationMessage
+from src.services.grounded_evidence import (
+    SELECTION_POLICY,
+    clinical_advice,
+    evidence_units,
+    render_selection,
+    selection_prompt,
+)
 
 logger = structlog.get_logger()
 
@@ -293,35 +300,23 @@ class CohereAnswerProvider(BaseAnswerProvider):
         if not context_chunks:
             return fallback
 
-        formatted_sources = formatter(context_chunks)
-
-        # Build limited conversation history text
-        if conversation_context:
-            context_lines = [
-                f"[{msg.role.capitalize()}]: {msg.content}"
-                for msg in conversation_context
-            ]
-            history_text = "\n".join(context_lines)
-        else:
-            history_text = "None"
-
-        user_message = (
-            f"=== BEGIN RETRIEVED DOCUMENT SOURCES ===\n"
-            f"{formatted_sources}\n"
-            f"=== END RETRIEVED DOCUMENT SOURCES ===\n\n"
-            f"Recent Conversation History:\n"
-            f"{history_text}\n\n"
-            f"User Question: {clean_query}"
-        )
+        if formatter in {format_medical_context_chunks} or "Medical" in effective_preamble:
+            if clinical_advice(clean_query):
+                return "I can retrieve recorded findings, but I cannot make diagnoses or recommend treatment."
+        units=evidence_units(context_chunks,formatter)
+        if not units:
+            return fallback
+        user_message=selection_prompt(clean_query,units,conversation_context)
 
         try:
             client = self._get_client()
             response = await asyncio.wait_for(
                 client.chat(
                     message=user_message,
-                    preamble=effective_preamble,
+                    preamble=effective_preamble+"\n\n"+SELECTION_POLICY,
                     model=self.model,
                     temperature=self.temperature,
+                    response_format={"type":"json_object"},
                 ),
                 timeout=self.timeout_seconds,
             )
@@ -333,11 +328,7 @@ class CohereAnswerProvider(BaseAnswerProvider):
                     "Cohere returned an empty answer response."
                 )
 
-            # Sanitize citations against the actual number of provided chunks
-            clean_answer = sanitize_citations(
-                raw_text.strip(), max_source_id=len(context_chunks)
-            )
-            return clean_answer
+            return render_selection(raw_text,units,fallback)
 
         except ProviderError:
             raise
@@ -375,106 +366,8 @@ class CohereAnswerProvider(BaseAnswerProvider):
         context_formatter: Any | None = None,
         no_results_answer: str | None = None,
     ) -> AsyncIterator[str]:
-        """Call Cohere Chat stream endpoint to yield text tokens."""
-        clean_query = query.strip()
-        effective_preamble = preamble if preamble is not None else ANSWER_SYSTEM_PREAMBLE
-        formatter = context_formatter if context_formatter is not None else format_context_chunks
-        fallback = no_results_answer if no_results_answer is not None else NO_RESULTS_ANSWER
-
-        if not self.api_key or self.api_key.strip() in (
-            "",
-            "your_cohere_api_key_here",
-        ):
-            raise AnswerGenerationConfigError(
-                "Cohere API key is not configured for answer generation."
-            )
-
-        if not context_chunks:
-            yield fallback
-            return
-
-        formatted_sources = formatter(context_chunks)
-
-        if conversation_context:
-            context_lines = [
-                f"[{msg.role.capitalize()}]: {msg.content}"
-                for msg in conversation_context
-            ]
-            history_text = "\n".join(context_lines)
-        else:
-            history_text = "None"
-
-        user_message = (
-            f"=== BEGIN RETRIEVED DOCUMENT SOURCES ===\n"
-            f"{formatted_sources}\n"
-            f"=== END RETRIEVED DOCUMENT SOURCES ===\n\n"
-            f"Recent Conversation History:\n"
-            f"{history_text}\n\n"
-            f"User Question: {clean_query}"
-        )
-
-        tokens_yielded = 0
-        try:
-            client = self._get_client()
-            stream = client.chat_stream(
-                message=user_message,
-                preamble=effective_preamble,
-                model=self.model,
-                temperature=self.temperature,
-            )
-            if inspect.isawaitable(stream):
-                stream = await stream
-
-            async for event in stream:
-                if getattr(event, "event_type", None) == "text-generation":
-                    text_chunk = getattr(event, "text", "")
-                    if text_chunk:
-                        tokens_yielded += 1
-                        yield text_chunk
-                elif getattr(event, "type", None) == "content-delta":
-                    delta = getattr(event, "delta", None)
-                    if delta:
-                        message = getattr(delta, "message", None)
-                        if message:
-                            content = getattr(message, "content", None)
-                            if content:
-                                delta_text = getattr(content, "text", "")
-                                if delta_text:
-                                    tokens_yielded += 1
-                                    yield delta_text
-                        delta_text = getattr(delta, "text", "")
-                        if delta_text:
-                            tokens_yielded += 1
-                            yield delta_text
-                elif hasattr(event, "delta") and hasattr(event.delta, "message") and hasattr(event.delta.message, "content"):
-                    delta_text = getattr(event.delta.message.content, "text", "")
-                    if delta_text:
-                        tokens_yielded += 1
-                        yield delta_text
-                elif hasattr(event, "text") and getattr(event, "text", None):
-                    text_val = event.text
-                    if isinstance(text_val, str) and text_val:
-                        tokens_yielded += 1
-                        yield text_val
-
-            # A completed empty response is an explicit failure, never a second
-            # billable generation attempt or a switch of grounding policy.
-            if tokens_yielded == 0:
-                raise AnswerGenerationUnavailableError("Provider returned an empty stream.")
-        except ProviderError:
-            raise
-        except TimeoutError as exc:
-            logger.error("Cohere stream timed out", timeout=self.timeout_seconds, query_length=len(clean_query))
-            raise AnswerGenerationTimeoutError(
-                f"Cohere answer streaming timed out after {self.timeout_seconds}s."
-            ) from exc
-        except (AnswerGenerationTimeoutError, AnswerGenerationConfigError, AnswerGenerationError):
-            raise
-        except Exception as exc:
-            logger.error("Cohere stream failed", error_type=type(exc).__name__, query_length=len(clean_query))
-            raise AnswerGenerationUnavailableError(
-                f"Cohere answer streaming provider failed: {exc}"
-            ) from exc
+        """One bounded selection call, fully validated before its only delta."""
+        yield await self.generate(query,context_chunks,conversation_context,preamble,context_formatter,no_results_answer)
 
 
 def provider_arguments(method, **kwargs):
@@ -556,7 +449,7 @@ class AnswerGenerator:
             query=clean_query,context_chunks=usable_chunks,conversation_context=conversation_context,
             preamble=preamble,context_formatter=context_formatter,no_results_answer=no_results_answer))
 
-        return answer_text, usable_chunks
+        return answer_text, [] if answer_text == fallback else usable_chunks
 
     async def generate_answer_stream(
         self,

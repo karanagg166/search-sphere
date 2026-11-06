@@ -9,6 +9,7 @@ from sqlalchemy import delete, select, text
 from src.models.conversation import Conversation
 from src.models.message import Message
 from src.security.conversation_access import conversation_query
+from src.security.data_screening import contains_secrets
 from src.services.conversation_context import message_evidence
 
 
@@ -44,7 +45,7 @@ async def visible_messages(db, access, conversation_id, limit=50, offset=0):
     result = []
     for message in rows:
         references = await message_evidence(db, access, message) if message.role == "assistant" else {}
-        valid = references is not None
+        valid = references is not None and not contains_secrets(message.content)
         if valid:
             access.evidence.update(references)
         result.append({"id": message.id, "role": message.role,

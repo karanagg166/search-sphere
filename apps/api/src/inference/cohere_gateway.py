@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import hashlib
+import json
 import math
 from typing import Any
 from weakref import WeakKeyDictionary
@@ -13,12 +14,14 @@ from src.config import settings
 from src.inference.policy import (
     ProviderError,
     ProviderInvalidResponseError,
+    ProviderNotApprovedError,
     ProviderQuotaExceededError,
     ProviderRateLimitError,
     ProviderTimeoutError,
     authorize_cohere,
 )
 from src.inference.usage import CohereUsageBudget
+from src.security.data_screening import contains_secrets
 
 EMBEDDING_MODEL = "embed-english-light-v3.0"
 EMBEDDING_DIMENSION = 384
@@ -47,6 +50,9 @@ class CohereGateway:
         self, endpoint: str, payload: dict, purpose: str, units: int = 1
     ) -> dict:
         scope = authorize_cohere(self.api_key)  # Before reserving quota or sending any content.
+        serialized=json.dumps(payload,ensure_ascii=False)
+        if contains_secrets(serialized) or (len(self.api_key)>=8 and self.api_key in serialized):
+            raise ProviderNotApprovedError("Inference input failed credential screening.")
         try:
             loop = asyncio.get_running_loop()
             slots = _request_slots.setdefault(loop, asyncio.Semaphore(2))
@@ -268,6 +274,8 @@ class CohereGateway:
         )
         if not answer.strip():
             raise ProviderInvalidResponseError("Cohere returned no generated text.")
+        if contains_secrets(answer) or (len(self.api_key)>=8 and self.api_key in answer):
+            raise ProviderInvalidResponseError("Provider output failed credential screening.")
         return answer
 
     async def inspect_image(self, image: bytes, instruction: str, *, max_tokens=1024) -> str:

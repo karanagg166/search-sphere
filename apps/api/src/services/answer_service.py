@@ -120,6 +120,8 @@ class AnswerService:
                 answer_text = "".join(pieces)
                 if not answer_text.strip():
                     raise AnswerGenerationError("Provider returned an empty answer.")
+                if answer_text == NO_RESULTS_ANSWER:
+                    used_chunks=[]
             else:
                 answer_text, used_chunks = await self.answer_generator.generate_answer(
                     query=search_response.query,chunks=search_response.results,

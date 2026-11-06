@@ -242,3 +242,18 @@ async def test_timeout_and_network_failures_remain_distinct_from_evidence_absenc
     assert caught.value.code == code
     assert 'private diagnostic' not in str(caught.value)
     assert len(attempts) == 1
+
+
+@pytest.mark.asyncio
+async def test_configured_credentials_fail_before_provider_and_budget_reservation():
+    client=gateway(lambda request:pytest.fail("Credential must never be sent"))
+    with (inference_scope(DataClassification.SYNTHETIC,"fixture","fixture"),pytest.raises(ProviderNotApprovedError)):
+        await client.embed(["PUBLIC SYNTHETIC accidentally contains "+KEY])
+    client.budget.reserve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provider_cannot_return_a_credential_in_generated_output():
+    client=gateway(lambda request:httpx.Response(200,json={"finish_reason":"COMPLETE","message":{"content":[{"type":"text","text":KEY}]}}))
+    with (inference_scope(DataClassification.SYNTHETIC,"fixture","fixture"),pytest.raises(ProviderInvalidResponseError)):
+        await client.chat([{"role":"user","content":"PUBLIC SYNTHETIC"}])
