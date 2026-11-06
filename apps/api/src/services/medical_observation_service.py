@@ -6,6 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.medical_observation import MedicalObservation
 from src.schemas.internal_medical_observations import MedicalObservationItem
+from src.security.medical_context import bind_patient
+from src.security.query_access import current_query_access
+from src.security.service_context import ServiceContext
+from src.security.structured_access import observation_fingerprint, observation_query
 
 logger = structlog.get_logger()
 
@@ -55,11 +59,9 @@ class MedicalObservationService:
         from_date: datetime | str | None = None,
         to_date: datetime | str | None = None,
     ) -> Select:
-        stmt: Select = select(MedicalObservation).where(
-            MedicalObservation.source_system == "quick_clinic",
-            MedicalObservation.tenant_id == "quick_clinic_default",
-            MedicalObservation.external_patient_id == patient_id,
-        )
+        access = current_query_access()
+        context = access.context if access else ServiceContext("quick_clinic", "quick_clinic_default")
+        stmt: Select = observation_query(bind_patient(context, patient_id))
 
         if observation_types:
             clean_types = [t.strip().upper() for t in observation_types if t.strip()]
@@ -124,7 +126,12 @@ class MedicalObservationService:
         stmt = stmt.offset(resolved_offset).limit(resolved_limit)
 
         result = await session.execute(stmt)
-        return list(result.scalars().all())
+        rows = list(result.scalars().all())
+        access = current_query_access()
+        if access is not None:
+            access.observation_evidence.update({row.id: observation_fingerprint(row) for row in rows})
+            await access.validate()
+        return rows
 
     async def get_latest_observations(
         self,

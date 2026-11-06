@@ -588,3 +588,37 @@ not a P95 or capacity estimate. No sensitive source content was sent.
 The clinical compatibility history/actor forwarding, validated complete intent router,
 citation support checks, memory, caching, versions, index cutover and authenticated
 live journeys remain open. Backend production is still `8288c9d`.
+
+### Medical compatibility history and current structured evidence
+
+The existing medical routes are preserved. When Quick-Clinic supplies a conversation
+reference, the server maps it idempotently under the authenticated doctor actor,
+patient, collection, tenant and client. Raw request history is ignored. The same
+PostgreSQL selector, exact response behavior and rewrite validation apply. Clinical
+short temporal refinements (for example “Only the last 3 days.”) reuse the authorized
+clinical concept through deterministic routing without hosted inference. Completed
+medical turns retain chunk/observation IDs and fingerprints, not source passages.
+
+Structured observations now join currently READY, authorized external documents and
+include only deterministic REGEX evidence. Orphans, other patients, failed documents,
+and unreviewed OCR values cannot supply exact clinical readings. Observation snapshots
+are rechecked around later provider calls and response completion; document revocation
+or value changes invalidate their history. Zero-valued observations are preserved.
+Medical SSE completes the shared JSON answer path and authorization before any token;
+upstream failure produces a safe HTTP error before a stream starts. This buffering is
+not yet full claim-to-evidence support validation; that remains open for every route.
+
+Seven real PostgreSQL regressions verify actor/patient isolation, ignored caller
+history, deterministic temporal follow-up, source/observation revocation, orphan/OCR
+exclusion, no saved turn on provider failure, and identical token/citation/completion
+payloads with a persisted message ID. The API suite passes with its existing isolated
+live-services skip. Quick-Clinic forwarding is a coordinated consumer PR; production
+backend migration/deployment and all authenticated live journeys remain open.
+
+[Search Sphere #48](https://github.com/karanagg166/search-sphere/pull/48) merged at
+`20588e6e4ec5042c1fddc76f8ab33ea020b96ade`; required CI passed in
+[42238038361](https://github.com/karanagg166/search-sphere/actions/runs/42238038361).
+Vercel health/Actions deployment verification remains available. Its local CLI
+management credential returns HTTP 403 even for `/v2/user`; billing-plan verification
+is pending reconnection or the owner's dashboard confirmation. No paid resource was
+created or upgraded. This limitation does not block local code/CI work.

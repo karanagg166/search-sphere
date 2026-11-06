@@ -21,10 +21,10 @@ from src.schemas.internal_medical_rag import (
     MedicalRagAnswerRequest,
     MedicalRagAnswerResponse,
 )
-from src.schemas.search import ConversationMessage
 from src.security.medical_context import bind_patient, get_medical_context
-from src.security.query_access import medical_query_inference
+from src.security.query_access import current_query_access, medical_query_inference
 from src.security.service_context import ServiceContext
+from src.security.structured_access import observation_query
 from src.services.answer_generator import (
     MEDICAL_ANSWER_SYSTEM_PREAMBLE,
     MEDICAL_NO_RESULTS_ANSWER,
@@ -36,6 +36,11 @@ from src.services.answer_generator import (
     format_medical_context_chunks,
     get_answer_generator,
     sanitize_citations,
+)
+from src.services.conversation_context import prior_answer_chunks
+from src.services.medical_conversation import (
+    complete_medical_turn,
+    prepare_medical_context,
 )
 from src.services.medical_observation_service import (
     MedicalObservationService,
@@ -88,7 +93,7 @@ def format_hybrid_context_chunks(items: list[Any]) -> str:
         if getattr(item, "source_type", None) == "OBSERVATION":
             obs = item.observation
             date_str = obs.observed_at.strftime("%b %d, %Y") if obs.observed_at else "unspecified date"
-            val_str = f"{obs.value_text or obs.value_numeric} {obs.unit or ''}".strip()
+            val_str = f"{obs.value_text if obs.value_text is not None else obs.value_numeric} {obs.unit or ''}".strip()
             parts.append(
                 f"[SOURCE {idx}] (Structured Clinical Observation):\n"
                 f"Type: {obs.display_name}\n"
@@ -122,7 +127,7 @@ def _build_hybrid_citations(
         if getattr(item, "source_type", None) == "OBSERVATION":
             obs = item.observation
             doc_meta = ready_docs.get(obs.external_document_id)
-            val_str = f"{obs.display_name}: {obs.value_text or obs.value_numeric} {obs.unit or ''}".strip()
+            val_str = f"{obs.display_name}: {obs.value_text if obs.value_text is not None else obs.value_numeric} {obs.unit or ''}".strip()
             citations.append(
                 MedicalAnswerCitation(
                     citationId=cid,
@@ -228,6 +233,10 @@ async def _handle_structured_chat(
         select(ExternalDocument).where(
             ExternalDocument.source_system == "quick_clinic",
             ExternalDocument.external_patient_id == patient_id,
+            ExternalDocument.tenant_id == "quick_clinic_default",
+            ExternalDocument.owner_subject_id == patient_id,
+            ExternalDocument.collection_id == bind_patient(ServiceContext("quick_clinic", "quick_clinic_default"), patient_id).collection_id,
+            ExternalDocument.status == "READY",
             ExternalDocument.external_document_id.in_(doc_ids),
         )
     )
@@ -237,13 +246,13 @@ async def _handle_structured_chat(
     if time_filter.is_latest:
         obs = observations[0]
         date_str = obs.observed_at.strftime("%b %d, %Y") if obs.observed_at else "recorded date"
-        val_str = f"{obs.value_text or obs.value_numeric} {obs.unit or ''}".strip()
+        val_str = f"{obs.value_text if obs.value_text is not None else obs.value_numeric} {obs.unit or ''}".strip()
         answer = f"The latest recorded {first_display} reading is {val_str} (observed on {date_str}) [1]."
     elif time_filter.is_trend:
         lines = [f"The recorded {first_display} readings in chronological order are:"]
         for idx, obs in enumerate(observations, start=1):
             date_str = obs.observed_at.strftime("%b %d, %Y") if obs.observed_at else "recorded date"
-            val_str = f"{obs.value_text or obs.value_numeric} {obs.unit or ''}".strip()
+            val_str = f"{obs.value_text if obs.value_text is not None else obs.value_numeric} {obs.unit or ''}".strip()
             lines.append(f"- {date_str}: {val_str} [{idx}]")
         answer = "\n".join(lines)
     else:
@@ -251,14 +260,14 @@ async def _handle_structured_chat(
         lines = [f"The available {first_display} readings{time_desc} are:"]
         for idx, obs in enumerate(observations, start=1):
             date_str = obs.observed_at.strftime("%b %d, %Y") if obs.observed_at else "recorded date"
-            val_str = f"{obs.value_text or obs.value_numeric} {obs.unit or ''}".strip()
+            val_str = f"{obs.value_text if obs.value_text is not None else obs.value_numeric} {obs.unit or ''}".strip()
             lines.append(f"- {date_str}: {val_str} [{idx}]")
         answer = "\n".join(lines)
 
     citations: list[MedicalAnswerCitation] = []
     for idx, obs in enumerate(observations, start=1):
         doc_meta = docs_map.get(obs.external_document_id)
-        val_str = f"{obs.display_name}: {obs.value_text or obs.value_numeric} {obs.unit or ''}".strip()
+        val_str = f"{obs.display_name}: {obs.value_text if obs.value_text is not None else obs.value_numeric} {obs.unit or ''}".strip()
         citations.append(
             MedicalAnswerCitation(
                 citationId=idx,
@@ -305,7 +314,8 @@ async def _retrieve_patient_ready_chunks(
         if clean_doc_type:
             qdrant_filters["document_type"] = clean_doc_type
 
-    reranked_chunks = await retriever.search(
+    access = current_query_access()
+    reranked_chunks = await prior_answer_chunks(access) if access and access.exact_previous_answer is not None else await retriever.search(
         query=query,
         top_k=resolved_limit,
         candidate_k=candidate_k,
@@ -469,14 +479,7 @@ async def generate_medical_answer(
     )
 
 
-@router.post(
-    "/chat",
-    response_model=MedicalChatResponse,
-    response_model_by_alias=True,
-    status_code=status.HTTP_200_OK,
-    summary="Multi-turn patient-isolated medical chat answer generation with structured/RAG/hybrid routing",
-)
-async def generate_medical_chat(
+async def _generate_medical_chat(
     body: MedicalChatRequest,
     _auth: ServiceContext = Depends(get_medical_context),
     session: AsyncSession = Depends(get_db),
@@ -497,34 +500,21 @@ async def generate_medical_chat(
             detail="Message cannot be empty or whitespace only.",
         )
 
-    # 1. Limit history to bounded context (last 6 messages)
-    limited_history = body.history[-6:] if body.history else []
-    conversation_context = [
-        ConversationMessage(
-            role="user" if msg.role.lower() == "user" else "assistant",
-            content=msg.content.strip(),
-        )
-        for msg in limited_history
-        if msg.content and msg.content.strip()
-    ]
-
-    # 2. Multi-turn query reformulation
-    effective_query = clean_message
-    rewritten = False
-    if conversation_context:
-        rewrite_result = await query_rewriter.rewrite(
-            query=clean_message,
-            conversation_context=conversation_context,
-        )
-        if rewrite_result.rewritten and rewrite_result.retrieval_query:
-            effective_query = rewrite_result.retrieval_query
-            rewritten = True
+    selection, rewrite_result = await prepare_medical_context(clean_message, query_rewriter, query_router)
+    conversation_context = selection.history
+    if selection.clarification:
+        return MedicalChatResponse(answer=selection.clarification, retrieval_query=clean_message, answer_mode="CLARIFICATION")
+    effective_query, rewritten = rewrite_result.retrieval_query, rewrite_result.rewritten
 
     # 3. Clinical Query Routing (STRUCTURED / RAG / HYBRID)
     routed = query_router.route_query(
         query=effective_query,
         conversation_context=conversation_context,
     )
+
+    access = current_query_access()
+    if selection.exact_previous_answer is not None and access and access.observation_evidence:
+        routed.route = MedicalQueryRoute.HYBRID
 
     # CASE A: STRUCTURED OBSERVATION QUERY
     if routed.route == MedicalQueryRoute.STRUCTURED:
@@ -554,15 +544,20 @@ async def generate_medical_chat(
     # CASE B: HYBRID QUERY (Structured Observations + RAG Chunks)
     if routed.route == MedicalQueryRoute.HYBRID:
         # Fetch structured observations
-        observations = await obs_service.query_observations(
-            session=session,
-            patient_id=clean_patient_id,
-            observation_types=routed.target_observation_types or None,
-            from_date=routed.time_filter.from_date,
-            to_date=routed.time_filter.to_date,
-            limit=10,
-            sort_order="asc",
-        )
+        if selection.exact_previous_answer is not None and access and access.observation_evidence:
+            observations = list((await session.execute(observation_query(access.context).where(
+                MedicalObservation.id.in_(list(access.observation_evidence)),
+            ))).scalars().all())
+        else:
+            observations = await obs_service.query_observations(
+                session=session,
+                patient_id=clean_patient_id,
+                observation_types=routed.target_observation_types or None,
+                from_date=routed.time_filter.from_date,
+                to_date=routed.time_filter.to_date,
+                limit=10,
+                sort_order="asc",
+            )
         # Fetch semantic chunks
         ready_chunks, ready_docs = await _retrieve_patient_ready_chunks(
             patient_id=clean_patient_id,
@@ -723,11 +718,22 @@ async def generate_medical_chat(
     )
 
 
-@router.post(
-    "/chat/stream",
-    status_code=status.HTTP_200_OK,
-    summary="Stream multi-turn medical chat answer via SSE with structured/RAG/hybrid routing",
-)
+@router.post("/chat", response_model=MedicalChatResponse, response_model_by_alias=True, status_code=200)
+async def generate_medical_chat(
+    body: MedicalChatRequest,
+    _auth: ServiceContext = Depends(get_medical_context),
+    session: AsyncSession = Depends(get_db),
+    retriever: RerankedHybridRetriever = Depends(get_retriever),
+    query_rewriter: QueryRewriter = Depends(get_query_rewriter),
+    answer_generator: AnswerGenerator = Depends(get_answer_generator),
+    query_router: MedicalQueryRouter = Depends(get_medical_query_router),
+    obs_service: MedicalObservationService = Depends(get_medical_observation_service),
+) -> MedicalChatResponse:
+    result = await _generate_medical_chat(body, _auth, session, retriever, query_rewriter, answer_generator, query_router, obs_service)
+    return await complete_medical_turn(session, body.message, result)
+
+
+@router.post("/chat/stream", status_code=status.HTTP_200_OK, summary="Authorized medical chat completion via SSE")
 async def stream_medical_chat(
     body: MedicalChatRequest,
     _auth: ServiceContext = Depends(get_medical_context),
@@ -738,247 +744,19 @@ async def stream_medical_chat(
     query_router: MedicalQueryRouter = Depends(get_medical_query_router),
     obs_service: MedicalObservationService = Depends(get_medical_observation_service),
 ) -> StreamingResponse:
-    start_time = time.perf_counter()
-
-    clean_patient_id = sanitize_identifier(body.patient_id, "patient_id")
-    _auth = bind_patient(_auth, clean_patient_id)
-    clean_message = body.message.strip()
-    if not clean_message:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Message cannot be empty or whitespace only.",
-        )
-
-    limited_history = body.history[-6:] if body.history else []
-    conversation_context = [
-        ConversationMessage(
-            role="user" if msg.role.lower() == "user" else "assistant",
-            content=msg.content.strip(),
-        )
-        for msg in limited_history
-        if msg.content and msg.content.strip()
-    ]
-
-    effective_query = clean_message
-    if conversation_context:
-        rewrite_result = await query_rewriter.rewrite(
-            query=clean_message,
-            conversation_context=conversation_context,
-        )
-        if rewrite_result.rewritten and rewrite_result.retrieval_query:
-            effective_query = rewrite_result.retrieval_query
-
-    routed = query_router.route_query(
-        query=effective_query,
-        conversation_context=conversation_context,
-    )
-
-    # 1. CASE: STRUCTURED STREAM
-    if routed.route == MedicalQueryRoute.STRUCTURED:
-        ans, citations = await _handle_structured_chat(
-            session=session,
-            patient_id=clean_patient_id,
-            routed_query=routed,
-            obs_service=obs_service,
-        )
-
-        async def structured_event_stream():
-            yield f"event: token\ndata: {json.dumps({'text': ans})}\n\n"
-            citations_payload = [c.model_dump(by_alias=True) for c in citations]
-            yield f"event: citations\ndata: {json.dumps({'citations': citations_payload})}\n\n"
-            yield f"event: done\ndata: {json.dumps({'answer': ans, 'citations': citations_payload, 'mode': 'STRUCTURED'})}\n\n"
-
-        return StreamingResponse(
-            structured_event_stream(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
-
-    # 2. CASE: HYBRID STREAM
-    if routed.route == MedicalQueryRoute.HYBRID:
-        observations = await obs_service.query_observations(
-            session=session,
-            patient_id=clean_patient_id,
-            observation_types=routed.target_observation_types or None,
-            from_date=routed.time_filter.from_date,
-            to_date=routed.time_filter.to_date,
-            limit=10,
-            sort_order="asc",
-        )
-        ready_chunks, ready_docs = await _retrieve_patient_ready_chunks(
-            patient_id=clean_patient_id,
-            query=effective_query,
-            limit=body.limit,
-            document_type=body.document_type,
-            session=session,
-            retriever=retriever,
-            context=_auth,
-        )
-
-        async def hybrid_event_stream():
-            if not observations and not ready_chunks:
-                yield f"event: token\ndata: {json.dumps({'text': MEDICAL_NO_RESULTS_ANSWER})}\n\n"
-                yield f"event: citations\ndata: {json.dumps({'citations': []})}\n\n"
-                yield f"event: done\ndata: {json.dumps({'answer': MEDICAL_NO_RESULTS_ANSWER, 'citations': [], 'mode': 'HYBRID'})}\n\n"
-                return
-
-            hybrid_items: list[Any] = []
-            for obs in observations:
-                doc_meta = ready_docs.get(obs.external_document_id)
-                hybrid_items.append(
-                    HybridSourceItem(
-                        source_type="OBSERVATION",
-                        observation=obs,
-                        doc_meta=doc_meta,
-                    )
-                )
-            for chunk in ready_chunks:
-                hybrid_items.append(
-                    HybridSourceItem(
-                        source_type="DOCUMENT_CHUNK",
-                        chunk=chunk,
-                        doc_meta=ready_docs.get(chunk.document_id),
-                    )
-                )
-
-            accumulated_tokens: list[str] = []
-            try:
-                token_iter, used_items = await answer_generator.generate_answer_stream(
-                    query=effective_query,
-                    chunks=hybrid_items,
-                    conversation_context=conversation_context,
-                    preamble=MEDICAL_HYBRID_SYSTEM_PREAMBLE,
-                    context_formatter=format_hybrid_context_chunks,
-                    no_results_answer=MEDICAL_NO_RESULTS_ANSWER,
-                )
-                async for token in token_iter:
-                    accumulated_tokens.append(token)
-                    yield f"event: token\ndata: {json.dumps({'text': token})}\n\n"
-
-                raw_answer = "".join(accumulated_tokens).strip()
-                if not raw_answer:
-                    raw_answer = MEDICAL_NO_RESULTS_ANSWER
-                    yield f"event: token\ndata: {json.dumps({'text': raw_answer})}\n\n"
-
-                clean_answer = sanitize_citations(raw_answer, max_source_id=len(used_items))
-                citations = _build_hybrid_citations(clean_answer, used_items, ready_docs)
-                citations_payload = [c.model_dump(by_alias=True) for c in citations]
-
-                yield f"event: citations\ndata: {json.dumps({'citations': citations_payload})}\n\n"
-                yield f"event: done\ndata: {json.dumps({'answer': clean_answer, 'citations': citations_payload, 'mode': 'HYBRID'})}\n\n"
-            except ProviderError:
-                raise
-            except Exception as exc:
-                logger.error("Medical chat hybrid streaming failed", error_type=type(exc).__name__)
-                yield f"event: error\ndata: {json.dumps({'message': 'Unable to generate answer'})}\n\n"
-
-        return StreamingResponse(
-            hybrid_event_stream(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
-
-    # 3. CASE: RAG STREAM
-    try:
-        ready_chunks, ready_docs = await _retrieve_patient_ready_chunks(
-            patient_id=clean_patient_id,
-            query=effective_query,
-            limit=body.limit,
-            document_type=body.document_type,
-            session=session,
-            retriever=retriever,
-            context=_auth,
-        )
-    except ProviderError:
-        raise
-    except Exception as exc:
-        logger.error("Medical chat stream retrieval failed", patient_id=clean_patient_id, error_type=type(exc).__name__)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Medical AI is temporarily unavailable.",
-        ) from exc
-
-    async def chat_event_stream():
-        if not ready_chunks:
-            yield f"event: token\ndata: {json.dumps({'text': MEDICAL_NO_RESULTS_ANSWER})}\n\n"
-            yield f"event: citations\ndata: {json.dumps({'citations': []})}\n\n"
-            yield f"event: done\ndata: {json.dumps({'answer': MEDICAL_NO_RESULTS_ANSWER, 'citations': [], 'mode': 'RAG'})}\n\n"
-            return
-
-        accumulated_tokens: list[str] = []
+    # Complete the same authorized JSON path before streaming any evidence/token.
+    result = await generate_medical_chat(body, _auth, session, retriever, query_rewriter, answer_generator, query_router, obs_service)
+    async def events():
+        access = current_query_access()
         try:
-            token_iter, used_chunks = await answer_generator.generate_answer_stream(
-                query=effective_query,
-                chunks=ready_chunks,
-                conversation_context=conversation_context,
-                preamble=MEDICAL_ANSWER_SYSTEM_PREAMBLE,
-                context_formatter=format_medical_context_chunks,
-                no_results_answer=MEDICAL_NO_RESULTS_ANSWER,
-            )
-            async for token in token_iter:
-                accumulated_tokens.append(token)
-                yield f"event: token\ndata: {json.dumps({'text': token})}\n\n"
-
-            raw_answer = "".join(accumulated_tokens).strip()
-            if not raw_answer:
-                try:
-                    fb_answer, fb_used = await answer_generator.generate_answer(
-                        query=effective_query,
-                        chunks=ready_chunks,
-                        conversation_context=conversation_context,
-                        preamble=MEDICAL_ANSWER_SYSTEM_PREAMBLE,
-                        context_formatter=format_medical_context_chunks,
-                        no_results_answer=MEDICAL_NO_RESULTS_ANSWER,
-                    )
-                    raw_answer = fb_answer.strip() if fb_answer else ""
-                    if raw_answer:
-                        yield f"event: token\ndata: {json.dumps({'text': raw_answer})}\n\n"
-                except ProviderError:
-                    raise
-                except Exception:
-                    pass
-
-            if not raw_answer:
-                raw_answer = MEDICAL_NO_RESULTS_ANSWER
-                yield f"event: token\ndata: {json.dumps({'text': raw_answer})}\n\n"
-
-            clean_answer = sanitize_citations(raw_answer, max_source_id=len(used_chunks))
-            citations = _build_citations(clean_answer, used_chunks, ready_docs)
-            citations_payload = [c.model_dump(by_alias=True) for c in citations]
-
-            yield f"event: citations\ndata: {json.dumps({'citations': citations_payload})}\n\n"
-            yield f"event: done\ndata: {json.dumps({'answer': clean_answer, 'citations': citations_payload, 'mode': 'RAG'})}\n\n"
-
-            duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-            logger.info(
-                "Medical chat stream completed successfully",
-                patient_id=clean_patient_id,
-                route_mode="RAG",
-                history_count=len(limited_history),
-                result_count=len(ready_chunks),
-                citation_count=len(citations),
-                duration_ms=duration_ms,
-            )
-        except ProviderError:
-            raise
-        except Exception as exc:
-            logger.error("Medical chat streaming failed", patient_id=clean_patient_id, error_type=type(exc).__name__)
-            yield f"event: error\ndata: {json.dumps({'message': 'Unable to generate answer'})}\n\n"
-
-    return StreamingResponse(
-        chat_event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+            if access is not None:
+                await access.validate()
+        except ProviderError as exc:
+            yield f"event: error\ndata: {json.dumps({'code': exc.code})}\n\n"
+            return
+        citations = [citation.model_dump(by_alias=True) for citation in result.citations]
+        yield f"event: metadata\ndata: {json.dumps({'retrievalQuery': result.retrieval_query, 'rewritten': result.rewritten, 'requiresHistory': result.requires_history, 'contextMessageIds': result.context_message_ids})}\n\n"
+        yield f"event: token\ndata: {json.dumps({'text': result.answer})}\n\n"
+        yield f"event: citations\ndata: {json.dumps({'citations': citations})}\n\n"
+        yield f"event: done\ndata: {json.dumps({'answer': result.answer, 'citations': citations, 'mode': result.answer_mode, 'messageId': result.message_id})}\n\n"
+    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

@@ -63,12 +63,12 @@ async def fixture(tmp_path, monkeypatch):
     async with sessions() as db, db.begin():
         await db.execute(delete(IngestionJob))  # Dedicated synthetic test DB only.
         db.add(User(id=owner_id, email=f"{owner_id}@example.invalid", name="Synthetic owner"))
-    value = SimpleNamespace(sessions=sessions, owner_id=owner_id, storage=storage, calls=calls, external_ids=[], client_ids=[])
+    value = SimpleNamespace(sessions=sessions, owner_id=owner_id, storage=storage, calls=calls, external_ids=[], client_ids=[], observation_ids=[])
     try:
         yield value
     finally:
         async with sessions() as db, db.begin():
-            await db.execute(delete(Conversation).where(Conversation.client_id == owner_id))
+            await db.execute(delete(Conversation).where((Conversation.client_id == owner_id) | (Conversation.external_reference == owner_id)))
             native_ids = select(Document.id).where(Document.user_id == owner_id)
             await db.execute(delete(DocumentChunk).where(DocumentChunk.document_id.in_(native_ids)))
             await db.execute(delete(DocumentChunk).where(DocumentChunk.client_id == owner_id))
@@ -76,6 +76,8 @@ async def fixture(tmp_path, monkeypatch):
                 await db.execute(delete(DocumentChunk).where(DocumentChunk.metadata_json["source_record_id"].as_string().in_(value.external_ids)))
                 await db.execute(delete(ExternalDocument).where(ExternalDocument.id.in_(value.external_ids)))
             await db.execute(delete(MedicalObservation).where(MedicalObservation.external_patient_id == owner_id))
+            if value.observation_ids:
+                await db.execute(delete(MedicalObservation).where(MedicalObservation.id.in_(value.observation_ids)))
             await db.execute(delete(ExternalDocument).where(ExternalDocument.source_system == owner_id))
             await db.execute(delete(IngestionJob))
             await db.execute(delete(DocumentEvidence).where((DocumentEvidence.tenant_id == owner_id) | (DocumentEvidence.client_id == owner_id) | (DocumentEvidence.subject_id == owner_id)))
