@@ -178,19 +178,19 @@ class HybridRetriever:
         except ProviderError:
             raise
         except DenseEmbeddingError as exc:
-            logger.exception(
+            logger.error(
                 "Dense query embedding failed during hybrid retrieval",
                 query_length=len(clean_query),
-                error=str(exc),
+                error_type=type(exc).__name__,
             )
             raise HybridRetrievalError(
                 f"Failed to generate dense query embedding: {exc}"
             ) from exc
         except Exception as exc:
-            logger.exception(
+            logger.error(
                 "Unexpected error during dense query embedding",
                 query_length=len(clean_query),
-                error=str(exc),
+                error_type=type(exc).__name__,
             )
             raise HybridRetrievalError(
                 f"Unexpected error during dense query embedding: {exc}"
@@ -209,19 +209,19 @@ class HybridRetriever:
         try:
             sparse_vector = self.sparse_embedder.embed_query(clean_query)
         except SparseEmbeddingError as exc:
-            logger.exception(
+            logger.error(
                 "Sparse query embedding failed during hybrid retrieval",
                 query_length=len(clean_query),
-                error=str(exc),
+                error_type=type(exc).__name__,
             )
             raise HybridRetrievalError(
                 f"Failed to generate sparse query embedding: {exc}"
             ) from exc
         except Exception as exc:
-            logger.exception(
+            logger.error(
                 "Unexpected error during sparse query embedding",
                 query_length=len(clean_query),
-                error=str(exc),
+                error_type=type(exc).__name__,
             )
             raise HybridRetrievalError(
                 f"Unexpected error during sparse query embedding: {exc}"
@@ -254,21 +254,21 @@ class HybridRetriever:
                 search_kwargs["filters"] = filters
             results = await self.vector_store.search_hybrid(**search_kwargs)
         except QdrantVectorStoreError as exc:
-            logger.exception(
+            logger.error(
                 "Qdrant hybrid search failed",
                 top_k=resolved_top_k,
                 candidate_k=resolved_candidate_k,
                 document_id=resolved_doc_id,
-                error=str(exc),
+                error_type=type(exc).__name__,
             )
             raise HybridRetrievalError(f"Hybrid vector search failed: {exc}") from exc
         except Exception as exc:
-            logger.exception(
+            logger.error(
                 "Unexpected error during hybrid search",
                 top_k=resolved_top_k,
                 candidate_k=resolved_candidate_k,
                 document_id=resolved_doc_id,
-                error=str(exc),
+                error_type=type(exc).__name__,
             )
             raise HybridRetrievalError(
                 f"Unexpected error during hybrid search: {exc}"

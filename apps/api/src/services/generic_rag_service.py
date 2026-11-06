@@ -8,6 +8,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.inference.policy import ProviderError
 from src.models.external_document import ExternalDocument
 from src.retrieval.reranked_retriever import RerankedHybridRetriever
 from src.schemas.search import ConversationMessage
@@ -152,8 +153,10 @@ class GenericRagService:
                     candidate_k=candidate_k,
                     filters=filters,
                 )
+            except ProviderError:
+                raise
             except Exception as exc:
-                logger.exception("Generic retrieval failed", error=str(exc))
+                logger.error("Generic retrieval failed", error_type=type(exc).__name__)
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Retrieval is temporarily unavailable.",
@@ -225,8 +228,10 @@ class GenericRagService:
                     candidate_k=candidate_k,
                     filters=filters,
                 )
+            except ProviderError:
+                raise
             except Exception as exc:
-                logger.exception("Retrieval failed during answer generation", error=str(exc))
+                logger.error("Retrieval failed during answer generation", error_type=type(exc).__name__)
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Retrieval is temporarily unavailable.",
@@ -262,8 +267,10 @@ class GenericRagService:
                     preamble=preamble,
                     no_results_answer=NO_RESULTS_ANSWER,
                 )
+            except ProviderError:
+                raise
             except Exception as exc:
-                logger.error("Answer generation LLM failed", error=str(exc))
+                logger.error("Answer generation LLM failed", error_type=type(exc).__name__)
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail="Answer generation is temporarily unavailable.",

@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import get_db
+from src.inference.policy import ProviderError
 from src.models.external_document import ExternalDocument
 from src.models.medical_observation import MedicalObservation
 from src.retrieval.reranked_retriever import RerankedHybridRetriever
@@ -22,6 +23,7 @@ from src.schemas.internal_medical_rag import (
 )
 from src.schemas.search import ConversationMessage
 from src.security.medical_context import bind_patient, get_medical_context
+from src.security.query_access import medical_query_inference
 from src.security.service_context import ServiceContext
 from src.services.answer_generator import (
     MEDICAL_ANSWER_SYSTEM_PREAMBLE,
@@ -50,7 +52,7 @@ from src.services.search_service import get_retriever
 
 logger = structlog.get_logger()
 
-router = APIRouter(prefix="/internal/medical-rag", tags=["Internal Medical RAG"])
+router = APIRouter(prefix="/internal/medical-rag", tags=["Internal Medical RAG"], dependencies=[Depends(medical_query_inference)])
 
 MEDICAL_HYBRID_SYSTEM_PREAMBLE = """You are a dependable, strictly grounded Medical Record Retrieval Assistant for Quick Clinic healthcare providers.
 Your goal is to answer the clinician's query accurately using BOTH the exact numeric values from the Structured Clinical Observations and narrative facts from the Document Records provided below.
@@ -449,6 +451,8 @@ async def generate_medical_answer(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Medical answer generation service is currently unavailable.",
         ) from exc
+    except ProviderError:
+        raise
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -609,8 +613,10 @@ async def generate_medical_chat(
                 context_formatter=format_hybrid_context_chunks,
                 no_results_answer=MEDICAL_NO_RESULTS_ANSWER,
             )
+        except ProviderError:
+            raise
         except Exception as exc:
-            logger.exception("Medical chat hybrid answer generation failed", error=str(exc))
+            logger.error("Medical chat hybrid answer generation failed", error_type=type(exc).__name__)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Medical AI is temporarily unavailable.",
@@ -648,8 +654,10 @@ async def generate_medical_chat(
             retriever=retriever,
             context=_auth,
         )
+    except ProviderError:
+        raise
     except Exception as exc:
-        logger.exception("Medical chat retrieval failed", patient_id=clean_patient_id, error=str(exc))
+        logger.error("Medical chat retrieval failed", patient_id=clean_patient_id, error_type=type(exc).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Medical AI is temporarily unavailable.",
@@ -684,6 +692,8 @@ async def generate_medical_chat(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Medical answer generation service is currently unavailable.",
         ) from exc
+    except ProviderError:
+        raise
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -860,8 +870,10 @@ async def stream_medical_chat(
 
                 yield f"event: citations\ndata: {json.dumps({'citations': citations_payload})}\n\n"
                 yield f"event: done\ndata: {json.dumps({'answer': clean_answer, 'citations': citations_payload, 'mode': 'HYBRID'})}\n\n"
+            except ProviderError:
+                raise
             except Exception as exc:
-                logger.exception("Medical chat hybrid streaming failed", error=str(exc))
+                logger.error("Medical chat hybrid streaming failed", error_type=type(exc).__name__)
                 yield f"event: error\ndata: {json.dumps({'message': 'Unable to generate answer'})}\n\n"
 
         return StreamingResponse(
@@ -885,8 +897,10 @@ async def stream_medical_chat(
             retriever=retriever,
             context=_auth,
         )
+    except ProviderError:
+        raise
     except Exception as exc:
-        logger.exception("Medical chat stream retrieval failed", patient_id=clean_patient_id, error=str(exc))
+        logger.error("Medical chat stream retrieval failed", patient_id=clean_patient_id, error_type=type(exc).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Medical AI is temporarily unavailable.",
@@ -927,6 +941,8 @@ async def stream_medical_chat(
                     raw_answer = fb_answer.strip() if fb_answer else ""
                     if raw_answer:
                         yield f"event: token\ndata: {json.dumps({'text': raw_answer})}\n\n"
+                except ProviderError:
+                    raise
                 except Exception:
                     pass
 
@@ -951,8 +967,10 @@ async def stream_medical_chat(
                 citation_count=len(citations),
                 duration_ms=duration_ms,
             )
+        except ProviderError:
+            raise
         except Exception as exc:
-            logger.exception("Medical chat streaming failed", patient_id=clean_patient_id, error=str(exc))
+            logger.error("Medical chat streaming failed", patient_id=clean_patient_id, error_type=type(exc).__name__)
             yield f"event: error\ndata: {json.dumps({'message': 'Unable to generate answer'})}\n\n"
 
     return StreamingResponse(

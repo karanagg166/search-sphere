@@ -449,3 +449,44 @@ atomic crop publication, orphan restart recovery, live leases, reindex and delet
 Detailed behavior and limits are in `docs/HOSTED_LAYOUT_EVIDENCE.md`. Exact chart
 comparisons require reviewed values and remain unavailable; broader model accuracy,
 full query guardrails, versioned cutover, and production journeys remain open.
+
+### Query provider and candidate authorization foundation
+
+Native, versioned, conversation-answer, and medical query routes now establish a
+request-scoped inference context from authenticated identity and PostgreSQL data
+policy. Native conversation ownership is checked before starting SSE. Fresh sessions
+recheck user/client activity, key rotation, allowed tenant/operation, selected resource
+ownership, and policy before and after every hosted request.
+
+Dense/lexical SQL requires the pinned Cohere embedding version and current authorized
+PostgreSQL document metadata. MiniLM vectors are excluded despite their matching 384
+dimensions. Before reranking, candidate IDs are re-fetched under the same scope;
+content/metadata are rebuilt from authoritative rows and unknown/unauthorized points
+are dropped. Active evidence hashes and permissions are revalidated for later calls,
+so deletion, replacement, revocation, or classification changes cannot reuse stale
+provider context. Policy resolution is batched across candidate scopes. Retrieval is
+bounded to 32 candidates and at most 20 final results; the default remains five.
+
+Provider failures keep their explicit timeout/quota/approval codes through application
+layers. Query/rewrite/generation/retrieval logs record lengths and error types instead
+of query text, model output, or exception contents. Real PostgreSQL regressions cover
+old-model/native-external collisions, malicious candidate text, current collection
+scope, document/policy/client revocation, and revocation while inference is running.
+
+This is the authorization foundation. Selective authorized history, validated intent
+routing, citation support checks before all SSE output, compact memory, caches,
+versioned replacement, and all live journeys remain open. No new backend rollout is
+claimed by these merged foundations.
+
+Recent merged implementation/CI evidence (backend production remains 8288c9d until
+pinned rollout and live verification):
+
+| PR | Merge revision | Passing PR workflow |
+|---|---|---|
+| [#38 ingestion runtime](https://github.com/karanagg166/search-sphere/pull/38) | a0720e2ed54fb9bb23e492b34bb460ec5893392e | [42215194099](https://github.com/karanagg166/search-sphere/actions/runs/42215194099) |
+| [#39 release smoke](https://github.com/karanagg166/search-sphere/pull/39) | 4f1cfb9fa299898ce0570d282db4dd3cc910898a | [42220757632](https://github.com/karanagg166/search-sphere/actions/runs/42220757632) |
+| [#40 durable deletion](https://github.com/karanagg166/search-sphere/pull/40) | 420f041cf2ba310e6761a09c184d03d8672c8a49 | [42221838170](https://github.com/karanagg166/search-sphere/actions/runs/42221838170) |
+| [#41 layout provenance](https://github.com/karanagg166/search-sphere/pull/41) | 93e89b0ba5b5d24cb31a298eef944617ee2f29f8 | [42223484421](https://github.com/karanagg166/search-sphere/actions/runs/42223484421) |
+| [#42 hosted token limits](https://github.com/karanagg166/search-sphere/pull/42) | 77fba3f5d067559457382066badc444230339f27 | [42226394219](https://github.com/karanagg166/search-sphere/actions/runs/42226394219) |
+| [#43 native tables](https://github.com/karanagg166/search-sphere/pull/43) | 8e28313859071f0192157057fe3072a01e186141 | [42227369092](https://github.com/karanagg166/search-sphere/actions/runs/42227369092) |
+| [#44 hosted layout/crops](https://github.com/karanagg166/search-sphere/pull/44) | 7babae2cad6dc67c26067a0d3d2ba6845ad71c0d | [42229574288](https://github.com/karanagg166/search-sphere/actions/runs/42229574288) |

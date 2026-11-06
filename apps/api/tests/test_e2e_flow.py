@@ -413,10 +413,7 @@ async def test_strict_multi_tenant_isolation(tmp_path):
                 json={"query": "Intruder stream"},
                 headers=headers_a,
             )
-            assert stream_in_conv_resp.status_code == 200
-            # SSE yields an error event for unauthorized conversation
-            assert "event: error" in stream_in_conv_resp.text
-            assert "Conversation not found" in stream_in_conv_resp.text
+            assert stream_in_conv_resp.status_code == 404
 
             # H) User A cannot submit feedback for User B's conversation message
             feedback_resp = await client.post(

@@ -208,8 +208,8 @@ class CrossEncoderReranker:
             score_duration_ms = (time.perf_counter() - start_score) * 1000
             logger.warning(
                 "Cross-encoder scoring failed or model unavailable; falling back to RRF retriever ranking",
-                query=clean_query,
-                error=str(exc),
+                query_length=len(clean_query),
+                error_type=type(exc).__name__,
             )
 
             def _get_fallback_score(cand_item: Any) -> float:
@@ -545,11 +545,11 @@ class CrossEncoderReranker:
         except (RerankingError, ProviderError):
             raise
         except Exception as exc:
-            logger.exception(
+            logger.error(
                 "Cross-encoder scoring inference failed",
                 model_name=self.model_name,
                 pair_count=len(pairs),
-                error=str(exc),
+                error_type=type(exc).__name__,
             )
             raise RerankingError(
                 f"Failed to score candidates with cross-encoder model "

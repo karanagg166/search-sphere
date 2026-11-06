@@ -104,7 +104,7 @@ class CohereQueryRewriteProvider(BaseQueryRewriteProvider):
         ):
             logger.debug(
                 "Cohere API key not configured or is placeholder; skipping LLM rewrite",
-                query=clean_query,
+                query_length=len(clean_query),
             )
             return RewriteResult(
                 original_query=clean_query,
@@ -145,8 +145,8 @@ class CohereQueryRewriteProvider(BaseQueryRewriteProvider):
             if not data or not isinstance(data, dict):
                 logger.warning(
                     "Cohere returned invalid or non-JSON response for query rewrite",
-                    raw_text=raw_text[:200] if raw_text else "",
-                    query=clean_query,
+                    raw_text_length=len(raw_text[:200] if raw_text else ""),
+                    query_length=len(clean_query),
                 )
                 return RewriteResult(
                     original_query=clean_query,
@@ -171,8 +171,8 @@ class CohereQueryRewriteProvider(BaseQueryRewriteProvider):
             if len(candidate_query.split()) > 35:
                 logger.warning(
                     "Rewritten query exceeded word count limit; falling back to original query",
-                    candidate_query=candidate_query,
-                    query=clean_query,
+                    candidate_query_length=len(candidate_query),
+                    query_length=len(clean_query),
                 )
                 return RewriteResult(
                     original_query=clean_query,
@@ -203,7 +203,7 @@ class CohereQueryRewriteProvider(BaseQueryRewriteProvider):
             logger.warning(
                 "Cohere query rewrite timed out; falling back to original query",
                 timeout=self.timeout_seconds,
-                query=clean_query,
+                query_length=len(clean_query),
             )
             return RewriteResult(
                 original_query=clean_query,
@@ -214,8 +214,8 @@ class CohereQueryRewriteProvider(BaseQueryRewriteProvider):
         except Exception as exc:
             logger.warning(
                 "Cohere query rewrite failed; falling back to original query",
-                error=str(exc),
-                query=clean_query,
+                error_type=type(exc).__name__,
+                query_length=len(clean_query),
             )
             return RewriteResult(
                 original_query=clean_query,
@@ -279,7 +279,7 @@ class QueryRewriter:
         if not self.enabled:
             logger.debug(
                 "Query rewriting disabled by configuration",
-                query=clean_query,
+                query_length=len(clean_query),
             )
             return RewriteResult(
                 original_query=clean_query,
@@ -319,7 +319,7 @@ class QueryRewriter:
         if not trimmed_context:
             logger.debug(
                 "No conversation context available; preserving original query",
-                query=clean_query,
+                query_length=len(clean_query),
             )
             return RewriteResult(
                 original_query=clean_query,
@@ -353,8 +353,8 @@ class QueryRewriter:
 
             logger.info(
                 "Query reformulation completed",
-                original_query=clean_query,
-                retrieval_query=result.retrieval_query,
+                original_query_length=len(clean_query),
+                retrieval_query_length=len(result.retrieval_query),
                 rewritten=result.rewritten,
                 reason=result.reason,
             )
@@ -363,10 +363,10 @@ class QueryRewriter:
         except ProviderError:
             raise
         except Exception as exc:
-            logger.exception(
+            logger.error(
                 "Unexpected error during query rewriting; falling back to original query",
-                error=str(exc),
-                query=clean_query,
+                error_type=type(exc).__name__,
+                query_length=len(clean_query),
             )
             return RewriteResult(
                 original_query=clean_query,
