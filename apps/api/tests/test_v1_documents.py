@@ -19,7 +19,6 @@ def mock_storage(tmp_path):
 
 @pytest.mark.asyncio
 async def test_v1_document_lifecycle(mock_storage, monkeypatch, admin_auth_header):
-    monkeypatch.setattr("src.services.generic_document_service.enqueue_generic_document", lambda *args, **kwargs: True)
     monkeypatch.setattr("src.routers.v1.documents.QdrantVectorStore", lambda: AsyncMock())
     """Test full document workflow: upload, registration, status check, signed-url, and deletion."""
     app.dependency_overrides[get_object_storage] = lambda: mock_storage

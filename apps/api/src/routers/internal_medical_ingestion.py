@@ -15,7 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import get_db
 from src.models.external_document import ExternalDocument
+from src.models.ingestion_job import IngestionJob
 from src.models.medical_observation import MedicalObservation
+from src.repositories.external_registration import register_external_document
+from src.repositories.ingestion_queue import ingestion_queue
 from src.routers.internal_medical_documents import (
     ALLOWED_MIME_TYPES,
     MAX_MEDICAL_DOC_SIZE_BYTES,
@@ -35,7 +38,7 @@ from src.security.medical_context import (
     validate_storage_scope,
 )
 from src.security.service_context import ServiceContext
-from src.tasks.document_tasks import enqueue_medical_document
+from src.services.ingestion_progress import attach_job_progress
 from src.vector_store import get_vector_store
 
 # Vector store provider; defaults to get_vector_store factory,
@@ -51,12 +54,13 @@ def parse_report_date(date_val: datetime | str | None) -> datetime | None:
     if not date_val:
         return None
     if isinstance(date_val, datetime):
-        return date_val
+        return date_val if date_val.tzinfo else date_val.replace(tzinfo=UTC)
     try:
         clean_str = date_val.strip()
         if clean_str.endswith("Z"):
             clean_str = clean_str[:-1] + "+00:00"
-        return datetime.fromisoformat(clean_str)
+        parsed = datetime.fromisoformat(clean_str)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
     except Exception:
         return None
 
@@ -78,26 +82,41 @@ async def recover_stale_documents(
     cutoff = datetime.now(UTC) - timedelta(minutes=threshold_minutes)
     stmt = select(ExternalDocument).where(
         ExternalDocument.source_system == "quick_clinic",
-            ExternalDocument.tenant_id == _auth.tenant_id,
+        ExternalDocument.tenant_id == _auth.tenant_id,
         ExternalDocument.status == "PROCESSING",
         ExternalDocument.updated_at < cutoff,
     )
+    if _auth.subject_id:
+        stmt = stmt.where(ExternalDocument.owner_subject_id == _auth.subject_id)
+    if _auth.collection_id:
+        stmt = stmt.where(ExternalDocument.collection_id == _auth.collection_id)
     result = await session.execute(stmt)
     stale_docs = list(result.scalars().all())
     recovered_ids: list[str] = []
 
-    req_id = getattr(request.state, "request_id", None)
     for doc in stale_docs:
+        job = (await session.execute(select(IngestionJob).where(
+            IngestionJob.document_kind == "external", IngestionJob.document_id == doc.id,
+        ).with_for_update())).scalar_one_or_none()
+        if job and job.status == "RUNNING" and job.lease_expires_at:
+            expiry = job.lease_expires_at if job.lease_expires_at.tzinfo else job.lease_expires_at.replace(tzinfo=UTC)
+            if expiry > datetime.now(UTC):
+                continue
         recovered_ids.append(doc.external_document_id)
         if action == "fail":
-            doc.status = "FAILED"
-            doc.processing_error = f"Processing timed out after {threshold_minutes} minutes without completion"
+            job = job or await ingestion_queue.enqueue(session, "external", doc.id)
+            job.status, job.stage, job.error_code = "FAILED", "failed", "lease_expired"
+            job.lease_token = job.lease_expires_at = None
+            await ingestion_queue.mirror_document_state(session, job)
         elif action == "requeue":
             doc.status = "QUEUED"
             doc.processing_error = None
-            enqueue_medical_document(doc.id, request_id=req_id)
+            await ingestion_queue.enqueue(session, "external", doc.id, reset=True)
 
     await session.commit()
+    from src.services.ingestion_worker import ingestion_worker
+
+    ingestion_worker.notify_new_job()
 
     logger.info(
         "Stale medical processing recovery executed",
@@ -173,79 +192,25 @@ async def ingest_medical_document(
     clean_doc_type = body.document_type.strip().upper()
     parsed_report_date = parse_report_date(body.report_date)
 
-    # Idempotent upsert check on (source_system, external_document_id)
-    result = await session.execute(
-        select(ExternalDocument).where(
-            ExternalDocument.source_system == "quick_clinic",
-            ExternalDocument.tenant_id == _auth.tenant_id,
-            ExternalDocument.external_document_id == clean_document_id,
-        )
-    )
-    existing_record = result.scalar_one_or_none()
-
-    if existing_record:
-        if existing_record.external_patient_id != clean_patient_id:
-            raise HTTPException(status_code=409, detail="Document identity is already assigned to another subject.")
-        existing_record.tenant_id = _auth.tenant_id
-        existing_record.collection_id = _auth.collection_id
-        existing_record.owner_subject_id = clean_patient_id
-        existing_record.external_patient_id = clean_patient_id
-        existing_record.storage_path = storage_path
-        existing_record.file_name = clean_file_name
-        existing_record.mime_type = mime_type
-        existing_record.file_size = body.file_size
-        existing_record.document_type = clean_doc_type
-        existing_record.report_date = parsed_report_date
-        existing_record.status = "QUEUED"
-        existing_record.processing_error = None
-        logger.info(
-            "Reusing existing external document record for re-ingestion",
-            document_id=clean_document_id,
-            patient_id=clean_patient_id,
-        )
-    else:
-        new_record = ExternalDocument(
-            source_system="quick_clinic",
-            tenant_id=_auth.tenant_id,
-            collection_id=_auth.collection_id,
-            owner_subject_id=clean_patient_id,
-            external_document_id=clean_document_id,
-            external_patient_id=clean_patient_id,
-            storage_path=storage_path,
-            file_name=clean_file_name,
-            mime_type=mime_type,
-            file_size=body.file_size,
-            document_type=clean_doc_type,
-            report_date=parsed_report_date,
-            status="QUEUED",
-        )
-        session.add(new_record)
-        logger.info(
-            "Created new external document record for ingestion",
-            document_id=clean_document_id,
-            patient_id=clean_patient_id,
-        )
-
-    record = existing_record or new_record
+    record, _ = await register_external_document(session, {
+        "source_system": "quick_clinic", "tenant_id": _auth.tenant_id,
+        "collection_id": _auth.collection_id, "owner_subject_id": clean_patient_id,
+        "external_document_id": clean_document_id, "external_patient_id": clean_patient_id,
+        "storage_path": storage_path, "file_name": clean_file_name, "mime_type": mime_type,
+        "file_size": body.file_size, "document_type": clean_doc_type, "report_date": parsed_report_date,
+    }, reindex=body.reindex)
     await session.commit()
     await session.refresh(record)
+    from src.services.ingestion_worker import ingestion_worker
 
-    # Enqueue background processing task via RabbitMQ/Dramatiq
-    request_id = getattr(request.state, "request_id", None)
-    enqueued = enqueue_medical_document(record.id, request_id=request_id)
-    if not enqueued:
-        record.status = "FAILED"
-        record.processing_error = "Processing queue is unavailable; retry ingestion."
-        await session.commit()
-        logger.warning(
-            "Medical document queued in database but worker queue unavailable",
-            document_id=clean_document_id,
-        )
+    ingestion_worker.notify_new_job()
 
+    await attach_job_progress(session, "external", [record])
     response.status_code = status.HTTP_202_ACCEPTED
     return MedicalDocumentIngestResponse(
         documentId=clean_document_id,
         status=record.status,
+        job=record.job,
     )
 
 
@@ -279,9 +244,11 @@ async def get_medical_document_status(
         )
 
     bind_patient(_auth, record.external_patient_id)
+    await attach_job_progress(session, "external", [record])
     return MedicalDocumentStatusResponse(
         documentId=record.external_document_id,
         status=record.status,
+        job=record.job,
         processedAt=record.processed_at,
         error=record.processing_error,
     )

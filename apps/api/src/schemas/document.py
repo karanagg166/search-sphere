@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
+from src.schemas.ingestion import IngestionProgress
+
 
 class DocumentResponse(BaseModel):
     id: str
@@ -13,6 +15,7 @@ class DocumentResponse(BaseModel):
     mime_type: str
     status: str
     chunk_count: int | None = None
+    job: IngestionProgress | None = None
     created_at: datetime
     updated_at: datetime
 

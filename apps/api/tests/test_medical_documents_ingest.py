@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
@@ -156,78 +157,85 @@ async def test_ingest_success_and_idempotency():
     storage_path = f"medical-documents/{patient_id}/{doc_id}/blood_test.pdf"
 
     transport = ASGITransport(app=app)
-    with patch("src.routers.internal_medical_ingestion.enqueue_medical_document", return_value=True) as mock_enqueue:
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            # 1. First ingest call -> creates QUEUED record and enqueues task
-            resp1 = await client.post(
-                f"/internal/medical-documents/{doc_id}/ingest",
-                headers=VALID_AUTH_HEADER,
-                json={
-                    "patientId": patient_id,
-                    "storagePath": storage_path,
-                    "fileName": "blood_test.pdf",
-                    "mimeType": "application/pdf",
-                    "fileSize": 123456,
-                    "documentType": "LAB_REPORT",
-                    "reportDate": "2026-10-01T00:00:00.000Z",
-                },
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. First ingest call -> creates QUEUED record and enqueues task
+        resp1 = await client.post(
+            f"/internal/medical-documents/{doc_id}/ingest",
+            headers=VALID_AUTH_HEADER,
+            json={
+                "patientId": patient_id,
+                "storagePath": storage_path,
+                "fileName": "blood_test.pdf",
+                "mimeType": "application/pdf",
+                "fileSize": 123456,
+                "documentType": "LAB_REPORT",
+                "reportDate": "2026-10-01T00:00:00.000Z",
+            },
+        )
+        assert resp1.status_code == 202
+        data1 = resp1.json()
+        assert data1["documentId"] == doc_id
+        assert data1["status"] == "QUEUED"
+        assert data1["job"]["status"] == "QUEUED"
+        assert data1["job"]["attempts"] == 0
+        duplicate = await client.post(
+            f"/internal/medical-documents/{doc_id}/ingest", headers=VALID_AUTH_HEADER,
+            json=json.loads(resp1.request.content),
+        )
+        assert duplicate.status_code == 202
+        assert duplicate.json()["job"]["generation"] == 1
+
+        # Check DB record
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ExternalDocument).where(
+                    ExternalDocument.source_system == "quick_clinic",
+                    ExternalDocument.external_document_id == doc_id,
+                )
             )
-            assert resp1.status_code == 202
-            data1 = resp1.json()
-            assert data1["documentId"] == doc_id
-            assert data1["status"] == "QUEUED"
-            mock_enqueue.assert_called_once()
-            queued_record_id = mock_enqueue.call_args.args[0]
+            record = result.scalar_one_or_none()
+            assert record is not None
+            queued_record_id = record.id
             assert queued_record_id != doc_id
+            assert record.external_patient_id == patient_id
+            assert record.status == "QUEUED"
+            assert record.document_type == "LAB_REPORT"
 
-            # Check DB record
-            async with AsyncSessionLocal() as session:
-                result = await session.execute(
-                    select(ExternalDocument).where(
-                        ExternalDocument.source_system == "quick_clinic",
-                        ExternalDocument.external_document_id == doc_id,
-                    )
+        # 2. Explicit reindex updates the same identity with a new job generation.
+        resp2 = await client.post(
+            f"/internal/medical-documents/{doc_id}/ingest",
+            headers=VALID_AUTH_HEADER,
+            json={
+                "patientId": patient_id,
+                "storagePath": storage_path,
+                "forceReindex": True,
+                "fileName": "blood_test_v2.pdf",
+                "mimeType": "application/pdf",
+                "fileSize": 234567,
+                "documentType": "DISCHARGE_SUMMARY",
+                "reportDate": "2026-10-02T00:00:00.000Z",
+            },
+        )
+        assert resp2.status_code == 202
+        data2 = resp2.json()
+        assert data2["documentId"] == doc_id
+        assert data2["status"] == "QUEUED"
+        assert data2["job"]["generation"] == 2
+
+        # Verify no duplicates created, record was updated
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ExternalDocument).where(
+                    ExternalDocument.source_system == "quick_clinic",
+                    ExternalDocument.external_document_id == doc_id,
                 )
-                record = result.scalar_one_or_none()
-                assert record is not None
-                assert record.id == queued_record_id
-                assert record.external_patient_id == patient_id
-                assert record.status == "QUEUED"
-                assert record.document_type == "LAB_REPORT"
-
-            # 2. Second ingest call (idempotent re-ingest)
-            resp2 = await client.post(
-                f"/internal/medical-documents/{doc_id}/ingest",
-                headers=VALID_AUTH_HEADER,
-                json={
-                    "patientId": patient_id,
-                    "storagePath": storage_path,
-                    "fileName": "blood_test_v2.pdf",
-                    "mimeType": "application/pdf",
-                    "fileSize": 234567,
-                    "documentType": "DISCHARGE_SUMMARY",
-                    "reportDate": "2026-10-02T00:00:00.000Z",
-                },
             )
-            assert resp2.status_code == 202
-            data2 = resp2.json()
-            assert data2["documentId"] == doc_id
-            assert data2["status"] == "QUEUED"
-
-            # Verify no duplicates created, record was updated
-            async with AsyncSessionLocal() as session:
-                result = await session.execute(
-                    select(ExternalDocument).where(
-                        ExternalDocument.source_system == "quick_clinic",
-                        ExternalDocument.external_document_id == doc_id,
-                    )
-                )
-                records = result.scalars().all()
-                assert len(records) == 1
-                updated = records[0]
-                assert updated.file_name == "blood_test_v2.pdf"
-                assert updated.document_type == "DISCHARGE_SUMMARY"
-                assert updated.file_size == 234567
+            records = result.scalars().all()
+            assert len(records) == 1
+            updated = records[0]
+            assert updated.file_name == "blood_test_v2.pdf"
+            assert updated.document_type == "DISCHARGE_SUMMARY"
+            assert updated.file_size == 234567
 
 
 @pytest.mark.asyncio
@@ -371,54 +379,52 @@ async def test_stale_documents_recovery():
         await session.commit()
 
     transport = ASGITransport(app=app)
-    with patch("src.routers.internal_medical_ingestion.enqueue_medical_document", return_value=True) as mock_enqueue:
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            # 1. Recover with action=fail
-            resp1 = await client.post(
-                "/internal/medical-documents/stale/recover?thresholdMinutes=15&action=fail",
-                headers=VALID_AUTH_HEADER,
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Recover with action=fail
+        resp1 = await client.post(
+            "/internal/medical-documents/stale/recover?thresholdMinutes=15&action=fail",
+            headers=VALID_AUTH_HEADER,
+        )
+        assert resp1.status_code == 200
+        data1 = resp1.json()
+        assert data1["staleCount"] >= 2
+        assert doc_id1 in data1["recoveredDocumentIds"]
+        assert doc_id2 in data1["recoveredDocumentIds"]
+        assert data1["action"] == "fail"
+
+        # Verify status in database changed to FAILED
+        async with AsyncSessionLocal() as session:
+            res1 = await session.execute(
+                select(ExternalDocument).where(ExternalDocument.external_document_id == doc_id1)
             )
-            assert resp1.status_code == 200
-            data1 = resp1.json()
-            assert data1["staleCount"] >= 2
-            assert doc_id1 in data1["recoveredDocumentIds"]
-            assert doc_id2 in data1["recoveredDocumentIds"]
-            assert data1["action"] == "fail"
+            d1 = res1.scalar_one()
+            assert d1.status == "FAILED"
+            assert d1.processing_error == "lease_expired"
 
-            # Verify status in database changed to FAILED
-            async with AsyncSessionLocal() as session:
-                res1 = await session.execute(
-                    select(ExternalDocument).where(ExternalDocument.external_document_id == doc_id1)
-                )
-                d1 = res1.scalar_one()
-                assert d1.status == "FAILED"
-                assert "timed out" in d1.processing_error
-
-            # 2. Reset doc2 to PROCESSING with old time and recover with action=requeue
-            async with AsyncSessionLocal() as session:
-                res2 = await session.execute(
-                    select(ExternalDocument).where(ExternalDocument.external_document_id == doc_id2)
-                )
-                d2 = res2.scalar_one()
-                d2.status = "PROCESSING"
-                d2.updated_at = old_time
-                await session.commit()
-
-            resp2 = await client.post(
-                "/internal/medical-documents/stale/recover?thresholdMinutes=15&action=requeue",
-                headers=VALID_AUTH_HEADER,
+        # 2. Reset doc2 to PROCESSING with old time and recover with action=requeue
+        async with AsyncSessionLocal() as session:
+            res2 = await session.execute(
+                select(ExternalDocument).where(ExternalDocument.external_document_id == doc_id2)
             )
-            assert resp2.status_code == 200
-            data2 = resp2.json()
-            assert doc_id2 in data2["recoveredDocumentIds"]
-            assert data2["action"] == "requeue"
-            mock_enqueue.assert_called_once()
-            assert mock_enqueue.call_args.args[0] != doc_id2
+            d2 = res2.scalar_one()
+            d2.status = "PROCESSING"
+            d2.updated_at = old_time
+            await session.commit()
 
-            async with AsyncSessionLocal() as session:
-                res2 = await session.execute(
-                    select(ExternalDocument).where(ExternalDocument.external_document_id == doc_id2)
-                )
-                d2_final = res2.scalar_one()
-                assert d2_final.status == "QUEUED"
+        resp2 = await client.post(
+            "/internal/medical-documents/stale/recover?thresholdMinutes=15&action=requeue",
+            headers=VALID_AUTH_HEADER,
+        )
+        assert resp2.status_code == 200
+        data2 = resp2.json()
+        assert doc_id2 in data2["recoveredDocumentIds"]
+        assert data2["action"] == "requeue"
+        assert data2["action"] == "requeue"
+
+        async with AsyncSessionLocal() as session:
+            res2 = await session.execute(
+                select(ExternalDocument).where(ExternalDocument.external_document_id == doc_id2)
+            )
+            d2_final = res2.scalar_one()
+            assert d2_final.status == "QUEUED"
 

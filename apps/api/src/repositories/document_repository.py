@@ -20,6 +20,7 @@ class DocumentRepository:
         file_size: int,
         mime_type: str = "application/pdf",
         status: str = "uploaded",
+        commit: bool = True,
     ) -> Document:
         doc = Document(
             id=document_id,
@@ -32,8 +33,10 @@ class DocumentRepository:
             status=status,
         )
         self.db.add(doc)
-        await self.db.commit()
-        await self.db.refresh(doc)
+        await self.db.flush()
+        if commit:
+            await self.db.commit()
+            await self.db.refresh(doc)
         return doc
 
     async def get_by_id(

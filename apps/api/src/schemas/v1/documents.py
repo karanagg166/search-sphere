@@ -3,6 +3,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.schemas.ingestion import IngestionProgress
+
 
 class DocumentUploadResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -14,6 +16,7 @@ class DocumentUploadResponse(BaseModel):
 
 class DocumentRegisterRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
+    reindex: bool = False
 
     external_document_id: str = Field(
         ...,
@@ -82,6 +85,7 @@ class DocumentResponse(BaseModel):
     status: str
     chunk_count: int | None = None
     processing_error: str | None = None
+    job: IngestionProgress | None = None
     metadata_json: dict[str, Any] | None = Field(None, serialization_alias="metadata")
     created_at: datetime
     updated_at: datetime

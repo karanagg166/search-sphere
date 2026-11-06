@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    RUN_INGESTION_WORKER: bool = True
     ENVIRONMENT: str = "development"
     LOG_LEVEL: str = "INFO"
     COHERE_TRIAL_KEY_SHA256: str = ""
