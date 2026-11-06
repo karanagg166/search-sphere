@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 
 import structlog
 from fastapi import HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.inference.policy import ProviderError
 from src.models.user import User
@@ -16,10 +16,12 @@ from src.schemas.conversation import (
     ConversationSummaryResponse,
     MessageResponse,
 )
-from src.security.query_access import current_query_access
+from src.security.data_screening import contains_secrets
+from src.security.query_access import QueryAccess, current_query_access
 from src.security.response_stream import authorized_frames
-from src.services.answer_generator import NO_RESULTS_ANSWER
+from src.security.service_context import ServiceContext
 from src.services.answer_service import AnswerService
+from src.services.conversation_context import message_evidence
 from src.services.delegated_conversations import append_turn
 
 logger = structlog.get_logger()
@@ -96,6 +98,18 @@ class ConversationService:
                 detail="Conversation not found.",
             )
 
+        access=QueryAccess(async_sessionmaker(self.db.bind,expire_on_commit=False),
+            ServiceContext("search_sphere",user_id,subject_id=user_id,user_id=user_id,is_service_client=False),
+            "conversations:read",conversation_id=conversation_id)
+        available={}
+        for message in conv.messages or []:
+            references=await message_evidence(self.db,access,message) if message.role=="assistant" else {}
+            valid=references is not None and not contains_secrets(message.content)
+            valid=valid and not contains_secrets(json.dumps(message.sources or [],ensure_ascii=False))
+            available[message.id]=valid
+            if valid:
+                access.evidence.update(references)
+        await access.validate()
         messages = [
             MessageResponse(
                 id=m.id,
@@ -103,15 +117,15 @@ class ConversationService:
                 role=m.role,
                 content=(
                     m.content
-                    if (m.content and m.content.strip())
-                    else NO_RESULTS_ANSWER
+                    if available[m.id] and (m.content and m.content.strip())
+                    else "This message is unavailable because its source access or version changed."
                 ),
-                original_query=m.original_query,
-                retrieval_query=m.retrieval_query,
-                rewritten=m.rewritten,
+                original_query=m.original_query if available[m.id] else None,
+                retrieval_query=m.retrieval_query if available[m.id] else None,
+                rewritten=m.rewritten if available[m.id] else False,
                 sources=[
                     AnswerSource(**s)
-                    for s in (m.sources or [])
+                    for s in ((m.sources or []) if available[m.id] else [])
                     if isinstance(s, dict)
                 ],
                 created_at=m.created_at,

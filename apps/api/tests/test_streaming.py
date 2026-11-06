@@ -9,6 +9,7 @@ from httpx import ASGITransport, AsyncClient
 from src.db import AsyncSessionLocal
 from src.main import app
 from src.models.document import Document
+from src.models.document_chunk import DocumentChunk
 from src.processing.models.search import RerankedSearchResult
 from src.retrieval.reranked_retriever import RerankedHybridRetriever
 from src.schemas.search import RewriteResult
@@ -124,6 +125,11 @@ async def test_stream_answer_events_order():
             score=9.1,
             rank=1,
         )
+        async with AsyncSessionLocal() as db:
+            db.add(DocumentChunk(point_id=str(uuid.uuid4()),document_id=doc.id,chunk_index=mock_chunk.chunk_index,
+                content=mock_chunk.content,embedding=[1.0]+[0.0]*383,
+                metadata_json={"embedding_model":"embed-english-light-v3.0","source_record_id":doc.id}))
+            await db.commit()
         mock_retriever = AsyncMock(spec=RerankedHybridRetriever)
         mock_retriever.search = AsyncMock(return_value=[mock_chunk])
 
@@ -198,6 +204,11 @@ async def test_stream_in_conversation_persists_final_answer():
             score=8.0,
             rank=1,
         )
+        async with AsyncSessionLocal() as db:
+            db.add(DocumentChunk(point_id=str(uuid.uuid4()),document_id=doc.id,chunk_index=mock_chunk.chunk_index,
+                content=mock_chunk.content,embedding=[1.0]+[0.0]*383,
+                metadata_json={"embedding_model":"embed-english-light-v3.0","source_record_id":doc.id}))
+            await db.commit()
         mock_retriever = AsyncMock(spec=RerankedHybridRetriever)
         mock_retriever.search = AsyncMock(return_value=[mock_chunk])
 
@@ -272,6 +283,11 @@ async def test_stream_error_does_not_persist_partial_assistant_message():
             score=8.0,
             rank=1,
         )
+        async with AsyncSessionLocal() as db:
+            db.add(DocumentChunk(point_id=str(uuid.uuid4()),document_id=doc.id,chunk_index=mock_chunk.chunk_index,
+                content=mock_chunk.content,embedding=[1.0]+[0.0]*383,
+                metadata_json={"embedding_model":"embed-english-light-v3.0","source_record_id":doc.id}))
+            await db.commit()
         mock_retriever = AsyncMock(spec=RerankedHybridRetriever)
         mock_retriever.search = AsyncMock(return_value=[mock_chunk])
 
@@ -332,19 +348,16 @@ async def test_provider_type_error_is_never_retried_as_a_compatibility_fallback(
 
 
 @pytest.mark.asyncio
-async def test_empty_provider_stream_never_triggers_direct_chat():
+async def test_empty_provider_response_never_triggers_second_generation():
     from types import SimpleNamespace
 
     from src.services.answer_generator import (
-        AnswerGenerationUnavailableError,
+        AnswerGenerationError,
         CohereAnswerProvider,
     )
-    async def no_tokens(**kwargs):
-        if False:
-            yield None
-    client=SimpleNamespace(chat_stream=no_tokens,chat=AsyncMock(side_effect=AssertionError("No second generation")))
+    client=SimpleNamespace(chat=AsyncMock(return_value=SimpleNamespace(text="")))
     provider=CohereAnswerProvider(api_key="synthetic-key",client=client)
     chunk=SimpleNamespace(document_id="synthetic",content="PUBLIC SYNTHETIC",start_page=1,end_page=1)
-    with pytest.raises(AnswerGenerationUnavailableError):
+    with pytest.raises(AnswerGenerationError):
         _=[token async for token in provider.generate_stream("Public question",[chunk])]
-    client.chat.assert_not_called()
+    client.chat.assert_awaited_once()

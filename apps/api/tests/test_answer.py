@@ -1,3 +1,4 @@
+import json
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
@@ -230,10 +231,7 @@ async def test_successful_grounded_answer_generation() -> None:
 
         mock_cohere_client = MagicMock()
         mock_resp = MagicMock()
-        mock_resp.text = (
-            "Redis supports configurable eviction policies including LRU and LFU [1]. "
-            "Specifically, volatile-lru evicts keys that have an expire set [2]."
-        )
+        mock_resp.text = json.dumps({"insufficient_evidence":False,"unit_ids":["1:1","2:1"]})
         mock_cohere_client.chat = AsyncMock(return_value=mock_resp)
 
         provider = CohereAnswerProvider(
@@ -256,7 +254,7 @@ async def test_successful_grounded_answer_generation() -> None:
             assert data["query"] == "How does Redis eviction work?"
             assert data["retrieval_query"] == "How does Redis eviction work?"
             assert data["rewritten"] is False
-            assert "Redis supports configurable eviction policies" in data["answer"]
+            assert "Redis supports several eviction policies" in data["answer"]
             assert len(data["sources"]) == 2
 
             # Check source 1
@@ -281,8 +279,8 @@ async def test_successful_grounded_answer_generation() -> None:
             # Verify mock_cohere_client was called
             assert mock_cohere_client.chat.await_count == 1
             call_kwargs = mock_cohere_client.chat.await_args.kwargs
-            assert "=== BEGIN RETRIEVED DOCUMENT SOURCES ===" in call_kwargs["message"]
-            assert "User Question: How does Redis eviction work?" in call_kwargs["message"]
+            assert len(json.loads(call_kwargs["message"])["evidence_units"]) == 2
+            assert json.loads(call_kwargs["message"])["question"] == "How does Redis eviction work?"
         finally:
             app.dependency_overrides.pop(get_retriever, None)
             app.dependency_overrides.pop(get_answer_generator, None)
@@ -331,9 +329,7 @@ async def test_query_rewriting_integration_with_answer() -> None:
 
         mock_cohere_client = MagicMock()
         mock_resp = MagicMock()
-        mock_resp.text = (
-            "The allkeys-random policy removes keys randomly to make space [1]."
-        )
+        mock_resp.text = json.dumps({"insufficient_evidence":False,"unit_ids":["1:1"]})
         mock_cohere_client.chat = AsyncMock(return_value=mock_resp)
 
         provider = CohereAnswerProvider(
@@ -641,8 +637,8 @@ async def test_unconfigured_api_key_returns_503() -> None:
 async def test_no_invented_sources_in_response() -> None:
     """
     If LLM hallucinates citation [99] when only 1 chunk was provided:
-    - [99] citation reference is stripped from returned answer
-    - Response sources list strictly contains only the 1 retrieved chunk
+    - Invented selection is rejected before any answer is returned
+    - Unsupported claims cannot survive citation removal
     """
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -666,9 +662,7 @@ async def test_no_invented_sources_in_response() -> None:
         mock_cohere_client = MagicMock()
         mock_resp = MagicMock()
         # Note [99] is an invented source not in retrieved context
-        mock_resp.text = (
-            "PostgreSQL is ACID compliant [1]. It was invented in 2050 [99]."
-        )
+        mock_resp.text = json.dumps({"insufficient_evidence":False,"unit_ids":["1:1","99:1"]})
         mock_cohere_client.chat = AsyncMock(return_value=mock_resp)
 
         provider = CohereAnswerProvider(
@@ -685,15 +679,10 @@ async def test_no_invented_sources_in_response() -> None:
                 json={"query": "Is Postgres ACID compliant?"},
                 headers=headers,
             )
-            assert resp.status_code == 200
-            data = resp.json()
-            # [1] is kept, [99] is stripped
-            assert "[1]" in data["answer"]
-            assert "[99]" not in data["answer"]
-            # sources list has exactly 1 source matching the retrieved chunk
-            assert len(data["sources"]) == 1
-            assert data["sources"][0]["source_id"] == 1
-            assert data["sources"][0]["document_id"] == doc.id
+            assert resp.status_code == 503
+            assert resp.json()["error_code"] == "provider_invalid_response"
+            assert "2050" not in resp.text
+            assert "PostgreSQL is ACID compliant" not in resp.text
         finally:
             app.dependency_overrides.pop(get_retriever, None)
             app.dependency_overrides.pop(get_answer_generator, None)
@@ -756,7 +745,7 @@ async def test_tenant_isolation_in_general_answer_query() -> None:
 
         mock_cohere_client = MagicMock()
         mock_resp = MagicMock()
-        mock_resp.text = "Answer based on User A's document [1]."
+        mock_resp.text = json.dumps({"insufficient_evidence":False,"unit_ids":["1:1"]})
         mock_cohere_client.chat = AsyncMock(return_value=mock_resp)
 
         provider = CohereAnswerProvider(

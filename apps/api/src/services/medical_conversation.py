@@ -6,6 +6,7 @@ from src.inference.policy import ProviderNotApprovedError
 from src.models.document_chunk import DocumentChunk
 from src.models.medical_observation import MedicalObservation
 from src.schemas.search import RewriteResult
+from src.security.data_screening import contains_secrets
 from src.security.query_access import current_query_access
 from src.security.structured_access import observation_fingerprint, observation_query
 from src.services.conversation_context import resolve_query_context
@@ -29,6 +30,8 @@ async def complete_medical_turn(db, query, result):
     if access is None:
         raise ProviderNotApprovedError("Medical query authorization is required.")
     await access.validate()
+    if contains_secrets(result.answer):
+        raise ProviderNotApprovedError("Medical response failed credential screening.")
     sources = []
     for citation in result.citations:
         if citation.source_type == "OBSERVATION":

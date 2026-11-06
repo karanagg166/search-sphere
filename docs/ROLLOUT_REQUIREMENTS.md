@@ -691,3 +691,42 @@ including the legacy worker job after its package-install delay recovered. Nativ
 stream PR #51 now targets main; its required CI is run on the updated branch.
 Quick-Clinic contract run [42254878720](https://github.com/karanagg166/Quick-Clinic/actions/runs/42254878720) passed
 against exact deployed `4ba7f6f61dfa6ded1b3738dff12b762bff6298cc`.
+
+### Code-rendered grounded evidence and response screening
+
+Hosted grounded generation now selects IDs of complete source sentences/paragraphs
+or structured row/chart units. The model cannot supply answer prose or citation IDs.
+The service validates a strict selection schema, rejects unknown/duplicate units and
+contradictory decisions, then renders original complete text and code-constructed
+source citations. Negation, numbers, identifiers, headings and table headers cannot
+be silently removed by selecting a fragment. Clinical advice requests get a predefined
+record-retrieval limitation; image/chart evidence remains visibly unverified and no
+exact chart comparison is generated. This conservative extractive behavior sacrifices
+free paraphrasing to give deterministic claim-to-source support. Model relevance and
+refusal quality still require broader labeled evaluation.
+
+Known configured credentials and credential-shaped strings are screened before a
+provider request, before reranking authoritative candidates, and in provider output.
+Source instructions are excluded from selection units. Invalid model output fails
+before JSON/SSE content instead of deleting a citation while retaining an unsupported
+claim. Native historical message reads now re-fetch/recheck source evidence and
+withhold revoked answers/passages; query metadata is withheld with an unavailable
+answer. The separate messages/memory/version/caching work remains open.
+
+Seven real PostgreSQL guardrail journeys use actual authorization and synthetic model
+HTTP: marker/page support, fabricated JSON/SSE claims, source-secret rejection before
+inference, prompt instructions, revocation during generation, and revocation when old
+messages are read. API tests cover whole-unit negation/identifier preservation,
+structured headers/review flags, clinical limits and malformed selections. The full
+API suite passed (existing isolated-services skip); 29 gateway/runtime tests passed.
+
+Three actual Cohere trial-key public/synthetic selection probes passed: unique-marker
+answer/citation (1.86s), missing-clinical-evidence behavior (0.84s), and prompt injection
+(1.01s). These are individual observations, not P95 or accuracy/capacity claims. No
+medical/company record or credential was included in the provider fixtures.
+
+[Search Sphere #51](https://github.com/karanagg166/search-sphere/pull/51) merged at
+`4c1d97dadf0c5bf5fc53c8cae6188ac649ee23d2`; required CI passed in
+[42256311065](https://github.com/karanagg166/search-sphere/actions/runs/42256311065).
+The backend production revision remains `8288c9d` pending migrations, versioned index
+cutover, protected release deployment and all three required authenticated journeys.

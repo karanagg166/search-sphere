@@ -10,6 +10,7 @@ from src.inference.policy import ProviderInvalidResponseError, ProviderNotApprov
 from src.models.document import Document
 from src.models.external_document import ExternalDocument
 from src.schemas.query_route import QueryRoute
+from src.security.data_screening import contains_secrets
 from src.security.query_policy import read_policy
 
 
@@ -62,7 +63,7 @@ async def execute_non_rag(intent, query, access, *, gateway=None):
             {"role":"user","content":query},
         ], max_tokens=600)
         # This route has no document evidence; reject invented source citations.
-        if re.search(r"\[\d+\]", result):
+        if re.search(r"\[\d+\]", result) or contains_secrets(result):
             raise ProviderInvalidResponseError("General answer invented document citations.")
         await access.validate()
     return result

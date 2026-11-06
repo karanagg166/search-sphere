@@ -27,6 +27,7 @@ from src.models.message import Message
 from src.models.service_client import ServiceClient
 from src.models.user import User
 from src.security.conversation_access import conversation_query
+from src.security.data_screening import contains_secrets
 from src.security.jwt import get_current_user
 from src.security.medical_context import bind_patient, get_medical_context
 from src.security.query_policy import read_policy
@@ -200,6 +201,8 @@ class QueryAccess:
             row = by_id.get(candidate.point_id)
             if row is None:
                 continue
+            if contains_secrets(row.content):
+                raise ProviderNotApprovedError("Source evidence failed credential screening.")
             self.evidence[row.point_id] = hashlib.sha256(row.content.encode()).hexdigest()
             authorized.append(replace(candidate, content=row.content, document_id=row.document_id, chunk_index=row.chunk_index,
                 token_count=row.token_count, start_page=row.start_page, end_page=row.end_page,
