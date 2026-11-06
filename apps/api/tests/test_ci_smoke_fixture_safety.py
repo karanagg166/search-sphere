@@ -15,13 +15,14 @@ import scripts.ci_production_smoke as smoke  # noqa: E402
 def tmp_manifest(tmp_path, monkeypatch):
     manifest_file = tmp_path / "ci_smoke_manifest.json"
     monkeypatch.setattr(smoke, "MANIFEST_PATH", manifest_file)
+    monkeypatch.setenv("PROD_SMOKE_FIXTURE_KEY", "synthetic-provenance-key-for-tests-only")
     return manifest_file
 
 
 def test_fixture_manifest_lifecycle(tmp_manifest):
     """Verify that fixtures can be registered, tracked, and updated in persistent manifest."""
     fm = smoke.FixtureManager(manifest_path=tmp_manifest, run_id="test_run_123")
-    assert tmp_manifest.exists()
+    assert not tmp_manifest.exists()  # Import/constructor does not create artifacts.
 
     # Register fixture
     fm.register_fixture(
@@ -72,7 +73,7 @@ def test_snapshot_iteration_cleans_all_fixtures(tmp_manifest, monkeypatch):
             return 200, {}, {"status": "ok"}
         if method == "POST" and "/search" in url:
             return 200, {}, {"results": []}
-        return 200, {}, {}
+        return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True}
 
     monkeypatch.setattr(smoke, "http", mock_http)
 
@@ -119,7 +120,7 @@ def test_provenance_and_ownership_protects_user_documents(tmp_manifest, monkeypa
         # 4. Old orphaned CI fixture belonging to active CI test user
         {
             "id": "ci-orphaned-doc-4",
-            "filename": "ci_smoke_old_run.pdf",
+            "filename": smoke.signed_filename(active_ci_user_id, "a" * 32),
             "user_id": active_ci_user_id,
             "created_at": "2026-11-04T10:00:00Z",
         },
@@ -128,15 +129,17 @@ def test_provenance_and_ownership_protects_user_documents(tmp_manifest, monkeypa
     deleted_calls = []
 
     def mock_http(url, method="GET", headers=None, data=None, timeout=15):
+        if url.endswith("/cleanup"):
+            return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True}
         if method == "GET" and "/documents" in url:
             if "page=1" in url or "page" not in url:
-                return 200, {}, {"documents": mock_docs_page_1}
+                return 200, {}, {"documents": mock_docs_page_1, "total": len(mock_docs_page_1)}
             return 200, {}, {"documents": []}
         if method == "DELETE":
             doc_id = url.split("/")[-1]
             deleted_calls.append(doc_id)
             return 204, {}, {}
-        return 200, {}, {}
+        return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True}
 
     monkeypatch.setattr(smoke, "http", mock_http)
 
@@ -159,25 +162,27 @@ def test_multi_page_pagination(tmp_manifest, monkeypatch):
     active_ci_user_id = "ci-user-123"
 
     page_1 = [{"id": f"page1-doc-{i}", "filename": f"other_{i}.pdf", "user_id": active_ci_user_id} for i in range(50)]
-    page_2 = [{"id": "ci-dangling-page2", "filename": "ci_smoke_run99.pdf", "user_id": active_ci_user_id}]
+    page_2 = [{"id": "ci-dangling-page2", "filename": smoke.signed_filename(active_ci_user_id, "b" * 32), "user_id": active_ci_user_id}]
 
     requested_pages = []
 
     def mock_http(url, method="GET", headers=None, data=None, timeout=15):
+        if url.endswith("/cleanup"):
+            return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True}
         if method == "GET" and "/documents" in url:
             import urllib.parse
             parsed = urllib.parse.urlparse(url)
             params = urllib.parse.parse_qs(parsed.query)
-            page = int(params.get("page", ["1"])[0])
+            page = int(params.get("offset", ["0"])[0]) // 50 + 1
             requested_pages.append(page)
             if page == 1:
-                return 200, {}, {"documents": page_1}
+                return 200, {}, {"documents": page_1, "total": 51}
             elif page == 2:
-                return 200, {}, {"documents": page_2}
+                return 200, {}, {"documents": page_2, "total": 51}
             return 200, {}, {"documents": []}
         if method == "DELETE":
-            return 200, {}, {}
-        return 200, {}, {}
+            return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True}
+        return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True}
 
     monkeypatch.setattr(smoke, "http", mock_http)
 
@@ -207,7 +212,7 @@ def test_cleanup_retries_on_transient_error(tmp_manifest, monkeypatch):
             return 200, {}, {"status": "ok"}
         if method == "POST" and "/search" in url:
             return 200, {}, {"results": []}
-        return 200, {}, {}
+        return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True}
 
     monkeypatch.setattr(smoke, "http", mock_http)
 

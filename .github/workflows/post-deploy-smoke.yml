@@ -1,73 +1,67 @@
 name: Search Sphere Post-Deployment Live Smoke
 
+# Deployment completion, not pre-deployment CI completion, is the prerequisite.
+# The release controller dispatches this phase after a pinned deployment succeeds.
 on:
-  workflow_run:
-    workflows: ["Search Sphere CI"]
-    types: [completed]
   workflow_dispatch:
     inputs:
-      require_rag:
-        description: "Require live authenticated semantic search (needs dedicated synthetic fixture secrets)"
-        type: boolean
-        required: false
-        default: false
-      run_answer:
-        description: "Also call real /answer with synthetic data (may consume LLM API quota)"
-        type: boolean
-        required: false
-        default: false
+      expected_sha:
+        description: "Full main revision already deployed to Render"
+        type: string
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
   group: search-sphere-production-smoke
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   production-smoke:
-    name: Real Render + Vercel API Contracts
-    if: >-
-      (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.head_branch == 'main' &&
-       github.event.workflow_run.conclusion == 'success') ||
-      (github.event_name == 'workflow_dispatch' &&
-       github.ref == 'refs/heads/main')
+    name: Authenticated standalone release journey
+    if: github.ref == 'refs/heads/main'
+    environment: search-sphere-release
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    timeout-minutes: 12
     steps:
-      - name: Check out the release commit (not PR code)
+      - name: Check out trusted main code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-          fetch-depth: 0
           persist-credentials: false
+          fetch-depth: 0
 
-      - name: Determine whether this main commit affects a deployed app
-        id: scope
+      - name: Validate the intended main revision and protected credentials
         env:
-          EVENT_NAME: ${{ github.event_name }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          PROD_SMOKE_USER_EMAIL: ${{ secrets.RELEASE_SMOKE_EMAIL }}
+          PROD_SMOKE_USER_PASSWORD: ${{ secrets.RELEASE_SMOKE_PASSWORD }}
+          PROD_SMOKE_FIXTURE_KEY: ${{ secrets.RELEASE_SMOKE_KEY }}
         run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          elif git rev-parse HEAD^ >/dev/null 2>&1 && \
-               git diff --quiet HEAD^ HEAD -- apps/api apps/web render.yaml; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "No deployed app changes: skip quota-sensitive live probes." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          fi
+          python3 - <<'PY'
+          import os, re, subprocess
+          sha = os.environ['EXPECTED_SHA']
+          assert re.fullmatch(r'[0-9a-f]{40}', sha), 'Full lowercase release SHA required'
+          subprocess.run(['git', 'merge-base', '--is-ancestor', sha, 'HEAD'], check=True)
+          for name in ('PROD_SMOKE_USER_EMAIL', 'PROD_SMOKE_USER_PASSWORD', 'PROD_SMOKE_FIXTURE_KEY'):
+              assert os.environ.get(name), f'Required protected credential is missing: {name}'
+          assert len(os.environ['PROD_SMOKE_FIXTURE_KEY'].encode()) >= 32, 'Fixture key is too short'
+          PY
 
-      - name: Probe live production (real responses, real DB, CORS, memory, optional RAG)
-        if: steps.scope.outputs.run == 'true'
+      - name: Verify upload, indexing, retrieval, grounded answer, SSE, and physical cleanup
         env:
-          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-          PROD_SMOKE_BEARER_TOKEN: ${{ secrets.PROD_SMOKE_BEARER_TOKEN }}
-          PROD_SMOKE_USER_EMAIL: ${{ secrets.PROD_SMOKE_USER_EMAIL }}
-          PROD_SMOKE_USER_PASSWORD: ${{ secrets.PROD_SMOKE_USER_PASSWORD }}
-          PROD_SMOKE_DOCUMENT_ID: ${{ secrets.PROD_SMOKE_DOCUMENT_ID }}
-          PROD_SMOKE_EXPECTED_MARKER: ${{ secrets.PROD_SMOKE_EXPECTED_MARKER || 'SS-SYNTHETIC-SMOKE-42' }}
-          REQUIRE_RAG: ${{ inputs.require_rag || 'true' }}
-          RUN_LLM_ANSWER: ${{ inputs.run_answer || 'true' }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          PROD_SMOKE_USER_EMAIL: ${{ secrets.RELEASE_SMOKE_EMAIL }}
+          PROD_SMOKE_USER_PASSWORD: ${{ secrets.RELEASE_SMOKE_PASSWORD }}
+          PROD_SMOKE_FIXTURE_KEY: ${{ secrets.RELEASE_SMOKE_KEY }}
         run: python3 scripts/ci_production_smoke.py
+
+      - name: Preserve synthetic cleanup receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-fixture-receipts-${{ github.run_id }}
+          path: .ci_smoke_manifest.json
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7

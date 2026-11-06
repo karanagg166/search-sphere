@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 import sys
 import time
 import urllib.error
@@ -18,6 +17,22 @@ import urllib.request
 import uuid
 from pathlib import Path
 from typing import Any
+
+if __package__:
+    from .smoke_fixtures import (
+        FixtureManager,
+        signed_filename,
+        signing_key,
+        verified_filename,
+    )
+else:
+    from smoke_fixtures import (
+        FixtureManager,
+        signed_filename,
+        signing_key,
+        verified_filename,
+    )
+
 
 API = "https://search-sphere-api.onrender.com"
 WEB = "https://search-sphere-rose.vercel.app"
@@ -31,98 +46,8 @@ ACTIVE_CI_USER_ID: str | None = None
 ACTIVE_CI_EMAIL: str | None = None
 
 MANIFEST_PATH = Path(".ci_smoke_manifest.json")
-CI_RUN_ID = f"ci_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-
-
-class FixtureManager:
-    """Persistent, provably safe fixture manifest manager across CI runs."""
-
-    def __init__(self, manifest_path: Path = MANIFEST_PATH, run_id: str = CI_RUN_ID) -> None:
-        self.manifest_path = manifest_path
-        self.run_id = run_id
-        self._ensure_manifest()
-
-    def _ensure_manifest(self) -> None:
-        if not self.manifest_path.exists():
-            initial = {"manifest_version": 1, "runs": {}}
-            self.save_manifest(initial)
-
-    def load_manifest(self) -> dict[str, Any]:
-        try:
-            if self.manifest_path.exists():
-                with open(self.manifest_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-        except (OSError, json.JSONDecodeError):
-            pass
-        return {"manifest_version": 1, "runs": {}}
-
-    def save_manifest(self, data: dict[str, Any]) -> None:
-        try:
-            with open(self.manifest_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-        except OSError as exc:
-            print(f"::warning::Failed to write fixture manifest: {exc}")
-
-    def register_fixture(
-        self,
-        doc_id: str,
-        filename: str,
-        marker: str,
-        user_id: str = "",
-        email: str = "",
-    ) -> None:
-        data = self.load_manifest()
-        runs = data.setdefault("runs", {})
-        run_entry = runs.setdefault(
-            self.run_id,
-            {
-                "run_id": self.run_id,
-                "user_id": user_id,
-                "user_email": email,
-                "created_at": time.time(),
-                "documents": [],
-            },
-        )
-        run_entry["documents"].append(
-            {
-                "doc_id": doc_id,
-                "filename": filename,
-                "marker": marker,
-                "created_at": time.time(),
-                "status": "pending_cleanup",
-            }
-        )
-        self.save_manifest(data)
-
-    def mark_fixture_cleaned(self, doc_id: str) -> None:
-        data = self.load_manifest()
-        for run_entry in data.get("runs", {}).values():
-            for doc in run_entry.get("documents", []):
-                if doc.get("doc_id") == doc_id:
-                    doc["status"] = "cleaned_up"
-                    doc["cleaned_at"] = time.time()
-        self.save_manifest(data)
-
-    def mark_fixture_failed(self, doc_id: str, reason: str = "") -> None:
-        data = self.load_manifest()
-        for run_entry in data.get("runs", {}).values():
-            for doc in run_entry.get("documents", []):
-                if doc.get("doc_id") == doc_id:
-                    doc["status"] = "failed_cleanup"
-                    doc["failure_reason"] = reason
-        self.save_manifest(data)
-
-    def get_uncleaned_fixtures(self) -> list[dict[str, Any]]:
-        uncleaned = []
-        data = self.load_manifest()
-        for run_entry in data.get("runs", {}).values():
-            for doc in run_entry.get("documents", []):
-                if doc.get("status") != "cleaned_up":
-                    uncleaned.append({**doc, "user_id": run_entry.get("user_id")})
-        return uncleaned
-
-
-fixture_manager = FixtureManager()
+CI_RUN_ID = uuid.uuid4().hex
+fixture_manager = FixtureManager(MANIFEST_PATH, CI_RUN_ID)
 
 
 def record(label: str, detail: str = "") -> None:
@@ -310,25 +235,9 @@ def require_json(status: int, payload: Any, label: str) -> dict[str, Any]:
 
 
 def compatible_backend_sha(deployed: str) -> bool:
-    """Accept exact SHA or an ancestor when no API/runtime files changed."""
+    """A release gate requires the exact intended revision."""
     sha = deployed.strip().lower()
-    if not re.fullmatch(r"[0-9a-f]{40}", sha) or not re.fullmatch(r"[0-9a-f]{40}", EXPECTED_SHA):
-        return False
-    if sha == EXPECTED_SHA:
-        return True
-    ancestor = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", sha, EXPECTED_SHA],
-        check=False,
-        capture_output=True,
-    )
-    if ancestor.returncode != 0:
-        return False
-    diff = subprocess.run(
-        ["git", "diff", "--quiet", sha, EXPECTED_SHA, "--", "apps/api", "render.yaml"],
-        check=False,
-        capture_output=True,
-    )
-    return diff.returncode == 0
+    return bool(re.fullmatch(r"[0-9a-f]{40}", EXPECTED_SHA) and sha == EXPECTED_SHA)
 
 
 def wait_for_matching_backend() -> dict[str, Any]:
@@ -498,7 +407,7 @@ def acquire_ci_auth() -> tuple[str, str] | None:
     if status == 200 and isinstance(res, dict) and "access_token" in res:
         token = str(res["access_token"])
         user_id = str(res.get("user", {}).get("id", ""))
-        record("CI test authentication", f"acquired bearer token via login for {email}")
+        record("CI test authentication", "authenticated dedicated synthetic account")
         return token, user_id
 
     # If user doesn't exist, try signup
@@ -507,31 +416,37 @@ def acquire_ci_auth() -> tuple[str, str] | None:
     if status in (200, 201) and isinstance(res, dict) and "access_token" in res:
         token = str(res["access_token"])
         user_id = str(res.get("user", {}).get("id", ""))
-        record("CI test authentication", f"provisioned new test account and acquired token for {email}")
+        record("CI test authentication", "provisioned dedicated synthetic account")
         return token, user_id
 
-    fail("CI test authentication", f"login returned HTTP {status}: {res}")
+    fail("CI test authentication", f"login/signup returned HTTP {status}")
     return None
 
 
 def get_all_documents(token: str) -> list[dict[str, Any]]:
-    """Paginates safely across all pages of documents for the authenticated user."""
+    """Use the API's offset contract; never treat a partial listing as success."""
     headers = {"Authorization": f"Bearer {token}"}
     all_docs: list[dict[str, Any]] = []
-    page = 1
+    seen: set[str] = set()
     limit = 50
-    while page <= 50:
-        status, _, payload = http(f"{API}/documents?page={page}&limit={limit}", headers=headers, timeout=20)
-        if status != 200 or not isinstance(payload, dict):
-            break
-        docs = payload.get("documents", [])
-        if not docs or not isinstance(docs, list):
-            break
-        all_docs.extend([d for d in docs if isinstance(d, dict)])
-        if len(docs) < limit:
-            break
-        page += 1
-    return all_docs
+    for offset in range(0, 2500, limit):
+        status, _, payload = http(f"{API}/documents?offset={offset}&limit={limit}", headers=headers, timeout=20)
+        data = require_json(status, payload, "Fixture listing")
+        docs = data.get("documents")
+        total = data.get("total")
+        if not isinstance(docs, list) or not isinstance(total, int) or total < 0 or len(docs) > limit:
+            fail("Fixture listing", "invalid document page")
+        for doc in docs:
+            if not isinstance(doc, dict) or not isinstance(doc.get("id"), str) or doc["id"] in seen:
+                fail("Fixture listing", "invalid or repeated document identity")
+            seen.add(doc["id"])
+            all_docs.append(doc)
+        if len(all_docs) >= total:
+            return all_docs
+        if len(docs) != limit:
+            fail("Fixture listing", "incomplete document page")
+    fail("Fixture listing", "bounded listing exceeded 2500 documents; cleanup must be reviewed")
+    return []
 
 
 def ensure_synthetic_document(
@@ -542,12 +457,11 @@ def ensure_synthetic_document(
     email: str = "",
 ) -> tuple[str, bool]:
     """Return an indexed document_id and whether it was dynamically created."""
-    existing_id = os.environ.get("PROD_SMOKE_DOCUMENT_ID", "").strip()
-    if existing_id:
-        return existing_id, False
+    if os.environ.get("PROD_SMOKE_DOCUMENT_ID", "").strip():
+        fail("Document upload", "a fresh owned fixture is required for the complete journey")
 
     actual_name = doc_name or f"CI-Synthetic-Smoke-{CI_RUN_ID}"
-    actual_filename = f"ci_smoke_{CI_RUN_ID}.pdf"
+    actual_filename = signed_filename(user_id, CI_RUN_ID)
 
     # Dynamically upload synthetic document
     pdf_bytes = generate_synthetic_pdf(marker, doc_name=actual_name)
@@ -565,6 +479,7 @@ def ensure_synthetic_document(
         fail("Document upload", f"failed to upload synthetic document: HTTP {status} {upload_res}")
 
     doc_id = str(upload_res["id"])
+    SYNTHETIC_DOCUMENT_IDS.add(doc_id)
     fixture_manager.register_fixture(
         doc_id=doc_id,
         filename=actual_filename,
@@ -572,7 +487,6 @@ def ensure_synthetic_document(
         user_id=user_id,
         email=email,
     )
-    SYNTHETIC_DOCUMENT_IDS.add(doc_id)
     record("Document upload", f"uploaded synthetic document {doc_id[:12]}")
 
     # Poll until indexed or ready
@@ -616,81 +530,68 @@ def cleanup_synthetic_document(
         if attempt < max_retries:
             time.sleep(1.0 * attempt)
 
-    if success:
-        record("Synthetic document cleanup", f"purged synthetic document {document_id[:12]}")
-        fixture_manager.mark_fixture_cleaned(document_id)
-        SYNTHETIC_DOCUMENT_IDS.discard(document_id)
-    else:
-        print(f"::warning::Failed to clean up synthetic document {document_id}: HTTP {last_status}")
+    if not success:
         fixture_manager.mark_fixture_failed(document_id, f"HTTP {last_status}")
-        return False
+        fail("Synthetic document cleanup", f"deletion returned HTTP {last_status}")
 
-    # Verify vector purge: search scoped to the deleted document must return 0 results
+    # Inaccessibility and physical cleanup are separate assertions. A missing
+    # document or an empty search alone cannot prove that stored vectors are gone.
     if marker:
-        time.sleep(1)
         st, _, res = http(
-            f"{API}/search",
-            method="POST",
+            f"{API}/search", method="POST",
             data={"query": f"Verification Marker: {marker}", "document_id": document_id},
-            headers=headers,
-            timeout=20,
+            headers=headers, timeout=20,
         )
-        if st == 200 and isinstance(res, dict):
-            remaining = res.get("results", [])
-            if len(remaining) > 0:
-                fail("Vector deletion verification", f"deleted document vectors still retrieved ({len(remaining)} points found)")
-        record("Vector deletion verification", "purged document vectors are no longer retrievable in search")
+        if st != 404 and (st != 200 or not isinstance(res, dict) or res.get("results") != []):
+            fail("Deletion access verification", f"unexpected search response HTTP {st}")
+    st, _, receipt = http(f"{API}/documents/{document_id}/cleanup", headers=headers, timeout=20)
+    if (
+        st != 200 or not isinstance(receipt, dict)
+        or receipt.get("document_id") != document_id or receipt.get("status") != "complete"
+        or type(receipt.get("vectors_remaining")) is not int or receipt["vectors_remaining"] != 0
+        or receipt.get("object_deleted") is not True
+    ):
+        fixture_manager.mark_fixture_failed(document_id, "physical_cleanup_unverified")
+        fail("Physical deletion verification", f"scoped cleanup receipt missing or incomplete (HTTP {st})")
+    fixture_manager.mark_fixture_cleaned(document_id)
+    SYNTHETIC_DOCUMENT_IDS.discard(document_id)
+    record("Synthetic document cleanup", f"purged synthetic document {document_id[:12]}")
+    record("Vector deletion verification", "owner-scoped physical count is zero and private object deletion is verified")
     return True
 
 
 def sweep_dangling_synthetic_documents(
-    token: str,
-    user_id: str | None = None,
-    user_email: str | None = None,
+    token: str, user_id: str | None = None, user_email: str | None = None,
 ) -> None:
-    """
-    Purge orphaned synthetic documents from prior interrupted runs to prevent fixture accumulation.
-    Strictly verifies account ownership and artifact provenance.
-    Never deletes documents based only on generic names containing 'test'.
-    """
-    try:
-        all_docs = get_all_documents(token)
-        if not all_docs:
-            return
+    """Delete only same-owner fixtures with valid release-run signatures."""
+    del user_email
+    if not user_id:
+        fail("Fixture provenance", "authenticated owner identity is required")
+    signing_key()
+    for doc in get_all_documents(token):
+        if doc.get("user_id") != user_id or not verified_filename(str(doc.get("filename", "")), user_id):
+            continue
+        cleanup_synthetic_document(token, str(doc["id"]))
 
-        uncleaned_manifest = {f["doc_id"]: f for f in fixture_manager.get_uncleaned_fixtures()}
-        dangling_candidates: list[str] = []
 
-        for d in all_docs:
-            doc_id = str(d.get("id", ""))
-            doc_user_id = str(d.get("user_id", ""))
-            # 1. Ownership check: If doc has user_id and active user_id is provided, must match
-            if doc_user_id and user_id and doc_user_id != user_id:
-                continue
-
-            fname = str(d.get("filename", "")).lower()
-
-            # 2. Provenance check:
-            # Must either be known in the persistent manifest
-            is_in_manifest = doc_id in uncleaned_manifest
-            # Or match explicit CI runner generator prefix: ci_smoke_
-            is_ci_generated_name = fname == "ci_smoke_test.pdf" or fname.startswith("ci_smoke_")
-
-            if not is_in_manifest and not is_ci_generated_name:
-                continue
-
-            dangling_candidates.append(doc_id)
-
-        if dangling_candidates:
-            print(f"Sweeping {len(dangling_candidates)} dangling synthetic documents with verified provenance...")
-            swept_count = 0
-            for cand_id in dangling_candidates:
-                if cleanup_synthetic_document(token, cand_id, max_retries=3):
-                    swept_count += 1
-            if swept_count > 0:
-                record("Pre-test fixture cleanup", f"swept {swept_count} verified dangling synthetic documents")
-    except Exception as exc:  # noqa: BLE001
-        print(f"::warning::Pre-test fixture sweep warning: {exc}")
+def verify_grounded_marker(answer: Any, sources: Any, document_id: str, marker: str, label: str) -> None:
+    if not isinstance(answer, str) or marker.lower() not in answer.lower() or not isinstance(sources, list):
+        fail(label, "expected unique marker is missing from the answer")
+    cited = {int(value) for value in re.findall(r"\[(\d+)\]", answer)}
+    valid = set()
+    for source in sources:
+        if not isinstance(source, dict) or source.get("document_id") != document_id:
+            fail(label, "source outside the synthetic document scope")
+        source_id = source.get("source_id")
+        if (
+            type(source_id) is not int or source_id <= 0 or source_id in valid
+            or type(source.get("start_page")) is not int or source["start_page"] != 1
+            or source.get("end_page") != 1 or marker.lower() not in str(source.get("content", "")).lower()
+        ):
+            fail(label, "invalid, duplicate, or unsupported page citation")
+        valid.add(source_id)
+    if not cited or not cited.issubset(valid):
+        fail(label, "missing or fabricated citation reference")
 
 
 def run_real_rag_pipeline(
@@ -731,19 +632,25 @@ def run_real_rag_pipeline(
         data = require_json(status, result, "Real grounded answer")
         answer_text = str(data.get("answer", "")).strip()
         sources = data.get("sources")
-        if not answer_text or not isinstance(sources, list) or not sources:
-            fail("Real grounded answer", "no grounded answer or sources list returned")
-        if not any(s.get("document_id") == document_id for s in sources if isinstance(s, dict)):
-            fail("Real grounded answer", "sources list did not reference the synthetic test document")
-        record("Real grounded answer", f"generated answer citing test document: '{answer_text[:60]}...'")
+        verify_grounded_marker(answer_text, sources, document_id, marker, "Real grounded answer")
+        record("Real grounded answer", "expected unique marker with valid supporting page citations")
 
         # 3. Real SSE Answer Streaming
         try:
             events = read_sse_stream(f"{API}/answer/stream", data=payload, headers=headers, timeout=65)
             event_types = [e[0] for e in events]
-            if "metadata" not in event_types or "done" not in event_types:
+            if (
+                not event_types or event_types[0] != "metadata" or event_types[-1] != "done"
+                or event_types.count("done") != 1 or "error" in event_types
+            ):
                 fail("SSE answer streaming", f"missing expected SSE lifecycle events (saw {event_types})")
+            streamed_sources = [e[1].get("sources") for e in events if e[0] == "source"]
+            if len(streamed_sources) != 1:
+                fail("SSE answer streaming", "exactly one source event is required")
+            verify_grounded_marker(events[-1][1].get("answer"), streamed_sources[0], document_id, marker, "SSE answer streaming")
             tokens = [e[1].get("token", "") for e in events if e[0] == "token"]
+            if "".join(tokens) != events[-1][1].get("answer"):
+                fail("SSE answer streaming", "streamed tokens differ from the completed answer")
             record("SSE answer streaming", f"received {len(tokens)} streamed tokens through completion")
         except (urllib.error.URLError, TimeoutError, OSError, AssertionError) as exc:
             fail("SSE answer streaming", f"stream probe failed: {exc}")
@@ -751,19 +658,17 @@ def run_real_rag_pipeline(
 
 def run_rag_suite() -> None:
     global ACTIVE_CI_TOKEN, ACTIVE_CI_USER_ID, ACTIVE_CI_EMAIL
-    require = os.environ.get("REQUIRE_RAG", "false").lower() == "true"
-    do_answer = os.environ.get("RUN_LLM_ANSWER", "false").lower() == "true"
-    marker = os.environ.get("PROD_SMOKE_EXPECTED_MARKER", "SS-SYNTHETIC-SMOKE-42").strip()
+    signing_key()
+    marker = f"SS-SYNTH-{CI_RUN_ID}"
 
     auth_info = acquire_ci_auth()
     if not auth_info:
-        if require or do_answer:
-            fail("Real RAG verification", "REQUIRE_RAG is set but no test credentials are configured")
-        print("::warning::Authenticated RAG test NOT CONFIGURED; configure PROD_SMOKE_* credentials.")
-        RESULTS.append("NOT RUN authenticated RAG verification (configure PROD_SMOKE_* credentials)")
-        return
-
-    token, user_id = auth_info
+        fail("Real RAG verification", "dedicated synthetic account credentials are required")
+    token, _ = auth_info
+    status, _, identity = http(f"{API}/auth/me", headers={"Authorization": f"Bearer {token}"})
+    user_id = require_json(status, identity, "Fixture owner identity").get("id")
+    if not isinstance(user_id, str) or not user_id:
+        fail("Fixture owner identity", "authenticated user ID is required")
     email = os.environ.get("PROD_SMOKE_USER_EMAIL", "").strip()
     ACTIVE_CI_TOKEN = token
     ACTIVE_CI_USER_ID = user_id
@@ -785,18 +690,16 @@ def run_rag_suite() -> None:
         )
         if was_created:
             created_id = doc_id
-        run_real_rag_pipeline(token, doc_id, marker, do_answer=do_answer)
+        run_real_rag_pipeline(token, doc_id, marker, do_answer=True)
     finally:
-        # Guaranteed cleanup: snapshot iteration over copy of set
+        cleanup_failed = False
         for pending_id in list(SYNTHETIC_DOCUMENT_IDS):
             try:
-                cleanup_synthetic_document(
-                    token,
-                    pending_id,
-                    marker=marker if pending_id == created_id else None,
-                )
-            except Exception as cl_err:  # noqa: BLE001
-                print(f"::warning::Cleanup failure for {pending_id}: {cl_err}")
+                cleanup_synthetic_document(token, pending_id, marker=marker if pending_id == created_id else None)
+            except (AssertionError, OSError, TimeoutError):
+                cleanup_failed = True
+        if cleanup_failed:
+            fail("Synthetic document cleanup", "one or more physical cleanup assertions failed")
 
 
 def save_summary() -> None:
@@ -861,8 +764,8 @@ def main() -> int:
             for s_id in list(SYNTHETIC_DOCUMENT_IDS):
                 try:
                     cleanup_synthetic_document(ACTIVE_CI_TOKEN, s_id)
-                except (urllib.error.URLError, TimeoutError, OSError):
-                    pass
+                except (AssertionError, urllib.error.URLError, TimeoutError, OSError):
+                    print("::warning::Cleanup remains unverified; the signed fixture can be recovered by the next run.")
         save_summary()
 
 
