@@ -684,3 +684,10 @@ Quick-Clinic #163 merged at `4ba7f6f61dfa6ded1b3738dff12b762bff6298cc`, and live
 health now reports exactly that revision. Its trusted contract workflow
 [42254878720](https://github.com/karanagg166/Quick-Clinic/actions/runs/42254878720)
 was dispatched after deployment. Full Search Sphere patient journeys remain open.
+
+Shared query routing PR #50 merged at `b9d53d01da31a53c6cdb6364f7c3cbdcf0b80c6d`.
+All required checks passed in [42254517270](https://github.com/karanagg166/search-sphere/actions/runs/42254517270),
+including the legacy worker job after its package-install delay recovered. Native
+stream PR #51 now targets main; its required CI is run on the updated branch.
+Quick-Clinic contract run [42254878720](https://github.com/karanagg166/Quick-Clinic/actions/runs/42254878720) passed
+against exact deployed `4ba7f6f61dfa6ded1b3738dff12b762bff6298cc`.
