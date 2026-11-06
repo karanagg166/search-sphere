@@ -48,6 +48,7 @@ from src.routers.v1 import (
 from src.routers.v1 import (
     search_router as v1_search_router,
 )
+from src.routers.v1.conversations import router as v1_conversations_router
 
 logger = structlog.get_logger()
 
@@ -200,6 +201,7 @@ app.include_router(v1_collections_router)
 app.include_router(v1_documents_router)
 app.include_router(v1_search_router)
 app.include_router(v1_answers_router)
+app.include_router(v1_conversations_router)
 
 
 @app.get("/health", tags=["Health"])

@@ -2,7 +2,15 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    column,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db import Base
@@ -14,6 +22,10 @@ if TYPE_CHECKING:
 
 class Conversation(Base):
     __tablename__ = "conversations"
+    __table_args__ = (
+        CheckConstraint("(user_id IS NOT NULL AND client_id IS NULL AND tenant_id IS NULL AND actor_id IS NULL AND external_reference IS NULL) OR (user_id IS NULL AND client_id IS NOT NULL AND tenant_id IS NOT NULL AND actor_id IS NOT NULL AND external_reference IS NOT NULL)", name="ck_conversation_identity"),
+        Index("uq_delegated_conversation_reference", "client_id", "tenant_id", "actor_id", func.coalesce(column("collection_id"), ""), func.coalesce(column("subject_id"), ""), "external_reference", unique=True),
+    )
 
     id: Mapped[str] = mapped_column(
         String(36),
@@ -21,12 +33,18 @@ class Conversation(Base):
         default=lambda: str(uuid.uuid4()),
         index=True,
     )
-    user_id: Mapped[str] = mapped_column(
+    user_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
+    client_id: Mapped[str | None] = mapped_column(String(64))
+    tenant_id: Mapped[str | None] = mapped_column(String(128))
+    actor_id: Mapped[str | None] = mapped_column(String(255))
+    collection_id: Mapped[str | None] = mapped_column(String(128))
+    subject_id: Mapped[str | None] = mapped_column(String(255))
+    external_reference: Mapped[str | None] = mapped_column(String(255))
     title: Mapped[str] = mapped_column(
         String(255),
         default="New Conversation",
@@ -45,7 +63,7 @@ class Conversation(Base):
     )
 
     # Relationships
-    user: Mapped["User"] = relationship("User", back_populates="conversations")
+    user: Mapped["User | None"] = relationship("User", back_populates="conversations")
     messages: Mapped[list["Message"]] = relationship(
         "Message",
         back_populates="conversation",

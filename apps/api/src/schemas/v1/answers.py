@@ -25,6 +25,7 @@ class AnswerRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     query: str = Field(..., min_length=1, max_length=2000, description="User question to answer")
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=36)
     collection_id: str | None = Field(None, max_length=128, description="Target collection scope")
     owner_subject_id: str | None = Field(None, max_length=255, description="Target owner/subject scope")
     limit: int = Field(default=5, ge=1, le=20, description="Number of context chunks to retrieve")

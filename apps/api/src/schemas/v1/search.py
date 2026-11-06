@@ -7,6 +7,7 @@ class SearchRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     query: str = Field(..., min_length=1, max_length=2000, description="Search query string")
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=36)
     collection_id: str | None = Field(None, max_length=128, description="Target collection scope")
     owner_subject_id: str | None = Field(None, max_length=255, description="Target owner/subject scope")
     limit: int = Field(default=10, ge=1, le=50, description="Maximum number of chunks to return")

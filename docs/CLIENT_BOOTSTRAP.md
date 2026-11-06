@@ -34,3 +34,30 @@ to authorize school enrollment and class access. They delegate the resulting ten
 collection and subject in each server request, which Search Sphere validates.
 The full future-client upload/poll/search/delete guide is tracked separately in the
 rollout ledger while durable ingestion and release journeys are completed.
+
+## Delegated conversation ownership
+
+`X-Actor-ID` identifies the authenticated person making the request. It is distinct
+from `X-Subject-ID`, which identifies the patient or other evidence subject. The
+consumer derives both after its own authorization checks and sends them only from
+its server using the scoped service credential. Browsers cannot self-assert these
+headers to Search Sphere without that credential.
+
+Register a conversation with `POST /api/v1/conversations`, the `conversations:write`
+scope, `X-Tenant-ID`, `X-Actor-ID`, and the selected collection/subject headers. The
+optional JSON `external_reference` makes registration idempotent within exactly
+that client, tenant, actor, collection, and subject. The response supplies an internal
+`id`. Retain it on the consumer server. Different actors/patients/collections receive
+separate conversations even if their external references happen to be identical.
+
+`GET /api/v1/conversations/{id}` and `/{id}/messages?limit=50&offset=0` require
+`conversations:read` and the same complete delegation. The message view reauthorizes
+source evidence and withholds an old answer when its source changed or was removed.
+`DELETE /api/v1/conversations/{id}` requires `conversations:write` and deletes its
+messages. An omitted actor is rejected; an out-of-scope ID returns 404.
+
+The `conversation_id` field on versioned search/answer requests is checked before
+query processing starts, including SSE. The storage/authorization foundation is
+implemented; wiring complete turn persistence, selective context, routing and memory
+into every delegated answer route is the following rollout phase. Until then, clients
+must not treat this foundation as a completed multi-turn answer contract.

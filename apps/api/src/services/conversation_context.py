@@ -11,6 +11,7 @@ from src.models.conversation import Conversation
 from src.models.document_chunk import DocumentChunk
 from src.models.message import Message
 from src.schemas.search import ConversationMessage
+from src.security.conversation_access import conversation_query
 
 _DIRECT = re.compile(r"^(?:hi|hello|hey|good (?:morning|evening|afternoon)|thanks?|thank you|bye|you['’]?re welcome|happy to help|ok(?:ay)?|got it)[!.\s]*$", re.I)
 _REFERENCE = re.compile(r"\b(?:what about|how about|and for|also for|previous (?:answer|response|message)|last (?:answer|response)|summari[sz]e (?:that|it)|explain (?:that|it)|those|that policy|this policy|their eligibility|what does it|what is it|what are they|which one|how does (?:it|that)|how do they)\b", re.I)
@@ -66,8 +67,8 @@ async def select_conversation_context(access, query):
         selection.clarification = "Which earlier topic or answer are you referring to?"
         return selection
     async with access.sessions() as db:
-        conversation = (await db.execute(select(Conversation.id).where(
-            Conversation.id == access.conversation_id, Conversation.user_id == access.context.user_id,
+        conversation = (await db.execute(conversation_query(access.context).where(
+            Conversation.id == access.conversation_id,
         ))).scalar_one_or_none()
         if conversation is None:
             raise HTTPException(status_code=404, detail="Conversation not found.")
