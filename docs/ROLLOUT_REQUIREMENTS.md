@@ -312,3 +312,26 @@ limit verification and the requested 500/700/60 semantic/layout benchmark remain
 open. Full query-context binding, model-version filtering/cutover, strict physical
 deletion verification and all three authenticated live release journeys remain open.
 Do not mark the rollout complete or deploy an incomplete acceptance chain.
+
+### Release gate repair (PR follows ingestion runtime #38)
+
+The standalone post-deployment gate is dispatched from trusted `main` after deployment,
+with a required exact SHA. It no longer starts on pre-deployment CI completion or
+accepts an older backend revision. The `search-sphere-release` GitHub environment
+allows only the `main` branch. Missing synthetic credentials/signing key fail the job;
+search, grounded answer, SSE completion, and cleanup are mandatory.
+
+`scripts/ci_production_smoke.py` now uses `offset`, rejects partial/error/repeated
+pages, fails deletion verification on 503, and requires an owner-scoped physical
+cleanup receipt from `GET /documents/{id}/cleanup`. That backend receipt is a
+remaining dependency: this stricter gate must fail until it is implemented and
+serving. Search denial alone is never reported as physical vector cleanup.
+
+`scripts/smoke_fixtures.py` signs fixture filenames with an environment secret and
+binds signatures to the authenticated owner and unique run ID. An interrupted run
+can be recovered from the owner's listing even before its manifest write. Filename
+prefixes or an unsigned local manifest do not authorize cleanup. Receipts omit
+credentials and account email; corrupt/unwritable manifests fail. Offline regressions
+cover pagination, interrupted runs, owner mismatch/forgery, provider outages during
+cleanup, physical cleanup receipts, unique-marker answer/citation support, and SSE.
+The three-app live release remains **open**; this is not a successful production run.
