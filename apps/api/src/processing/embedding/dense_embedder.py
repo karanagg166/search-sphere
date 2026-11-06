@@ -180,6 +180,7 @@ class DenseEmbedder:
                 page_numbers=list(chunk.page_numbers),
                 block_types=list(chunk.block_types),
                 embedding=raw_vectors[idx],
+                provenance=[dict(item) for item in chunk.provenance],
             )
             for idx, chunk in enumerate(chunked_document.chunks)
         ]

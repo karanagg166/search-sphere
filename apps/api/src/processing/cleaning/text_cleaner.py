@@ -69,8 +69,8 @@ class TextCleaner:
         # Final pass: normalize spacing after line transformations
         return self.whitespace_cleaner.normalize_spacing(step4)
 
-    _IMAGE_TEXT_RE = re.compile(r"\[Image text:\s*(.*?)\s*\]", re.DOTALL)
-    _IMAGE_DESC_RE = re.compile(r"\[Image description:\s*(.*?)\s*\]", re.DOTALL)
+    _IMAGE_TEXT_RE = re.compile(r"\[Image text:\s*(.*?)\s*\](?=\s*(?:\[Image (?:text|description):|$))", re.DOTALL)
+    _IMAGE_DESC_RE = re.compile(r"\[Image description:\s*(.*?)\s*\](?=\s*(?:\[Image (?:text|description):|$))", re.DOTALL)
 
     def clean_block(self, block: ExtractedBlock) -> CleanedBlock | None:
         """
@@ -88,6 +88,7 @@ class TextCleaner:
         return CleanedBlock(
             block_type=block.block_type,
             content=cleaned_content,
+            provenance=dict(block.provenance),
         )
 
     def _clean_image_block(self, content: str) -> str:

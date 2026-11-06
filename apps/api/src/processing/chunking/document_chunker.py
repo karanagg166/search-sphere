@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
+from typing import Any
 
 import structlog
 
@@ -28,6 +29,7 @@ class _TextUnit:
     block_type: str
     token_count: int
     is_intro_header: bool = False
+    provenance: dict[str, Any] = field(default_factory=dict)
 
 
 class DocumentChunker:
@@ -111,6 +113,7 @@ class DocumentChunker:
                     end_page=max(pages) if pages else 1,
                     page_numbers=pages,
                     block_types=block_types,
+                    provenance=list({u.provenance.get("block_id", str(index)): u.provenance for index, u in enumerate(units) if u.provenance}.values()),
                 )
             )
 
@@ -135,6 +138,7 @@ class DocumentChunker:
                 if not content:
                     continue
 
+                first_unit = len(units)
                 if block.block_type == "image":
                     # Multimodal block is kept as a single atomic semantic unit
                     tokens = self.token_counter.count(content)
@@ -168,6 +172,8 @@ class DocumentChunker:
                     paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
                     for p in paragraphs:
                         self._process_paragraph(p, page.page_number, units)
+
+                units[first_unit:] = [replace(unit, provenance=dict(block.provenance)) for unit in units[first_unit:]]
 
         return units
 
