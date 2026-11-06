@@ -18,12 +18,21 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from smoke_fixtures import (
-    FixtureManager,
-    signed_filename,
-    signing_key,
-    verified_filename,
-)
+if __package__:
+    from .smoke_fixtures import (
+        FixtureManager,
+        signed_filename,
+        signing_key,
+        verified_filename,
+    )
+else:
+    from smoke_fixtures import (
+        FixtureManager,
+        signed_filename,
+        signing_key,
+        verified_filename,
+    )
+
 
 API = "https://search-sphere-api.onrender.com"
 WEB = "https://search-sphere-rose.vercel.app"
