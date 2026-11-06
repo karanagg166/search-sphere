@@ -10,6 +10,7 @@ from src.models.document import Document
 from src.models.document_chunk import DocumentChunk
 from src.models.document_deletion import DocumentDeletion
 from src.models.document_evidence import DocumentEvidence
+from src.models.document_version import DocumentVersion
 from src.models.external_document import ExternalDocument
 from src.models.ingestion_job import IngestionJob
 from src.models.medical_observation import MedicalObservation
@@ -78,6 +79,8 @@ async def delete_registered_document(db, kind, document_id, client_id, tenant_id
         ))
     await db.delete(document)
     await db.flush()
+    await db.execute(delete(DocumentVersion).where(DocumentVersion.document_kind == kind,
+        DocumentVersion.source_record_id == document.id))
     return row
 
 

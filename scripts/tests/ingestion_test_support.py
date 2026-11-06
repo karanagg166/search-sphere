@@ -21,6 +21,7 @@ from src.models.document import Document
 from src.models.document_chunk import DocumentChunk
 from src.models.document_deletion import DocumentDeletion
 from src.models.document_evidence import DocumentEvidence
+from src.models.document_version import DocumentVersion
 from src.models.external_document import ExternalDocument
 from src.models.inference_data_policy import InferenceDataPolicy
 from src.models.ingestion_job import IngestionJob
@@ -83,6 +84,7 @@ async def fixture(tmp_path, monkeypatch):
                 await db.execute(delete(MedicalObservation).where(MedicalObservation.id.in_(value.observation_ids)))
             await db.execute(delete(ExternalDocument).where(ExternalDocument.source_system == owner_id))
             await db.execute(delete(IngestionJob))
+            await db.execute(delete(DocumentVersion).where((DocumentVersion.tenant_id == owner_id) | (DocumentVersion.client_id == owner_id)))
             await db.execute(delete(DocumentEvidence).where((DocumentEvidence.tenant_id == owner_id) | (DocumentEvidence.client_id == owner_id) | (DocumentEvidence.subject_id == owner_id)))
             await db.execute(delete(DocumentDeletion).where((DocumentDeletion.tenant_id == owner_id) | (DocumentDeletion.client_id == owner_id) | (DocumentDeletion.subject_id == owner_id)))
             await db.execute(delete(InferenceDataPolicy).where(InferenceDataPolicy.tenant_id == owner_id))

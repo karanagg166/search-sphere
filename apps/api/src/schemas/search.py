@@ -161,6 +161,8 @@ class SearchResultResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     document_id: str
+    chunk_id: str | None = None
+    version_id: str | None = None
     chunk_index: int
     content: str
 

@@ -184,6 +184,7 @@ class AnswerService:
             AnswerSource(
                 source_id=idx + 1,
                 document_id=chunk.document_id,
+                chunk_id=getattr(chunk, "chunk_id", None), version_id=getattr(chunk, "version_id", None),
                 chunk_index=chunk.chunk_index,
                 start_page=chunk.start_page,
                 end_page=chunk.end_page,

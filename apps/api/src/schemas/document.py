@@ -15,6 +15,7 @@ class DocumentResponse(BaseModel):
     mime_type: str
     status: str
     chunk_count: int | None = None
+    current_version_id: str | None = None
     job: IngestionProgress | None = None
     created_at: datetime
     updated_at: datetime

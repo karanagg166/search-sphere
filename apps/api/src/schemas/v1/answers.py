@@ -15,6 +15,7 @@ class AnswerCitation(BaseModel):
 
     citation_number: int
     chunk_id: str
+    version_id: str | None = None
     document_id: str
     file_name: str | None = None
     page_number: int | None = None

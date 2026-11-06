@@ -50,6 +50,7 @@ class DenseSearchResult:
     document_type: str | None = None
     report_date: str | None = None
     file_name: str | None = None
+    version_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,7 @@ class SparseSearchResult:
     document_type: str | None = None
     report_date: str | None = None
     file_name: str | None = None
+    version_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -109,6 +111,7 @@ class HybridSearchResult:
     document_type: str | None = None
     report_date: str | None = None
     file_name: str | None = None
+    version_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -140,6 +143,7 @@ class RerankedSearchResult:
     document_type: str | None = None
     report_date: str | None = None
     file_name: str | None = None
+    version_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.score is None:

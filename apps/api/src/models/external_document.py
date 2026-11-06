@@ -6,6 +6,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     DateTime,
+    ForeignKey,
     Integer,
     String,
     Text,
@@ -122,6 +123,7 @@ class ExternalDocument(Base):
         nullable=True,
         default=None,
     )
+    current_version_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("document_versions.id", ondelete="SET NULL"))
 
     processing_error: Mapped[str | None] = mapped_column(
         Text,

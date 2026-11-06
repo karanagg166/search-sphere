@@ -373,6 +373,7 @@ class CrossEncoderReranker:
                     document_type=document_type,
                     report_date=report_date,
                     file_name=file_name,
+                    version_id=getattr(cand, "version_id", None),
                 )
             )
 

@@ -69,6 +69,7 @@ class DocumentRegisterRequest(BaseModel):
 
 
 class DocumentResponse(BaseModel):
+    current_version_id: str | None = None
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: str

@@ -212,6 +212,8 @@ class ConversationService:
         sources_payload=[source.model_dump() for source in answer_resp.sources]
         assistant_msg=await append_turn(self.db,access,request.query,answer_resp.answer,sources_payload,
             answer_resp.retrieval_query,answer_resp.rewritten)
+        for source in answer_resp.sources:
+            source.source_message_id = assistant_msg.id
         if conv.title in ("New Conversation", ""):
             conv.title=request.query[:50].strip()+("..." if len(request.query)>50 else "")
         await self.db.commit()

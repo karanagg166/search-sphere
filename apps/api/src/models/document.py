@@ -60,6 +60,7 @@ class Document(Base):
         nullable=True,
         default=None,
     )
+    current_version_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("document_versions.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

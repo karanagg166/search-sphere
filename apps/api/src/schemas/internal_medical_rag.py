@@ -25,6 +25,8 @@ class MedicalAnswerCitation(BaseModel):
 
     citation_id: int = Field(..., alias="citationId", serialization_alias="citationId")
     document_id: str = Field(..., alias="documentId", serialization_alias="documentId")
+    version_id: str | None = Field(default=None, alias="versionId", serialization_alias="versionId")
+    chunk_id: str | None = Field(default=None, alias="chunkId", serialization_alias="chunkId")
     file_name: str = Field(..., alias="fileName", serialization_alias="fileName")
     document_type: str = Field(..., alias="documentType", serialization_alias="documentType")
     report_date: str | None = Field(default=None, alias="reportDate", serialization_alias="reportDate")

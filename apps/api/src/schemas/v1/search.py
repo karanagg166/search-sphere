@@ -24,6 +24,7 @@ class SearchChunkResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     chunk_id: str
+    version_id: str | None = None
     document_id: str
     text: str
     score: float

@@ -822,3 +822,40 @@ and diff checks passed. Synthetic adapters demonstrate skipped embedding/reranki
 work, not production latency. Document-version replacement/cutover, full labeled
 evaluation and the three authenticated production journeys remain open. No new
 production migrations or Search Sphere runtime deployment occurred in this phase.
+
+[Search Sphere #55](https://github.com/karanagg166/search-sphere/pull/55) merged at
+`fb34007e3f8deaaa8cb80926d98c7009a8adf23e`; required CI passed in
+[42263736443](https://github.com/karanagg166/search-sphere/actions/runs/42263736443).
+
+## Published version identity and citation provenance (partial replacement phase)
+
+Migration 021 adds private `document_versions` and active-version pointers to the
+existing native/delegated document tables. `services/ingestion_pipeline.py` hashes
+the actual downloaded original; `services/document_versions.py` records a successful
+publication under the job fence. Catalog, vector version tags, active pointer,
+cache invalidation and completed job commit atomically. Failed publication preserves
+the old working version. Existing legacy rows remain explicitly unversioned until
+successfully indexed; no historical byte hashes are fabricated.
+
+`security/query_access.py` applies active-version predicates to dense, lexical and
+candidate SQL, and compares evidence versions around provider calls. Native,
+`/api/v1` and medical citations carry actual version IDs when available. Stored
+message references and compact memory bind version, chunk and source-message IDs.
+Native and versioned `GET /documents/{id}/versions` metadata listings authorize the
+live parent, use offset pagination and omit private storage paths. Root deletion
+removes version metadata with vector revocation before durable object cleanup.
+
+Six new PostgreSQL/pgvector cases verify byte hashes, actual citation/memory links,
+publication rollback, continued prior-index retrieval, monotonically numbered
+successful reindexes, stale-citation refusal, stale-version exclusion in dense and
+lexical retrieval, duplicate delivery, scoped metadata pagination and deletion.
+The combined version/cache/ingestion/query/memory/stream/cleanup group passed 47
+tests before the final citation-link case was added. Another 28 structured-evidence,
+crop, medical/history and guardrail tests passed. The API suite passed with its
+existing isolated-live-service skip; focused medical/structured API checks and
+all-source Ruff passed. See `docs/DOCUMENT_VERSIONS.md` for the boundary of this phase.
+
+Changed-file replacement uploads, staged-original cleanup, retained historical
+evidence, bounded reindex/cutover, broader labeled evaluation and production journeys
+remain open. Production is still on the older runtime; no production version
+migration has been applied.

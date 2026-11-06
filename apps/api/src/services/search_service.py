@@ -196,6 +196,7 @@ class SearchService:
             result_responses = [
                 SearchResultResponse(
                     document_id=r.document_id,
+                    chunk_id=getattr(r, "point_id", None), version_id=getattr(r, "version_id", None),
                     chunk_index=r.chunk_index,
                     content=r.content,
                     start_page=r.start_page,

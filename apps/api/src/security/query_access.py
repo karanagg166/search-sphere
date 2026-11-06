@@ -63,6 +63,7 @@ class QueryAccess:
     conversation_id: str | None = None
     classification: object = None
     evidence: dict[str, str] = field(default_factory=dict, repr=False)
+    evidence_versions: dict[str, str | None] = field(default_factory=dict, repr=False)
     observation_evidence: dict[str, str] = field(default_factory=dict, repr=False)
     history: list = field(default_factory=list, repr=False)
     history_hashes: dict[str, str] = field(default_factory=dict, repr=False)
@@ -123,7 +124,8 @@ class QueryAccess:
                     raise ProviderNotApprovedError("Structured evidence access or version changed.")
             if self.evidence:
                 rows = (await db.execute(self.chunk_query().where(DocumentChunk.point_id.in_(list(self.evidence))))).scalars().all()
-                if len(rows) != len(self.evidence) or any(hashlib.sha256(row.content.encode()).hexdigest() != self.evidence.get(row.point_id) for row in rows):
+                if len(rows) != len(self.evidence) or any(hashlib.sha256(row.content.encode()).hexdigest() != self.evidence.get(row.point_id)
+                    or (row.point_id in self.evidence_versions and self.evidence_versions[row.point_id] != row.metadata_json.get("version_id")) for row in rows):
                     raise ProviderNotApprovedError("Source evidence access or version changed.")
             requested_scope = (context.collection_id or "", context.subject_id or "")
             scopes = {requested_scope}
@@ -147,6 +149,7 @@ class QueryAccess:
             )).where(
                 ExternalDocument.source_system == context.client_id, ExternalDocument.tenant_id == context.tenant_id,
                 ExternalDocument.status == "READY",
+                DocumentChunk.metadata_json["version_id"].as_string().is_not_distinct_from(ExternalDocument.current_version_id),
             )
             if context.subject_id:
                 query = query.where(ExternalDocument.owner_subject_id == context.subject_id, DocumentChunk.owner_subject_id == context.subject_id)
@@ -157,6 +160,7 @@ class QueryAccess:
                 Document.user_id == context.user_id, Document.status == "indexed",
                 DocumentChunk.client_id.is_(None), DocumentChunk.source_system.is_(None),
                 DocumentChunk.metadata_json["source_record_id"].as_string() == Document.id,
+                DocumentChunk.metadata_json["version_id"].as_string().is_not_distinct_from(Document.current_version_id),
             )
             if self.document_id:
                 query = query.where(Document.id == self.document_id)
@@ -175,6 +179,7 @@ class QueryAccess:
                 "ed.collection_id IS NOT DISTINCT FROM document_chunks.collection_id",
                 "ed.owner_subject_id IS NOT DISTINCT FROM document_chunks.owner_subject_id",
                 "ed.source_system = :auth_client", "ed.tenant_id = :auth_tenant",
+                "ed.current_version_id IS NOT DISTINCT FROM document_chunks.metadata_json->>'version_id'",
             ]
             if context.subject_id:
                 params["auth_subject"] = context.subject_id
@@ -184,7 +189,7 @@ class QueryAccess:
                 inner += ["ed.collection_id = :auth_collection", "document_chunks.collection_id = :auth_collection"]
             clauses.append("EXISTS (SELECT 1 FROM external_documents ed WHERE " + " AND ".join(inner) + ")")
         else:
-            clauses += ["client_id IS NULL", "source_system IS NULL", "EXISTS (SELECT 1 FROM documents d WHERE d.id = document_chunks.document_id AND d.id = document_chunks.metadata_json->>'source_record_id' AND d.user_id = :auth_tenant AND d.status = 'indexed')"]
+            clauses += ["client_id IS NULL", "source_system IS NULL", "EXISTS (SELECT 1 FROM documents d WHERE d.id = document_chunks.document_id AND d.id = document_chunks.metadata_json->>'source_record_id' AND d.user_id = :auth_tenant AND d.status = 'indexed' AND d.current_version_id IS NOT DISTINCT FROM document_chunks.metadata_json->>'version_id')"]
             if self.document_id:
                 params["auth_document"] = self.document_id
                 clauses.append("document_id = :auth_document")
@@ -204,11 +209,13 @@ class QueryAccess:
             if contains_secrets(row.content):
                 raise ProviderNotApprovedError("Source evidence failed credential screening.")
             self.evidence[row.point_id] = hashlib.sha256(row.content.encode()).hexdigest()
+            self.evidence_versions[row.point_id] = row.metadata_json.get("version_id")
             authorized.append(replace(candidate, content=row.content, document_id=row.document_id, chunk_index=row.chunk_index,
                 token_count=row.token_count, start_page=row.start_page, end_page=row.end_page,
                 page_numbers=row.page_numbers, block_types=row.block_types, client_id=row.client_id, tenant_id=row.tenant_id,
                 collection_id=row.collection_id, owner_subject_id=row.owner_subject_id, patient_id=row.patient_id,
-                source_system=row.source_system, file_name=row.file_name, document_type=row.document_type))
+                source_system=row.source_system, file_name=row.file_name, document_type=row.document_type,
+                version_id=row.metadata_json.get("version_id")))
         await self.validate()
         return authorized
 
