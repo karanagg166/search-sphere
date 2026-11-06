@@ -790,5 +790,5 @@ cold-start capacity measurement. Broader evaluation, caching, document versions/
 cutover and all three authenticated production journeys remain open.
 
 [Search Sphere #53](https://github.com/karanagg166/search-sphere/pull/53) merged at
-`bf15e50` (full SHA recorded by GitHub); required CI passed in
+`bf15e50850afc4750bb2d22a162ca9cbc4f97ea4`; required CI passed in
 [42259891811](https://github.com/karanagg166/search-sphere/actions/runs/42259891811).
