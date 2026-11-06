@@ -859,3 +859,18 @@ Changed-file replacement uploads, staged-original cleanup, retained historical
 evidence, bounded reindex/cutover, broader labeled evaluation and production journeys
 remain open. Production is still on the older runtime; no production version
 migration has been applied.
+
+## Bounded provider timeout recovery
+
+Reproduced a queue failure for `ProviderTimeoutError`: the server-owned failure
+allowlist omitted `provider_timeout`, so `IngestionQueue.fail` raised `ValueError`
+and left the job RUNNING until lease expiry. Added the timeout code to the existing
+retry path. Two new real-PostgreSQL regressions cover fresh ingestion and reindexing:
+each timeout releases the lease, backoff applies, attempt three becomes terminal
+FAILED with the exact reason, and an existing working index remains searchable.
+Both tests failed before the repair and passed after it; the complete queue/timeout
+group passed 11 tests. The required PostgreSQL CI gate includes these regressions.
+
+Schema-only, read-only connection checks succeeded for both consumers' configured
+databases. No medical/student records or credential/hash fields were selected.
+This establishes available setup access, not completed synthetic production journeys.
