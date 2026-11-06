@@ -226,3 +226,25 @@ database; container capped at 512 MiB served health/readiness/diagnostics 200 wi
 capacity/P95 measurement. Production still serves 8288c9d at this checkpoint.
 Trusted classification binding, durable worker binding, index version filtering
 and live journeys remain pending; do not deploy the model migration alone.
+
+The hosted runtime [#35](https://github.com/karanagg166/search-sphere/pull/35)
+merged at `c54a03335cac0c10d6cce9abe11f47febf4565f6` after all four CI jobs passed
+([42207588839](https://github.com/karanagg166/search-sphere/actions/runs/42207588839)).
+This revision has not been deployed. The separate runtime image gate passed offline.
+
+### Legacy credential scope containment
+
+Inspection found that the Quick-Clinic legacy secret received `*`, including
+`clients:manage`, in `security/service_auth.py`. It could therefore invoke platform
+client administration despite being intended for medical compatibility. The adapter
+now grants only document operations, collection management, search and answers in
+`quick_clinic_default`. An existing registered client can narrow or revoke these
+permissions; it cannot expand the legacy credential into platform administration.
+Future client registration/rotation/revocation requires an independent server-only
+`clients:manage` credential. Existing medical route names and key format are preserved.
+
+Four negative API tests deny client list/register/rotation/revocation with the
+medical key. Three registered-profile tests cover revocation, tenant denial and
+scope narrowing. Client lifecycle/isolation tests now bootstrap a dedicated synthetic
+platform administrator instead of relying on the old wildcard. Fourteen focused
+service-client/integration tests passed against isolated PostgreSQL.

@@ -6,7 +6,6 @@ from httpx import ASGITransport, AsyncClient
 from src.main import app
 from src.storage.object_storage import LocalStorage, get_object_storage
 from tests.binary_fixtures import pdf_bytes
-from tests.conftest import VALID_AUTH_HEADER
 
 SAMPLE_PDF_BYTES = pdf_bytes()
 
@@ -18,7 +17,7 @@ def mock_storage(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_cross_tenant_and_cross_client_isolation(mock_storage):
+async def test_cross_tenant_and_cross_client_isolation(mock_storage, admin_auth_header):
     """
     Comprehensive multi-tenant isolation verification:
     1. Cross-client document and search isolation.
@@ -43,7 +42,7 @@ async def test_cross_tenant_and_cross_client_isolation(mock_storage):
                     "allowed_scopes": ["documents:read", "documents:write", "documents:delete", "search:execute", "collections:manage"],
                     "authorized_tenants": ["*"],
                 },
-                headers=VALID_AUTH_HEADER,
+                headers=admin_auth_header,
             )
             assert res_a.status_code == 201
             key_a = res_a.json()["api_key"]
@@ -56,7 +55,7 @@ async def test_cross_tenant_and_cross_client_isolation(mock_storage):
                     "allowed_scopes": ["documents:read", "documents:write", "documents:delete", "search:execute", "collections:manage"],
                     "authorized_tenants": ["*"],
                 },
-                headers=VALID_AUTH_HEADER,
+                headers=admin_auth_header,
             )
             assert res_b.status_code == 201
             key_b = res_b.json()["api_key"]

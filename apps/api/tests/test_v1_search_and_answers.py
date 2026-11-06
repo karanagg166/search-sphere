@@ -10,11 +10,10 @@ from src.processing.models.search import DenseSearchResult
 from src.retrieval.reranked_retriever import RerankedHybridRetriever
 from src.services.answer_generator import AnswerGenerator, get_answer_generator
 from src.services.search_service import get_retriever
-from tests.conftest import VALID_AUTH_HEADER
 
 
 @pytest.mark.asyncio
-async def test_v1_search_and_grounded_answers():
+async def test_v1_search_and_grounded_answers(admin_auth_header):
     """
     Simulates second external client ExamArena:
     Tenant: school_cbse_10
@@ -76,7 +75,7 @@ async def test_v1_search_and_grounded_answers():
                     "allowed_scopes": ["documents:read", "documents:write", "search:execute", "answers:generate", "collections:manage"],
                     "authorized_tenants": ["*"],
                 },
-                headers=VALID_AUTH_HEADER,
+                headers=admin_auth_header,
             )
             assert res.status_code == 201
             api_key = res.json()["api_key"]

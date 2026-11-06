@@ -4,11 +4,10 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from src.main import app
-from tests.conftest import VALID_AUTH_HEADER
 
 
 @pytest.mark.asyncio
-async def test_service_client_lifecycle():
+async def test_service_client_lifecycle(admin_auth_header):
     """Verify registration, authentication, key rotation, and revocation for external service clients."""
     cid = f"exam_{uuid.uuid4().hex[:6]}"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -20,7 +19,7 @@ async def test_service_client_lifecycle():
             "authorized_tenants": ["school_1", "school_2"],
             "rate_limit_per_minute": 300,
         }
-        res = await client.post("/api/v1/clients", json=reg_payload, headers=VALID_AUTH_HEADER)
+        res = await client.post("/api/v1/clients", json=reg_payload, headers=admin_auth_header)
         assert res.status_code == 201, res.text
         data = res.json()
         assert data["client_id"] == cid
@@ -29,11 +28,11 @@ async def test_service_client_lifecycle():
         assert raw_key.startswith("ss_live_")
 
         # 2. Cannot register duplicate client_id
-        res_dup = await client.post("/api/v1/clients", json=reg_payload, headers=VALID_AUTH_HEADER)
+        res_dup = await client.post("/api/v1/clients", json=reg_payload, headers=admin_auth_header)
         assert res_dup.status_code == 409
 
         # 3. List clients
-        list_res = await client.get("/api/v1/clients", headers=VALID_AUTH_HEADER)
+        list_res = await client.get("/api/v1/clients", headers=admin_auth_header)
         assert list_res.status_code == 200
         client_ids = [c["client_id"] for c in list_res.json()]
         assert cid in client_ids
@@ -68,7 +67,7 @@ async def test_service_client_lifecycle():
         # 6. Rotate API key
         rot_res = await client.post(
             f"/api/v1/clients/{cid}/rotate-key",
-            headers=VALID_AUTH_HEADER,
+            headers=admin_auth_header,
         )
         assert rot_res.status_code == 200
         new_key = rot_res.json()["api_key"]
@@ -91,7 +90,7 @@ async def test_service_client_lifecycle():
         assert res_new.status_code == 200
 
         # 9. Revoke client
-        rev_res = await client.delete(f"/api/v1/clients/{cid}", headers=VALID_AUTH_HEADER)
+        rev_res = await client.delete(f"/api/v1/clients/{cid}", headers=admin_auth_header)
         assert rev_res.status_code == 200
         assert rev_res.json()["status"] == "revoked"
 
@@ -101,7 +100,7 @@ async def test_service_client_lifecycle():
 
 
 @pytest.mark.asyncio
-async def test_service_client_scope_restriction():
+async def test_service_client_scope_restriction(admin_auth_header):
     """Verify that scopes restrict what endpoints a service client can invoke."""
     ro_cid = f"readonly_{uuid.uuid4().hex[:6]}"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -112,7 +111,7 @@ async def test_service_client_scope_restriction():
             "allowed_scopes": ["search:execute"],
             "authorized_tenants": ["*"],
         }
-        res = await client.post("/api/v1/clients", json=reg_payload, headers=VALID_AUTH_HEADER)
+        res = await client.post("/api/v1/clients", json=reg_payload, headers=admin_auth_header)
         assert res.status_code == 201
         raw_key = res.json()["api_key"]
 
