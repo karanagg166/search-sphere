@@ -16,12 +16,16 @@ from src.retrieval.reranked_retriever import (
 )
 from src.schemas.query_route import QueryRoute
 from src.schemas.search import (
+    RewriteResult,
     SearchRequest,
     SearchResponse,
     SearchResultResponse,
 )
 from src.security.query_access import current_query_access
-from src.services.conversation_context import select_conversation_context
+from src.services.conversation_context import (
+    prior_answer_chunks,
+    select_conversation_context,
+)
 from src.services.query_rewriter import QueryRewriter, get_query_rewriter
 from src.services.workload_scheduler import workload_scheduler
 
@@ -133,7 +137,7 @@ class SearchService:
 
         # 2. Query Reformulation & Retrieval under interactive RAG guardrails
         async with workload_scheduler.interactive_rag_scope():
-            rewrite_result = await self.query_rewriter.rewrite(
+            rewrite_result = RewriteResult(original_query=request.query, retrieval_query=request.query) if selection.exact_previous_answer is not None else await self.query_rewriter.rewrite(
                 query=request.query,
                 conversation_context=selection.history,
             )
@@ -145,7 +149,7 @@ class SearchService:
 
             # 3. Execute two-stage reranked retrieval pipeline
             try:
-                raw_results = await self.retriever.search(
+                raw_results = await prior_answer_chunks(access) if selection.exact_previous_answer is not None else await self.retriever.search(
                     query=retrieval_query,
                     top_k=request.top_k,
                     candidate_k=request.candidate_k,

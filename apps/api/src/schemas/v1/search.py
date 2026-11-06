@@ -2,6 +2,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.schemas.query_route import QueryRoute
+
 
 class SearchRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -44,3 +46,9 @@ class SearchResponse(BaseModel):
     total: int
     results: list[SearchChunkResult]
     duration_ms: float
+    route: QueryRoute = QueryRoute.RAG
+    clarification: str | None = None
+    requires_history: bool = False
+    context_message_ids: list[str] = Field(default_factory=list)
+    retrieval_query: str | None = None
+    rewritten: bool = False

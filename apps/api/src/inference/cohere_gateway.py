@@ -15,6 +15,7 @@ from src.inference.policy import (
     ProviderInvalidResponseError,
     ProviderQuotaExceededError,
     ProviderRateLimitError,
+    ProviderTimeoutError,
     authorize_cohere,
 )
 from src.inference.usage import CohereUsageBudget
@@ -57,8 +58,10 @@ class CohereGateway:
                 if scope.validator is not None:
                     await scope.validator()
                 return data
-        except (TimeoutError, httpx.TimeoutException, httpx.NetworkError) as exc:
-            raise ProviderError("Cohere request timed out or is unavailable.") from exc
+        except (TimeoutError, httpx.TimeoutException) as exc:
+            raise ProviderTimeoutError("Cohere request timed out.") from exc
+        except httpx.NetworkError as exc:
+            raise ProviderError("Cohere request is unavailable.") from exc
 
     async def _request(self, endpoint: str, payload: dict) -> dict:
         async with httpx.AsyncClient(

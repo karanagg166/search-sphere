@@ -227,3 +227,18 @@ async def test_revoked_scope_is_revalidated_before_quota_or_transmission():
         await client.embed(["PUBLIC SYNTHETIC FIXTURE"])
     validator.assert_awaited_once()
     client.budget.reserve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure,code', [(httpx.ReadTimeout, 'provider_timeout'), (httpx.ConnectError, 'provider_unavailable')])
+async def test_timeout_and_network_failures_remain_distinct_from_evidence_absence(failure, code):
+    attempts = []
+    def response(request):
+        attempts.append(request)
+        raise failure('synthetic private diagnostic')
+    client = gateway(response)
+    with (inference_scope(DataClassification.SYNTHETIC, 'fixture', 'fixture'), pytest.raises(ProviderError) as caught):
+        await client.embed(['PUBLIC SYNTHETIC'])
+    assert caught.value.code == code
+    assert 'private diagnostic' not in str(caught.value)
+    assert len(attempts) == 1

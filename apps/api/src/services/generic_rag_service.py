@@ -1,3 +1,4 @@
+import hashlib
 import json
 import time
 from collections.abc import AsyncIterator
@@ -8,10 +9,11 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.inference.policy import ProviderError
+from src.inference.policy import ProviderError, ProviderNotApprovedError
+from src.models.document_chunk import DocumentChunk
 from src.models.external_document import ExternalDocument
 from src.retrieval.reranked_retriever import RerankedHybridRetriever
-from src.schemas.search import ConversationMessage
+from src.schemas.query_route import QueryRoute
 from src.schemas.v1.answers import (
     AnswerCitation,
     AnswerRequest,
@@ -22,6 +24,7 @@ from src.schemas.v1.search import (
     SearchRequest,
     SearchResponse,
 )
+from src.security.query_access import current_query_access
 from src.security.service_context import ServiceContext
 from src.services.answer_generator import (
     ANSWER_SYSTEM_PREAMBLE,
@@ -30,6 +33,9 @@ from src.services.answer_generator import (
     extract_citation_numbers,
     sanitize_citations,
 )
+from src.services.conversation_context import prior_answer_chunks, resolve_query_context
+from src.services.delegated_conversations import append_turn
+from src.services.query_rewriter import get_query_rewriter
 from src.services.workload_scheduler import workload_scheduler
 
 logger = structlog.get_logger()
@@ -41,10 +47,12 @@ class GenericRagService:
         db: AsyncSession,
         retriever: RerankedHybridRetriever,
         answer_generator: AnswerGenerator,
+        query_rewriter=None,
     ):
         self.db = db
         self.retriever = retriever
         self.answer_generator = answer_generator
+        self.query_rewriter = query_rewriter or get_query_rewriter()
 
     def _build_qdrant_filters(
         self,
@@ -134,6 +142,13 @@ class GenericRagService:
                 detail="Search query cannot be empty or whitespace only.",
             )
 
+        access = current_query_access()
+        selection, rewrite = await resolve_query_context(access, clean_query, self.query_rewriter)
+        if selection.clarification:
+            return SearchResponse(query=clean_query, retrieval_query=clean_query, total=0, results=[], duration_ms=0,
+                route=QueryRoute.CLARIFICATION, clarification=selection.clarification, requires_history=selection.requires_history,
+                context_message_ids=selection.message_ids)
+
         resolved_limit = max(1, min(request.limit, 50))
         candidate_k = max(resolved_limit * 2, 20)
 
@@ -147,8 +162,8 @@ class GenericRagService:
 
         async with workload_scheduler.interactive_rag_scope():
             try:
-                raw_chunks = await self.retriever.search(
-                    query=clean_query,
+                raw_chunks = await prior_answer_chunks(access) if selection.exact_previous_answer is not None else await self.retriever.search(
+                    query=rewrite.retrieval_query,
                     top_k=resolved_limit,
                     candidate_k=candidate_k,
                     filters=filters,
@@ -189,6 +204,8 @@ class GenericRagService:
             duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
             return SearchResponse(
                 query=clean_query,
+                retrieval_query=rewrite.retrieval_query, rewritten=rewrite.rewritten,
+                requires_history=selection.requires_history, context_message_ids=selection.message_ids,
                 total=len(results),
                 results=results,
                 duration_ms=duration_ms,
@@ -209,6 +226,15 @@ class GenericRagService:
                 detail="Query cannot be empty or whitespace only.",
             )
 
+        access = current_query_access()
+        selection, rewrite = await resolve_query_context(access, clean_query, self.query_rewriter)
+        if selection.clarification:
+            result = AnswerResponse(answer=selection.clarification, citations=[], retrieved_chunk_count=0, duration_ms=0,
+                route=QueryRoute.CLARIFICATION, requires_history=selection.requires_history, context_message_ids=selection.message_ids,
+                retrieval_query=clean_query)
+            await self._persist(access, clean_query, result, [])
+            return result
+
         resolved_limit = max(1, min(request.limit, 20))
         candidate_k = max(resolved_limit * 2, 20)
 
@@ -222,8 +248,8 @@ class GenericRagService:
 
         async with workload_scheduler.interactive_rag_scope():
             try:
-                raw_chunks = await self.retriever.search(
-                    query=clean_query,
+                raw_chunks = await prior_answer_chunks(access) if selection.exact_previous_answer is not None else await self.retriever.search(
+                    query=rewrite.retrieval_query,
                     top_k=resolved_limit,
                     candidate_k=candidate_k,
                     filters=filters,
@@ -243,28 +269,23 @@ class GenericRagService:
 
             if not verified_chunks:
                 duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-                return AnswerResponse(
+                result = AnswerResponse(
                     answer=NO_RESULTS_ANSWER,
                     citations=[],
                     retrieved_chunk_count=0,
                     duration_ms=duration_ms,
+                    requires_history=selection.requires_history, context_message_ids=selection.message_ids,
+                    retrieval_query=rewrite.retrieval_query, rewritten=rewrite.rewritten,
                 )
-
-            conversation_context: list[ConversationMessage] | None = None
-            if request.conversation_history:
-                conversation_context = [
-                    ConversationMessage(role=m.role, content=m.content)
-                    for m in request.conversation_history
-                ]
-
-            preamble = request.system_prompt or ANSWER_SYSTEM_PREAMBLE
+                await self._persist(access, clean_query, result, [])
+                return result
 
             try:
                 answer_text, verified_chunks = await self.answer_generator.generate_answer(
                     query=clean_query,
                     chunks=verified_chunks,
-                    conversation_context=conversation_context,
-                    preamble=preamble,
+                    conversation_context=selection.history,
+                    preamble=ANSWER_SYSTEM_PREAMBLE,
                     no_results_answer=NO_RESULTS_ANSWER,
                 )
             except ProviderError:
@@ -298,94 +319,49 @@ class GenericRagService:
                 )
 
             duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-            return AnswerResponse(
-                answer=answer_text,
-                citations=citations,
-                retrieved_chunk_count=len(verified_chunks),
-                duration_ms=duration_ms,
-            )
+            result = AnswerResponse(answer=answer_text, citations=citations, retrieved_chunk_count=len(verified_chunks),
+                duration_ms=duration_ms, requires_history=selection.requires_history, context_message_ids=selection.message_ids,
+                retrieval_query=rewrite.retrieval_query, rewritten=rewrite.rewritten)
+            await self._persist(access, clean_query, result, verified_chunks)
+            return result
+
+    async def _persist(self, access, query, result, chunks):
+        if access is not None:
+            await access.validate()
+        if access is None or not access.conversation_id:
+            return
+        identifiers = list(dict.fromkeys(chunk.point_id for chunk in chunks))
+        async with access.sessions() as db:
+            rows = (await db.execute(access.chunk_query().where(DocumentChunk.point_id.in_(identifiers)))).scalars().all()
+        by_id = {row.point_id: row for row in rows}
+        if len(by_id) != len(identifiers) or any(by_id[chunk.point_id].content != chunk.content for chunk in chunks):
+            raise ProviderNotApprovedError("Answer source access or version changed.")
+        sources = [{"document_id": row.document_id, "chunk_index": row.chunk_index, "chunk_id": row.point_id,
+                    "chunk_row_id": str(row.id), "content_sha256": hashlib.sha256(row.content.encode()).hexdigest()}
+                   for point_id in identifiers if (row := by_id.get(point_id)) is not None]
+        message = await append_turn(self.db, access, query, result.answer, sources, result.retrieval_query, result.rewritten)
+        await self.db.commit()
+        result.message_id = message.id
 
     async def answer_stream(
         self,
         context: ServiceContext,
         request: AnswerRequest,
     ) -> AsyncIterator[str]:
-        """Streams grounded answer tokens via Server-Sent Events (SSE)."""
-        context = context.resolve_scope(request.collection_id, request.owner_subject_id)
-        clean_query = request.query.strip()
-        if not clean_query:
-            yield f"data: {json.dumps({'event': 'error', 'detail': 'Empty query'})}\n\n"
+        """Complete generation and current authorization before emitting answer content."""
+        try:
+            result = await self.answer(context, request)
+            access = current_query_access()
+            if access is not None:
+                await access.validate()
+        except (ProviderError, HTTPException) as exc:
+            code = exc.code if isinstance(exc, ProviderError) else "answer_unavailable"
+            yield f"data: {json.dumps({'event': 'error', 'code': code})}\n\n"
             yield "data: [DONE]\n\n"
             return
-
-        resolved_limit = max(1, min(request.limit, 20))
-        candidate_k = max(resolved_limit * 2, 20)
-
-        filters = self._build_qdrant_filters(
-            context=context,
-            collection_id=request.collection_id,
-            owner_subject_id=request.owner_subject_id,
-            document_type=request.document_type,
-            metadata_filters=request.metadata_filters,
-        )
-
-        raw_chunks = await self.retriever.search(
-            query=clean_query,
-            top_k=resolved_limit,
-            candidate_k=candidate_k,
-            filters=filters,
-        )
-
-        verified_pairs = await self._verify_and_enrich_chunks(context, raw_chunks)
-        verified_chunks = [pair[0] for pair in verified_pairs]
-        doc_lookup = {getattr(pair[0], "point_id", getattr(pair[0], "id", None)): pair[1] for pair in verified_pairs}
-
-        if not verified_chunks:
-            yield f"data: {json.dumps({'event': 'token', 'text': NO_RESULTS_ANSWER})}\n\n"
-            yield f"data: {json.dumps({'event': 'citations', 'citations': []})}\n\n"
-            yield "data: [DONE]\n\n"
-            return
-
-        conversation_context: list[ConversationMessage] | None = None
-        if request.conversation_history:
-            conversation_context = [
-                ConversationMessage(role=m.role, content=m.content)
-                for m in request.conversation_history
-            ]
-
-        preamble = request.system_prompt or ANSWER_SYSTEM_PREAMBLE
-
-        accumulated_text = []
-        token_stream, verified_chunks = await self.answer_generator.generate_answer_stream(
-            query=clean_query,
-            chunks=verified_chunks,
-            conversation_context=conversation_context,
-            preamble=preamble,
-            no_results_answer=NO_RESULTS_ANSWER,
-        )
-        async for token in token_stream:
-            accumulated_text.append(token)
-            yield f"data: {json.dumps({'event': 'token', 'text': token})}\n\n"
-
-        full_answer = "".join(accumulated_text)
-        cited_numbers = extract_citation_numbers(full_answer, len(verified_chunks))
-        citations: list[dict[str, Any]] = []
-        for num in cited_numbers:
-            chunk = verified_chunks[num - 1]
-            chunk_pid = getattr(chunk, "point_id", getattr(chunk, "id", None))
-            doc = doc_lookup.get(chunk_pid)
-            citations.append(
-                {
-                    "citation_number": num,
-                    "chunk_id": chunk_pid or str(num),
-                    "document_id": doc.external_document_id if doc else chunk.document_id,
-                    "file_name": doc.file_name if doc else None,
-                    "page_number": chunk.start_page,
-                    "text_snippet": chunk.content[:200],
-                    "collection_id": doc.collection_id if doc else None,
-                    "owner_subject_id": doc.owner_subject_id if doc else None,
-                }
-            )
-
-        yield f"data: {json.dumps({'event': 'citations', 'citations': citations})}\n\n"
+        payload = result.model_dump()
+        yield f"data: {json.dumps({'event': 'metadata', 'requires_history': result.requires_history, 'route': result.route, 'retrieval_query': result.retrieval_query, 'rewritten': result.rewritten, 'context_message_ids': result.context_message_ids})}\n\n"
+        yield f"data: {json.dumps({'event': 'token', 'text': result.answer})}\n\n"
+        yield f"data: {json.dumps({'event': 'citations', 'citations': payload['citations']})}\n\n"
+        yield f"data: {json.dumps({'event': 'done', **payload})}\n\n"
         yield "data: [DONE]\n\n"

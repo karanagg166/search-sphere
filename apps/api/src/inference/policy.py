@@ -34,6 +34,10 @@ class ProviderQuotaExceededError(ProviderError):
     retryable = False
 
 
+class ProviderTimeoutError(ProviderError):
+    code = "provider_timeout"
+
+
 class ProviderRateLimitError(ProviderError):
     code = "provider_rate_limit"
 

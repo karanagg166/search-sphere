@@ -3,6 +3,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.inference.policy import (
+    ProviderError,
+    ProviderInvalidResponseError,
+    ProviderNotApprovedError,
+    ProviderTimeoutError,
+)
 from src.schemas.search import ConversationMessage, RewriteResult
 from src.services.query_rewriter import (
     BaseQueryRewriteProvider,
@@ -240,9 +246,9 @@ async def test_empty_conversation_context_list_skips_llm() -> None:
 
 
 @pytest.mark.asyncio
-async def test_provider_timeout_fallback() -> None:
+async def test_provider_timeout_is_explicit() -> None:
     """
-    When Cohere times out, service falls back safely to original query without crashing.
+    A rewrite timeout is reported separately from ambiguous context or absent evidence.
     """
     mock_client = MagicMock()
     mock_client.chat = AsyncMock(side_effect=TimeoutError("Request timed out"))
@@ -255,22 +261,14 @@ async def test_provider_timeout_fallback() -> None:
     rewriter = QueryRewriter(provider=provider)
 
     context = [ConversationMessage(role="user", content="Explain Redis.")]
-    result = await rewriter.rewrite(
-        query="how does eviction work?",
-        conversation_context=context,
-    )
-
-    assert result.rewritten is False
-    assert result.original_query == "how does eviction work?"
-    assert result.retrieval_query == "how does eviction work?"
-    assert "timed out" in (result.reason or "").lower()
+    with pytest.raises(ProviderTimeoutError):
+        await rewriter.rewrite(query='how does eviction work?', conversation_context=context)
 
 
 @pytest.mark.asyncio
-async def test_provider_api_error_fallback() -> None:
+async def test_provider_api_error_is_explicit() -> None:
     """
-    When Cohere raises an API exception (rate limit, network error, 500), service falls back
-    gracefully to original query.
+    Provider failures remain explicit; no ambiguous query is sent to retrieval as a fallback.
     """
     mock_client = MagicMock()
     mock_client.chat = AsyncMock(
@@ -281,20 +279,14 @@ async def test_provider_api_error_fallback() -> None:
     rewriter = QueryRewriter(provider=provider)
 
     context = [ConversationMessage(role="user", content="Explain Redis.")]
-    result = await rewriter.rewrite(
-        query="which one is better?",
-        conversation_context=context,
-    )
-
-    assert result.rewritten is False
-    assert result.original_query == "which one is better?"
-    assert result.retrieval_query == "which one is better?"
+    with pytest.raises(ProviderError):
+        await rewriter.rewrite(query='which one is better?', conversation_context=context)
 
 
 @pytest.mark.asyncio
-async def test_invalid_provider_response_fallback() -> None:
+async def test_invalid_provider_response_is_explicit() -> None:
     """
-    When Cohere returns malformed non-JSON text, service safely falls back to original query.
+    Malformed rewrite JSON is an explicit provider response failure.
     """
     mock_client = MagicMock()
     mock_resp = MagicMock()
@@ -305,14 +297,8 @@ async def test_invalid_provider_response_fallback() -> None:
     rewriter = QueryRewriter(provider=provider)
 
     context = [ConversationMessage(role="user", content="Explain Redis.")]
-    result = await rewriter.rewrite(
-        query="which one is best?",
-        conversation_context=context,
-    )
-
-    assert result.rewritten is False
-    assert result.retrieval_query == "which one is best?"
-    assert result.original_query == "which one is best?"
+    with pytest.raises(ProviderInvalidResponseError):
+        await rewriter.rewrite(query='which one is best?', conversation_context=context)
 
 
 @pytest.mark.asyncio
@@ -416,22 +402,16 @@ async def test_disabled_query_rewriting_setting() -> None:
 
 
 @pytest.mark.asyncio
-async def test_missing_or_dummy_cohere_key_fallback() -> None:
+async def test_missing_or_dummy_cohere_key_is_explicit() -> None:
     """
-    When COHERE_API_KEY is not configured or is a placeholder, provider safely falls back.
+    A missing provider key fails closed before a contextual rewrite can run.
     """
     provider = CohereQueryRewriteProvider(api_key="your_cohere_api_key_here")
     rewriter = QueryRewriter(provider=provider)
 
     context = [ConversationMessage(role="user", content="Explain Redis.")]
-    result = await rewriter.rewrite(
-        query="which one is best?",
-        conversation_context=context,
-    )
-
-    assert result.rewritten is False
-    assert result.retrieval_query == "which one is best?"
-    assert "not configured" in (result.reason or "").lower()
+    with pytest.raises(ProviderNotApprovedError):
+        await rewriter.rewrite(query='which one is best?', conversation_context=context)
 
 
 @pytest.mark.asyncio
