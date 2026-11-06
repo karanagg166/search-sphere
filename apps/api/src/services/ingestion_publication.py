@@ -11,6 +11,7 @@ from src.models.document_evidence import DocumentEvidence
 from src.models.external_document import ExternalDocument
 from src.models.external_document_content import ExternalDocumentContent
 from src.models.medical_observation import MedicalObservation
+from src.retrieval.permission_cache import invalidate_scope
 from src.services.ingestion_source import load_ingestion_source
 from src.vector_store.supabase_vector_store import SupabaseVectorStore
 
@@ -70,6 +71,7 @@ async def publish_ingestion(sessions, queue, lease, source, processed):
         model = Document if source.kind == "standalone" else ExternalDocument
         row = await db.get(model, source.internal_id)
         row.chunk_count = count
+        await invalidate_scope(db, source.client_id, source.tenant_id)
         row.status = "indexed" if source.kind == "standalone" else "READY"
         if source.kind == "external":
             row.processing_error = None

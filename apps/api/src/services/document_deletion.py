@@ -18,6 +18,7 @@ from src.repositories.document_deletion import (
     find_deletion,
     lock_document_identity,
 )
+from src.retrieval.permission_cache import invalidate_scope
 
 
 async def delete_registered_document(db, kind, document_id, client_id, tenant_id, *, context=None):
@@ -61,6 +62,7 @@ async def delete_registered_document(db, kind, document_id, client_id, tenant_id
     # pgvector and relational metadata share the same transaction. A failed delete
     # rolls everything back; a committed delete immediately hides all evidence.
     await db.execute(delete(DocumentChunk).where(*chunk_scope(row)))
+    await invalidate_scope(db, client_id, tenant_id)
     await db.execute(update(DocumentDeletion).where(
         DocumentDeletion.kind == "asset", DocumentDeletion.source_record_id == document.id,
         DocumentDeletion.client_id == client_id, DocumentDeletion.tenant_id == tenant_id,

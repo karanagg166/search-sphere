@@ -99,7 +99,8 @@ jobs:
           scripts/tests/test_query_routing_postgres.py
           scripts/tests/test_native_streams_postgres.py
           scripts/tests/test_grounded_guardrails_postgres.py
-          scripts/tests/test_compact_memory_postgres.py -v
+          scripts/tests/test_compact_memory_postgres.py
+          scripts/tests/test_retrieval_cache_postgres.py -v
 
       - name: Verify hosted inference eligibility and bounded failures
         env:

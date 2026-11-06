@@ -26,6 +26,7 @@ from src.models.inference_data_policy import InferenceDataPolicy
 from src.models.ingestion_job import IngestionJob
 from src.models.medical_observation import MedicalObservation
 from src.models.query_policy import QueryPolicy
+from src.models.retrieval_cache import RetrievalCache
 from src.models.service_client import ServiceClient
 from src.models.user import User
 from src.processing.chunking.semantic_splitter import SemanticEmbedder
@@ -69,6 +70,7 @@ async def fixture(tmp_path, monkeypatch):
         yield value
     finally:
         async with sessions() as db, db.begin():
+            await db.execute(delete(RetrievalCache).where((RetrievalCache.client_id == owner_id) | (RetrievalCache.tenant_id == owner_id)))
             await db.execute(delete(Conversation).where((Conversation.client_id == owner_id) | (Conversation.external_reference == owner_id)))
             native_ids = select(Document.id).where(Document.user_id == owner_id)
             await db.execute(delete(DocumentChunk).where(DocumentChunk.document_id.in_(native_ids)))
