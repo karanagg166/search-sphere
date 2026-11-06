@@ -316,7 +316,7 @@ def test_cleanup_synthetic_document_checks_vector_purge(monkeypatch):
 
 
 def cleanup_receipt(document_id):
-    return {"document_id": document_id, "status": "complete", "vectors_remaining": 0, "object_deleted": True}
+    return {"document_id": document_id, "status": "complete", "vectors_remaining": 0, "object_deleted": True, "derived_objects_remaining": 0}
 
 
 def valid_source(document_id, marker):
@@ -361,9 +361,9 @@ def test_deletion_search_outage_or_remaining_results_fail(monkeypatch, status, p
     assert not any("purged synthetic document" in r for r in smoke.RESULTS)
 
 
-@pytest.mark.parametrize("receipt", [None, {}, {"document_id": "doc-001", "status": "complete", "vectors_remaining": 1, "object_deleted": True},
-                                     {"document_id": "doc-001", "status": "complete", "vectors_remaining": 0, "object_deleted": False},
-                                     {"document_id": "another-document", "status": "complete", "vectors_remaining": 0, "object_deleted": True}])
+@pytest.mark.parametrize("receipt", [None, {}, {"document_id": "doc-001", "status": "complete", "vectors_remaining": 1, "object_deleted": True, "derived_objects_remaining": 0},
+                                     {"document_id": "doc-001", "status": "invalid", "vectors_remaining": 0, "object_deleted": False, "derived_objects_remaining": 0},
+                                     {"document_id": "another-document", "status": "complete", "vectors_remaining": 0, "object_deleted": True, "derived_objects_remaining": 0}])
 def test_physical_cleanup_cannot_pass_without_scoped_receipt(monkeypatch, receipt):
     monkeypatch.setattr(smoke, "http", lambda *a, **kw: (204, {}, {}) if kw.get("method") == "DELETE" else (200, {}, receipt))
     with pytest.raises(AssertionError, match="Physical deletion verification"):
@@ -390,6 +390,27 @@ def test_corrupt_manifest_fails_instead_of_resetting(tmp_path):
     path.write_text("invalid")
     with pytest.raises(AssertionError, match="manifest"):
         smoke.FixtureManager(path, "run").load_manifest()
+
+
+def test_cleanup_waits_for_derived_crops_but_never_accepts_a_503(monkeypatch):
+    responses = iter([
+        (200, {}, {**cleanup_receipt("doc"), "status": "pending", "derived_objects_remaining": 1}),
+        (503, {}, {}),
+    ])
+    monkeypatch.setattr(smoke, "http", lambda *a, **kw: (204, {}, {}) if kw.get("method") == "DELETE" else next(responses))
+    monkeypatch.setattr(smoke.time, "sleep", lambda *_: None)
+    with pytest.raises(AssertionError, match="Physical deletion verification"):
+        smoke.cleanup_synthetic_document("token", "doc")
+
+
+def test_cleanup_succeeds_after_valid_pending_crop_receipt(monkeypatch):
+    responses = iter([
+        (200, {}, {**cleanup_receipt("doc"), "status": "pending", "derived_objects_remaining": 1}),
+        (200, {}, cleanup_receipt("doc")),
+    ])
+    monkeypatch.setattr(smoke, "http", lambda *a, **kw: (204, {}, {}) if kw.get("method") == "DELETE" else next(responses))
+    monkeypatch.setattr(smoke.time, "sleep", lambda *_: None)
+    assert smoke.cleanup_synthetic_document("token", "doc")
 
 
 def test_missing_credentials_fail_required_journey(monkeypatch):

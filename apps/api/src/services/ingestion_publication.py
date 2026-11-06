@@ -3,9 +3,10 @@
 from dataclasses import asdict
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from src.models.document import Document
+from src.models.document_deletion import DocumentDeletion
 from src.models.document_evidence import DocumentEvidence
 from src.models.external_document import ExternalDocument
 from src.models.external_document_content import ExternalDocumentContent
@@ -22,6 +23,21 @@ async def publish_ingestion(sessions, queue, lease, source, processed):
         current = await load_ingestion_source(db, source.kind, source.internal_id)
         if current != source:
             return False
+        asset_ids = [block.provenance["asset_id"] for page in processed.extracted.pages for block in page.blocks if "asset_id" in block.provenance]
+        await db.execute(update(DocumentDeletion).where(
+            DocumentDeletion.kind == "asset", DocumentDeletion.source_record_id == source.internal_id,
+            DocumentDeletion.status == "PUBLISHED", DocumentDeletion.id.not_in(asset_ids),
+        ).values(status="QUEUED", available_at=datetime.now(UTC)))
+        if asset_ids:
+            assets = (await db.execute(select(DocumentDeletion).where(
+                DocumentDeletion.id.in_(asset_ids), DocumentDeletion.kind == "asset",
+                DocumentDeletion.source_record_id == source.internal_id, DocumentDeletion.lease_token == lease.token,
+                DocumentDeletion.status == "STAGED",
+            ).with_for_update())).scalars().all()
+            if len(assets) != len(asset_ids):
+                raise RuntimeError("Derived source asset publication fence was lost")
+            for asset in assets:
+                asset.status, asset.lease_token = "PUBLISHED", None
         store = SupabaseVectorStore(session_factory=sessions)
         count = await store.index_document(
             source.document_id, processed.embedded, extra_payload=source.vector_payload(), session=db,
@@ -42,6 +58,7 @@ async def publish_ingestion(sessions, queue, lease, source, processed):
                     prior["row_pages"] = prior["row_pages"] + data["row_pages"]
                     prior["pages"] = prior["pages"] + data["pages"]
                     prior["regions"] = prior["regions"] + data["regions"]
+                    prior["asset_ids"] = prior.get("asset_ids", []) + data.get("asset_ids", [])
                 else:
                     structured[evidence_id] = {**data, "source_sha256": block.provenance.get("document_sha256", "")}
         for evidence_id, data in structured.items():

@@ -18,6 +18,7 @@ from src.models.ingestion_job import IngestionJob
 from src.processing.extraction.document_extractor import DocumentExtractionError
 from src.repositories.ingestion_queue import IngestionQueue
 from src.services.cleanup_worker import DocumentCleanupWorker
+from src.services.derived_assets import attach_asset_references, stage_derived_assets
 from src.services.ingestion_pipeline import process_ingestion
 from src.services.ingestion_publication import publish_ingestion
 from src.services.ingestion_recovery import adopt_legacy_pending
@@ -126,6 +127,9 @@ class PostgresIngestionWorker:
 
                 authorize_cohere(settings.COHERE_API_KEY or "")  # Fail before downloading unapproved content.
                 processed = await self.processor(source, self.storage_factory(), stage)
+                await guard()
+                await stage_derived_assets(self.sessions, self.queue, lease, source, processed.extracted, self.storage_factory(), guard)
+                attach_asset_references(processed)
                 await stage("indexing")
                 await guard()
                 await publish_ingestion(self.sessions, self.queue, lease, source, processed)

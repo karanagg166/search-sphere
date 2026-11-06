@@ -180,6 +180,7 @@ class IngestionQueue:
             "provider_invalid_response",
             "document_removed",
             "processing_failed",
+            "derived_assets_too_large",
         }:
             raise ValueError("Failure reason must be a server-owned code")
         async with self.sessions() as db, db.begin():

@@ -64,6 +64,9 @@ def continue_tables(pages):
             if block.block_type != "table":
                 continue
             data = dict(block.structured)
+            if len(data.get("column_edges", [])) != len(data["headers"]) + 1:
+                previous = None
+                continue  # No merge without explicit, validated column geometry.
             if previous:
                 prior = previous
                 before = prior["regions"][-1]

@@ -421,3 +421,31 @@ Unit fixtures cover grid extraction, units/identifiers, duplicate exclusion, row
 splitting, and continuation rejection. Real PostgreSQL checks cover table/chunk
 links, idempotent reindex identity, and complete deletion. Hosted scanned/complex
 tables, chart extraction, private crop persistence, and versioned cutover remain open.
+
+### Hosted layout, charts, and durable private source crops
+
+The canonical worker now routes image/scanned regions and vector graphics clusters
+through `HostedLayoutRecognizer`, while retaining native prose/tables. Strict
+validation rejects overlapping regions, malformed tables, invalid geometry, unknown
+routes/keys, and model claims of value verification. Text/image/table/chart blocks
+retain source provenance. Captions stay generated descriptions; chart values retain
+readability/approximation flags and server-owned `verified=false`. Unreviewed OCR,
+images/captions, and charts cannot enter exact structured clinical observations.
+Tables split at row boundaries; large charts split at point boundaries with stable
+IDs and repeated context. Continuations require explicit matching column geometry.
+
+`derived_assets.py` records private crop cleanup intents before object upload and
+publishes references under the ingestion fence. Cleanup recovers orphaned crops,
+preserves live staged work, and removes obsolete crops after successful reindex.
+Document cleanup receipts include `derived_objects_remaining`; the live gate waits
+only on valid pending receipts and still fails on 503 or physical vectors remaining.
+Authorized crop routes issue short-lived private signed URLs after live document
+scope checks. No public bucket, local model weights, or paid service is introduced.
+
+Real public synthetic hosted probes passed table extraction (3 rows/values, 3.90s)
+and labeled chart extraction (2 values, 5.34s), with review flags preserved. Tests
+cover schema/injection rejection, numeric uncertainty, clinical-path exclusion,
+atomic crop publication, orphan restart recovery, live leases, reindex and deletion.
+Detailed behavior and limits are in `docs/HOSTED_LAYOUT_EVIDENCE.md`. Exact chart
+comparisons require reviewed values and remain unavailable; broader model accuracy,
+full query guardrails, versioned cutover, and production journeys remain open.

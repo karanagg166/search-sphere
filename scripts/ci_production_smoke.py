@@ -544,15 +544,24 @@ def cleanup_synthetic_document(
         )
         if st != 404 and (st != 200 or not isinstance(res, dict) or res.get("results") != []):
             fail("Deletion access verification", f"unexpected search response HTTP {st}")
-    st, _, receipt = http(f"{API}/documents/{document_id}/cleanup", headers=headers, timeout=20)
-    if (
-        st != 200 or not isinstance(receipt, dict)
-        or receipt.get("document_id") != document_id or receipt.get("status") != "complete"
-        or type(receipt.get("vectors_remaining")) is not int or receipt["vectors_remaining"] != 0
-        or receipt.get("object_deleted") is not True
-    ):
-        fixture_manager.mark_fixture_failed(document_id, "physical_cleanup_unverified")
-        fail("Physical deletion verification", f"scoped cleanup receipt missing or incomplete (HTTP {st})")
+    deadline = time.monotonic() + 240
+    while True:
+        st, _, receipt = http(f"{API}/documents/{document_id}/cleanup", headers=headers, timeout=20)
+        if (
+            st != 200 or not isinstance(receipt, dict) or receipt.get("document_id") != document_id
+            or receipt.get("status") not in {"pending", "complete"}
+            or type(receipt.get("vectors_remaining")) is not int or receipt["vectors_remaining"] != 0
+            or type(receipt.get("derived_objects_remaining")) is not int or receipt["derived_objects_remaining"] < 0
+            or type(receipt.get("object_deleted")) is not bool
+        ):
+            fixture_manager.mark_fixture_failed(document_id, "physical_cleanup_unverified")
+            fail("Physical deletion verification", f"scoped cleanup receipt missing or invalid (HTTP {st})")
+        if receipt["status"] == "complete" and receipt["object_deleted"] and receipt["derived_objects_remaining"] == 0:
+            break
+        if time.monotonic() >= deadline:
+            fixture_manager.mark_fixture_failed(document_id, "physical_cleanup_pending")
+            fail("Physical deletion verification", "object/crop cleanup did not complete within 240 seconds")
+        time.sleep(3)
     fixture_manager.mark_fixture_cleaned(document_id)
     SYNTHETIC_DOCUMENT_IDS.discard(document_id)
     record("Synthetic document cleanup", f"purged synthetic document {document_id[:12]}")

@@ -67,7 +67,7 @@ def continuation(page, bbox, headers=None, edges=None, caption=""):
     data = {
         "evidence_id": f"table-{page}", "kind": "table", "headers": headers or ["ID", "Value"], "rows": [[str(page), "42"]],
         "row_pages": [page], "regions": [{"page_number": page, "bbox": bbox}], "pages": [page],
-        "column_edges": edges or [40, 200, 350], "page_width": 600, "page_height": 800, "caption": caption, "row_offset": 0,
+        "column_edges": edges or [40, 200, 350], "page_width": 600, "page_height": 800, "caption": caption, "row_offset": 0, "extraction_method": "native_pdf_table",
     }
     return ExtractedPage(page, [ExtractedBlock("table", "PUBLIC", {}, data)])
 

@@ -11,6 +11,7 @@ from src.processing.extraction.image_captioner import (
     ImageCaptioner,
     ImageCaptioningError,
 )
+from src.processing.extraction.layout_regions import render_region, visual_regions
 from src.processing.extraction.native_tables import (
     continue_tables,
     native_tables,
@@ -60,9 +61,13 @@ class DocumentExtractor:
         self,
         ocr_processor: OcrProcessor | None = None,
         image_captioner: ImageCaptioner | None = None,
+        layout_recognizer=None,
     ) -> None:
         self.ocr_processor = ocr_processor or OcrProcessor()
         self.image_captioner = image_captioner or ImageCaptioner()
+        self.layout_recognizer = layout_recognizer
+        self._hosted_regions = 0
+        self._crop_bytes = 0
 
     def extract_image(self, image_bytes: bytes) -> ExtractedDocument:
         """
@@ -76,6 +81,16 @@ class DocumentExtractor:
             raise DocumentExtractionError("Cannot extract content from empty image data.")
 
         try:
+            if self.layout_recognizer is not None:
+                with Image.open(BytesIO(image_bytes)) as image:
+                    width, height = image.size
+                    if width * height > 16_000_000:
+                        raise DocumentExtractionError("Image exceeds the pixel limit.")
+                blocks = self.layout_recognizer.recognize(
+                    image_bytes, page_number=1, bbox=[0, 0, width, height],
+                    source_hash=hashlib.sha256(image_bytes).hexdigest(), original_order=0, coordinate_space="image_pixels",
+                )
+                return ExtractedDocument([ExtractedPage(1, blocks)])
             text = self.ocr_processor.extract_text(image_bytes)
             clean_text = text.strip() if text else ""
             blocks = (
@@ -166,7 +181,10 @@ class DocumentExtractor:
         """
 
         try:
-            page_dict = page.get_text("dict")
+            flags = fitz.TEXTFLAGS_DICT
+            if self.layout_recognizer is not None:
+                flags &= ~fitz.TEXT_PRESERVE_IMAGES
+            page_dict = page.get_text("dict", flags=flags)
         except Exception as exc:
             logger.exception(
                 "Failed to read PDF page layout",
@@ -192,7 +210,28 @@ class DocumentExtractor:
             raise DocumentExtractionError("Native table inspection failed.") from exc
         filtered = []
         masks = [fitz.Rect(bbox) for table in tables for bbox in table["masks"]]
+        hosted = []
+        if self.layout_recognizer is not None:
+            # Image metadata can be read without duplicating original image bytes.
+            image_blocks = [{"type": 1, "bbox": info["bbox"]} for info in page.get_image_info()]
+            for rect in visual_regions(page, blocks + image_blocks, tables):
+                self._hosted_regions += 1
+                if self._hosted_regions > 32:
+                    raise DocumentExtractionError("Document exceeds the hosted layout region limit.")
+                recognized = self.layout_recognizer.recognize(
+                    render_region(page, rect), page_number=page_number, bbox=list(rect),
+                    source_hash=source_sha256, original_order=len(blocks) + len(tables) + len(hosted),
+                    page_size=[float(page.cropbox.width), float(page.cropbox.height)],
+                )
+                self._crop_bytes += sum(len(block.crop or b"") for block in recognized)
+                if self._crop_bytes > 8 * 1024 * 1024:
+                    raise DocumentExtractionError("Document exceeds the derived crop byte limit.")
+                masks.append(rect)
+                hosted.extend({"type": "hosted", "bbox": block.provenance["bbox"], "extracted": block,
+                               "original_order": len(blocks) + len(tables) + index} for index, block in enumerate(recognized))
         for index, block in enumerate(blocks):
+            if block.get("type") == self.IMAGE_BLOCK_TYPE and self.layout_recognizer is not None:
+                continue
             if block.get("type") != self.TEXT_BLOCK_TYPE:
                 filtered.append({**block, "original_order": index})
                 continue
@@ -207,7 +246,7 @@ class DocumentExtractor:
                 for line in lines[1:]:
                     rect |= fitz.Rect(line["bbox"])
                 filtered.append({**block, "lines": lines, "bbox": tuple(rect), "original_order": index})
-        blocks = filtered + [{**table, "original_order": len(blocks) + index} for index, table in enumerate(tables)]
+        blocks = filtered + [{**table, "original_order": len(blocks) + index} for index, table in enumerate(tables)] + hosted
         blocks = [part for block in blocks for part in split_text_columns(block)]
         if len(blocks) > 4096:
             raise DocumentExtractionError("PDF page exceeds the layout block limit.")
@@ -216,6 +255,9 @@ class DocumentExtractor:
         extracted_blocks: list[ExtractedBlock] = []
 
         for block in ordered_blocks:
+            if block.get("type") == "hosted":
+                extracted_blocks.append(block["extracted"])
+                continue
             block_type = block.get("type")
             provenance = {
                 "block_id": f"{source_sha256}:{page_number}:{block['original_order']}:{block.get('source_part', 0)}",

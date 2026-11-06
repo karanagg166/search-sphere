@@ -49,7 +49,7 @@ class CohereSyncAdapter:
     def rerank(self, query, documents):
         return self.run(lambda: self.gateway.rerank(query, list(documents)))
 
-    def inspect_image(self, image_bytes: bytes, instruction: str, *, preprocess=False):
+    def inspect_image(self, image_bytes: bytes, instruction: str, *, preprocess=False, max_tokens=1024):
         with Image.open(BytesIO(image_bytes)) as source:
             if source.width * source.height > 16_000_000:
                 raise ValueError("Image exceeds the processing pixel limit")
@@ -60,7 +60,7 @@ class CohereSyncAdapter:
                 image = image.filter(ImageFilter.MedianFilter(size=3))
             buffer = BytesIO()
             image.save(buffer, format="PNG", optimize=True)
-        return self.run(lambda: self.gateway.inspect_image(buffer.getvalue(), instruction))
+        return self.run(lambda: self.gateway.inspect_image(buffer.getvalue(), instruction, max_tokens=max_tokens))
 
 
 class PostgresLexicalAdapter:

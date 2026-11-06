@@ -4,11 +4,12 @@ import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, exists, func, or_, select, update
 
 from src.db import AsyncSessionLocal
 from src.models.document_chunk import DocumentChunk
 from src.models.document_deletion import DocumentDeletion
+from src.models.ingestion_job import IngestionJob
 from src.repositories.document_deletion import chunk_scope
 from src.storage.object_storage import get_object_storage
 
@@ -19,6 +20,15 @@ class DocumentCleanupWorker:
 
     async def run_once(self, deletion_id=None):
         async with self.sessions() as db, db.begin():
+            live_job = exists(select(IngestionJob.id).where(
+                IngestionJob.document_id == DocumentDeletion.source_record_id,
+                IngestionJob.lease_token == DocumentDeletion.lease_token,
+                IngestionJob.status == "RUNNING", IngestionJob.lease_expires_at > func.now(),
+            ))
+            await db.execute(update(DocumentDeletion).where(
+                DocumentDeletion.kind == "asset", DocumentDeletion.status == "STAGED",
+                DocumentDeletion.available_at <= func.now(), ~live_job,
+            ).values(status="QUEUED", lease_token=None))
             query = select(DocumentDeletion).where(or_(
                 (DocumentDeletion.status == "QUEUED") & (DocumentDeletion.available_at <= func.now()),
                 (DocumentDeletion.status == "PROCESSING") & (DocumentDeletion.lease_expires_at <= func.now()),
@@ -48,7 +58,8 @@ class DocumentCleanupWorker:
             ).with_for_update())).scalar_one_or_none()
             if row is None:
                 return True  # Another process owns recovery of this expired attempt.
-            await db.execute(delete(DocumentChunk).where(*chunk_scope(row)))
+            if row.kind != "asset":
+                await db.execute(delete(DocumentChunk).where(*chunk_scope(row)))
             row.lease_token = row.lease_expires_at = None
             row.object_deleted, row.error_code = error_code is None, error_code
             row.status = "COMPLETE" if error_code is None else "QUEUED"

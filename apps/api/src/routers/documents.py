@@ -167,3 +167,16 @@ async def get_document_evidence(
 
     document = await DocumentService(db, storage).get_user_document(document_id, current_user.id)
     return await read_structured_evidence(db, "standalone", document.id, evidence_id)
+
+
+@router.get("/{document_id}/evidence/{evidence_id}/crop", summary="Read an authorized private source crop")
+async def get_document_evidence_crop(
+    document_id: str, evidence_id: str,
+    asset_id: str | None = Query(None, max_length=36),
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    storage: ObjectStorage = Depends(get_object_storage),
+) -> dict:
+    from src.services.structured_evidence import structured_crop_access
+
+    document = await DocumentService(db, storage).get_user_document(document_id, current_user.id)
+    return await structured_crop_access(db, storage, "standalone", document.id, evidence_id, asset_id)

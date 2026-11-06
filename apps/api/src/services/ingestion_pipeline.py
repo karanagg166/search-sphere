@@ -9,6 +9,7 @@ from src.processing.chunking.structured_chunks import chunk_with_structures
 from src.processing.cleaning import TextCleaner
 from src.processing.embedding.dense_embedder import DenseEmbedder
 from src.processing.extraction.document_extractor import DocumentExtractor
+from src.processing.extraction.hosted_layout import HostedLayoutRecognizer
 from src.processing.extraction.medical_observation_extractor import (
     ExtractedObservationData,
     MedicalObservationExtractor,
@@ -46,7 +47,7 @@ async def process_ingestion(source, storage, stage):
             raise IngestionSourceError("invalid_document") from None
         extracted = ExtractedDocument([ExtractedPage(1, [ExtractedBlock("text", text)])])
     else:
-        extracted = await asyncio.to_thread(DocumentExtractor().extract, content, source.mime_type)
+        extracted = await asyncio.to_thread(DocumentExtractor(layout_recognizer=HostedLayoutRecognizer()).extract, content, source.mime_type)
     del content
     if not extracted.combined_text().strip():
         raise IngestionSourceError("empty_document")

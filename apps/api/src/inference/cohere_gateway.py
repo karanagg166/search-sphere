@@ -264,7 +264,7 @@ class CohereGateway:
             raise ProviderInvalidResponseError("Cohere returned no generated text.")
         return answer
 
-    async def inspect_image(self, image: bytes, instruction: str) -> str:
+    async def inspect_image(self, image: bytes, instruction: str, *, max_tokens=1024) -> str:
         if not image.startswith(b"\x89PNG\r\n\x1a\n") or len(image) > 4 * 1024 * 1024:
             raise ValueError("Hosted image input must be a PNG of at most 4 MiB")
         data_url = "data:image/png;base64," + base64.b64encode(image).decode("ascii")
@@ -283,5 +283,5 @@ class CohereGateway:
                 },
             ],
             vision=True,
-            max_tokens=1024,
+            max_tokens=max_tokens,
         )
