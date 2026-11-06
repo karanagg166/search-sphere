@@ -1,3 +1,4 @@
+import uuid
 from unittest.mock import patch
 
 import pytest
@@ -275,7 +276,7 @@ async def test_delete_endpoint(mock_storage):
                 "/internal/medical-documents",
                 headers=VALID_AUTH_HEADER,
                 files={"file": ("to_delete.pdf", SAMPLE_PDF_BYTES, "application/pdf")},
-                data={"patient_id": "p_del", "document_id": "d_del"},
+                data={"patient_id": "p_del", "document_id": f"d_del_{uuid.uuid4().hex}"},
             )
             assert upload_resp.status_code == 201
             storage_path = upload_resp.json()["storagePath"]

@@ -335,3 +335,21 @@ credentials and account email; corrupt/unwritable manifests fail. Offline regres
 cover pagination, interrupted runs, owner mismatch/forgery, provider outages during
 cleanup, physical cleanup receipts, unique-marker answer/citation support, and SSE.
 The three-app live release remains **open**; this is not a successful production run.
+
+### Durable deletion foundation
+
+Migration 015 and `services/document_deletion.py` revoke live metadata, chunks,
+structured observations, and ingestion publication atomically. `cleanup_worker.py`
+retains immutable cleanup targets, leases attempts, verifies private object absence,
+and retries failures after restart. Owner/delegation-scoped `/cleanup` endpoints
+provide a fresh physical vector count and verified object deletion. Native,
+`/api/v1`, and medical compatibility deletes share this path. Deleted identities
+cannot be resurrected by delayed registration or upload; registered bytes cannot be
+overwritten before versioned replacement is implemented. Detailed contracts and the
+preexisting signed-URL expiry limitation are in `docs/DOCUMENT_DELETION.md`.
+
+Real PostgreSQL regressions cover deletion/publication fencing, atomic rollback,
+client/tenant collisions, receipt authorization, delayed delivery, concurrent claims,
+storage failures, and restart recovery. This foundation is not deployed yet and does
+not complete the pending versioned replacement, old-citation authorization, or live
+three-app verification requirements.

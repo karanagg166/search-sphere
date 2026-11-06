@@ -17,6 +17,7 @@ from src.inference.policy import (
 from src.models.ingestion_job import IngestionJob
 from src.processing.extraction.document_extractor import DocumentExtractionError
 from src.repositories.ingestion_queue import IngestionQueue
+from src.services.cleanup_worker import DocumentCleanupWorker
 from src.services.ingestion_pipeline import process_ingestion
 from src.services.ingestion_publication import publish_ingestion
 from src.services.ingestion_recovery import adopt_legacy_pending
@@ -70,6 +71,7 @@ class PostgresIngestionWorker:
                 if time.monotonic() - self._last_adoption > 60:
                     self._last_adoption = time.monotonic()
                     await adopt_legacy_pending(self.sessions, self.queue)
+                await DocumentCleanupWorker(self.sessions, self.storage_factory).run_once()
                 if await self.run_once():
                     continue
             except asyncio.CancelledError:

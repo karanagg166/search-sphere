@@ -126,6 +126,18 @@ async def delete_document(
     await service.delete_user_document(document_id=document_id, user_id=current_user.id)
 
 
+@router.get("/{document_id}/cleanup", summary="Verify owned document vector and object cleanup")
+async def get_document_cleanup(
+    document_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from src.repositories.document_deletion import cleanup_receipt, find_deletion
+
+    row = await find_deletion(db, "standalone", "search_sphere", current_user.id, document_id)
+    return await cleanup_receipt(db, row)
+
+
 @router.post(
     "/{document_id}/reindex",
     response_model=DocumentResponse,
