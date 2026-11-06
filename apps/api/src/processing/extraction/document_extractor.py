@@ -4,6 +4,7 @@ import fitz
 import structlog
 from PIL import Image
 
+from src.inference.policy import ProviderError
 from src.processing.extraction.image_captioner import (
     ImageCaptioner,
     ImageCaptioningError,
@@ -77,6 +78,8 @@ class DocumentExtractor:
             return ExtractedDocument(
                 pages=[ExtractedPage(page_number=1, blocks=blocks)]
             )
+        except ProviderError:
+            raise
         except Exception as exc:
             logger.exception("Image OCR extraction failed", error=str(exc))
             raise DocumentExtractionError(f"Image extraction failed: {exc}") from exc
@@ -303,6 +306,8 @@ class DocumentExtractor:
         try:
             return self.ocr_processor.extract_text(image_bytes).strip()
 
+        except ProviderError:
+            raise
         except OcrProcessingError as exc:
             logger.warning(
                 "OCR failed for PDF image",
@@ -329,6 +334,8 @@ class DocumentExtractor:
         try:
             return self.image_captioner.describe(image_bytes).strip()
 
+        except ProviderError:
+            raise
         except ImageCaptioningError as exc:
             logger.warning(
                 "Image captioning failed",

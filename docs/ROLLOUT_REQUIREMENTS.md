@@ -202,3 +202,27 @@ see old vectors until commit, rollback preserves old vectors, eight duplicate wr
 produce one index, colliding native/client/tenant identities stay isolated, incomplete
 scopes are denied, and job completion rolls back with vectors. This is an atomic
 replacement primitive; immutable source versions and a bounded model cutover remain open.
+
+### Hosted runtime conversion (implementation verification in progress)
+
+All default API embedding, semantic-boundary, rerank, OCR, caption, rewrite and
+generation paths now use the guarded Cohere boundary. Deterministic lexical
+preprocessing remains in service; PostgreSQL `tsvector`/`ts_rank_cd` and RRF own
+lexical ranking. The old model-name reranker aliases resolve to the pinned hosted
+version. Test-only injected models remain supported. No automatic local fallback
+is present. Provider denials/quotas propagate rather than becoming successful RRF
+fallbacks or silently omitted OCR; JSON endpoints return safe 503 error codes.
+
+The production Docker image uses a separate lean requirements file, contains no
+Torch, Transformers, FastEmbed, Tesseract or Docling, and copies only runtime source
+and migrations. An offline Docker import/package/weight/health gate is required in
+CI. `/diag` is metadata plus SQL connectivity only and never uses model quota.
+Authenticated journeys remain responsible for proving actual provider inference.
+
+Executed local Docker checks: clean production image build; API import without
+local inference packages; migrations through 013 on an isolated PostgreSQL/pgvector
+database; container capped at 512 MiB served health/readiness/diagnostics 200 with
+129.7 MiB reported memory. This is a local cold-boot observation, not a production
+capacity/P95 measurement. Production still serves 8288c9d at this checkpoint.
+Trusted classification binding, durable worker binding, index version filtering
+and live journeys remain pending; do not deploy the model migration alone.

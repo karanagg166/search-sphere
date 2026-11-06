@@ -4,8 +4,6 @@ import gc
 import os
 import sys
 import threading
-import time
-from pathlib import Path
 from typing import Any
 
 import structlog
@@ -25,25 +23,24 @@ for var in (
     if var not in os.environ:
         os.environ[var] = "1"
 
-DEFAULT_DENSE_MODEL = getattr(settings, "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-DEFAULT_SPARSE_MODEL = "Qdrant/bm25"
-DEFAULT_RERANKER_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2"
+DEFAULT_DENSE_MODEL = getattr(settings, "EMBEDDING_MODEL", "embed-english-light-v3.0")
+DEFAULT_SPARSE_MODEL = "postgresql-tsvector"
+DEFAULT_RERANKER_MODEL = "rerank-v3.5"
 MAX_INFERENCE_BATCH_SIZE = 16
 
 RERANKER_MODEL_ALIASES: dict[str, str] = {
-    "cross-encoder/ms-marco-MiniLM-L-6-v2": "Xenova/ms-marco-MiniLM-L-6-v2",
-    "ms-marco-MiniLM-L-6-v2": "Xenova/ms-marco-MiniLM-L-6-v2",
-    "Xenova/ms-marco-MiniLM-L-6-v2": "Xenova/ms-marco-MiniLM-L-6-v2",
-    "bge-reranker-base": "BAAI/bge-reranker-base",
-    "BAAI/bge-reranker-base": "BAAI/bge-reranker-base",
+    "cross-encoder/ms-marco-MiniLM-L-6-v2": "rerank-v3.5",
+    "ms-marco-MiniLM-L-6-v2": "rerank-v3.5",
+    "Xenova/ms-marco-MiniLM-L-6-v2": "rerank-v3.5",
 }
+
 
 
 class ModelManager:
     """
     Centralized, thread-safe model lifecycle manager.
 
-    Prevents duplicate model loading, manages native thread pools,
+    Caches lightweight hosted adapters, manages bounded requests,
     enforces bounded inference batch sizes, and provides controlled
     memory unloading for memory-constrained environments (512 MiB RAM limit).
     """
@@ -73,162 +70,34 @@ class ModelManager:
             self._async_lock = asyncio.Lock()
         return self._async_lock
 
-    def _get_cache_path(self) -> str | None:
-        """Resolve FastEmbed local cache directory with graceful fallback if path is uncreatable."""
-        path = (
-            getattr(settings, "FASTEMBED_CACHE_PATH", None)
-            or os.environ.get("FASTEMBED_CACHE_PATH")
-        )
-        if path:
-            try:
-                p = Path(path)
-                p.mkdir(parents=True, exist_ok=True)
-                return str(p)
-            except (OSError, PermissionError):
-                logger.warning(
-                    "Configured FASTEMBED_CACHE_PATH is inaccessible on host; falling back to default cache",
-                    path=path,
-                )
-                return None
-        return None
-
-    # -------------------------------------------------------------------------
-    # Model Retrieval (Thread-Safe Singletons)
-    # -------------------------------------------------------------------------
+    def _adapter(self, key: str, factory, name: str):
+        with self._sync_lock:
+            if key not in self._models:
+                self._models[key] = factory()
+                self._model_metadata[key] = {"type": key.split(":")[0], "name": name, "hosted": key != "sparse:postgresql"}
+                self._total_inferences[key] = 0
+            return self._models[key]
 
     def get_dense_embedder(self, model_name: str | None = None) -> Any:
-        """
-        Lazily loads and returns the FastEmbed TextEmbedding singleton.
-        Reused by both dense retrieval and semantic chunking.
-        """
-        resolved_name = model_name or DEFAULT_DENSE_MODEL
-        if not resolved_name.startswith("sentence-transformers/") and resolved_name == "all-MiniLM-L6-v2":
-            resolved_name = "sentence-transformers/all-MiniLM-L6-v2"
+        from src.inference.cohere_gateway import EMBEDDING_MODEL
+        from src.inference.sync_adapter import CohereSyncAdapter
 
-        key = f"dense:{resolved_name}"
-        if key in self._models:
-            return self._models[key]
-
-        with self._sync_lock:
-            if key in self._models:
-                return self._models[key]
-
-            cache_path = self._get_cache_path()
-            logger.info("Initializing FastEmbed TextEmbedding", model_name=resolved_name, threads=1)
-            t0 = time.perf_counter()
-
-            try:
-                from fastembed import TextEmbedding
-
-                model = TextEmbedding(
-                    model_name=resolved_name,
-                    cache_dir=cache_path,
-                    threads=1,
-                )
-                self._models[key] = model
-                self._model_metadata[key] = {
-                    "type": "dense",
-                    "name": resolved_name,
-                    "loaded_at": time.time(),
-                    "init_duration_ms": (time.perf_counter() - t0) * 1000,
-                }
-                self._total_inferences[key] = 0
-                logger.info(
-                    "FastEmbed TextEmbedding initialized successfully",
-                    model_name=resolved_name,
-                    duration_ms=self._model_metadata[key]["init_duration_ms"],
-                )
-                return model
-            except Exception as exc:
-                logger.exception("Failed to load FastEmbed TextEmbedding", error=str(exc))
-                raise
+        if model_name and model_name != EMBEDDING_MODEL:
+            raise ValueError("The embedding model must match the pinned hosted index version")
+        return self._adapter(f"dense:{EMBEDDING_MODEL}", CohereSyncAdapter, EMBEDDING_MODEL)
 
     def get_sparse_embedder(self, model_name: str | None = None) -> Any:
-        """
-        Lazily loads and returns the FastEmbed SparseTextEmbedding (BM25) singleton.
-        """
-        resolved_name = model_name or DEFAULT_SPARSE_MODEL
-        key = f"sparse:{resolved_name}"
-        if key in self._models:
-            return self._models[key]
+        from src.inference.sync_adapter import PostgresLexicalAdapter
 
-        with self._sync_lock:
-            if key in self._models:
-                return self._models[key]
-
-            cache_path = self._get_cache_path()
-            logger.info("Initializing FastEmbed SparseTextEmbedding", model_name=resolved_name, threads=1)
-            t0 = time.perf_counter()
-
-            try:
-                from fastembed import SparseTextEmbedding
-
-                model = SparseTextEmbedding(
-                    model_name=resolved_name,
-                    cache_dir=cache_path,
-                    threads=1,
-                )
-                self._models[key] = model
-                self._model_metadata[key] = {
-                    "type": "sparse",
-                    "name": resolved_name,
-                    "loaded_at": time.time(),
-                    "init_duration_ms": (time.perf_counter() - t0) * 1000,
-                }
-                self._total_inferences[key] = 0
-                logger.info(
-                    "FastEmbed SparseTextEmbedding initialized successfully",
-                    model_name=resolved_name,
-                    duration_ms=self._model_metadata[key]["init_duration_ms"],
-                )
-                return model
-            except Exception as exc:
-                logger.exception("Failed to load FastEmbed SparseTextEmbedding", error=str(exc))
-                raise
+        return self._adapter("sparse:postgresql", PostgresLexicalAdapter, "postgresql-tsvector")
 
     def get_reranker(self, model_name: str | None = None) -> Any:
-        """
-        Lazily loads and returns the FastEmbed TextCrossEncoder reranker singleton.
-        """
-        raw_name = model_name or getattr(settings, "RERANKER_MODEL_NAME", DEFAULT_RERANKER_MODEL)
-        resolved_name = RERANKER_MODEL_ALIASES.get(raw_name, raw_name)
-        key = f"reranker:{resolved_name}"
-        if key in self._models:
-            return self._models[key]
+        from src.inference.cohere_gateway import RERANK_MODEL
+        from src.inference.sync_adapter import CohereSyncAdapter
 
-        with self._sync_lock:
-            if key in self._models:
-                return self._models[key]
-
-            cache_path = self._get_cache_path()
-            logger.info("Initializing FastEmbed TextCrossEncoder", model_name=resolved_name, threads=1)
-            t0 = time.perf_counter()
-
-            try:
-                from fastembed.rerank.cross_encoder import TextCrossEncoder
-
-                model = TextCrossEncoder(
-                    model_name=resolved_name,
-                    cache_dir=cache_path,
-                    threads=1,
-                )
-                self._models[key] = model
-                self._model_metadata[key] = {
-                    "type": "reranker",
-                    "name": resolved_name,
-                    "loaded_at": time.time(),
-                    "init_duration_ms": (time.perf_counter() - t0) * 1000,
-                }
-                self._total_inferences[key] = 0
-                logger.info(
-                    "FastEmbed TextCrossEncoder initialized successfully",
-                    model_name=resolved_name,
-                    duration_ms=self._model_metadata[key]["init_duration_ms"],
-                )
-                return model
-            except Exception as exc:
-                logger.exception("Failed to load FastEmbed TextCrossEncoder", error=str(exc))
-                raise
+        if model_name and RERANKER_MODEL_ALIASES.get(model_name, model_name) != RERANK_MODEL:
+            raise ValueError("The reranker must match the pinned hosted model")
+        return self._adapter(f"reranker:{RERANK_MODEL}", CohereSyncAdapter, RERANK_MODEL)
 
     def rerank_bounded(
         self,

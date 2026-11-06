@@ -37,9 +37,14 @@ class TestModelManager:
         texts = [f"Sample sentence number {i} for bounded embedding test." for i in range(25)]
 
         # Test bounded batch execution with batch_size=8
-        embeddings = model_manager.embed_dense_bounded(texts, batch_size=8)
+        # Exercise batching without downloading weights or calling a real provider.
+        adapter = MagicMock()
+        adapter.embed.side_effect = lambda batch: [[1.0] + [0.0] * 383 for _ in batch]
+        with patch.object(model_manager, "get_dense_embedder", return_value=adapter):
+            embeddings = model_manager.embed_dense_bounded(texts, batch_size=8)
         assert len(embeddings) == 25
-        assert len(embeddings[0]) == 384  # MiniLM dimension
+        assert len(embeddings[0]) == 384
+        assert [len(call.args[0]) for call in adapter.embed.call_args_list] == [8, 8, 8, 1]
 
     def test_embed_sparse_bounded(self):
         texts = [f"Sample query text {i} for sparse BM25 test." for i in range(10)]

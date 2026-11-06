@@ -16,9 +16,9 @@ from src.vector_store.qdrant_store import (
 
 def test_cross_encoder_model_aliases_and_resolution():
     """Verify legacy model names resolve to FastEmbed-compatible Xenova model."""
-    assert RERANKER_MODEL_ALIASES["cross-encoder/ms-marco-MiniLM-L-6-v2"] == "Xenova/ms-marco-MiniLM-L-6-v2"
-    assert RERANKER_MODEL_ALIASES["ms-marco-MiniLM-L-6-v2"] == "Xenova/ms-marco-MiniLM-L-6-v2"
-    assert RERANKER_MODEL_ALIASES["Xenova/ms-marco-MiniLM-L-6-v2"] == "Xenova/ms-marco-MiniLM-L-6-v2"
+    assert RERANKER_MODEL_ALIASES["cross-encoder/ms-marco-MiniLM-L-6-v2"] == "rerank-v3.5"
+    assert RERANKER_MODEL_ALIASES["ms-marco-MiniLM-L-6-v2"] == "rerank-v3.5"
+    assert RERANKER_MODEL_ALIASES["Xenova/ms-marco-MiniLM-L-6-v2"] == "rerank-v3.5"
 
 
 def test_production_strictly_prohibits_ephemeral_fallback():

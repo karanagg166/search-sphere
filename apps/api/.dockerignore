@@ -13,3 +13,13 @@ htmlcov/
 .ruff_cache/
 .DS_Store
 .git
+.env
+.env.*
+!.env.example
+*.onnx
+*.safetensors
+*.pt
+*.pth
+.fastembed_cache/
+.cache/
+tests/

@@ -192,50 +192,13 @@ class SemanticEmbedder:
             self._model = SemanticEmbedder._cached_model
             return self._model
 
-        # 1. Prefer centralized ModelManager singleton (shares memory with DenseEmbedder)
-        try:
-            from src.services.model_manager import model_manager
+        from src.services.model_manager import model_manager
 
-            loaded_model = model_manager.get_dense_embedder(self.model_name)
-            SemanticEmbedder._cached_model = loaded_model
-            SemanticEmbedder._cached_model_name = self.model_name
-            self._model = loaded_model
-            return self._model
-        except Exception as fe_exc:
-            logger.warning(
-                "ModelManager FastEmbed unavailable for semantic chunking; trying SentenceTransformer",
-                error=str(fe_exc),
-            )
-
-        # 2. Fallback to SentenceTransformer
-        logger.info(
-            "Loading semantic chunking sentence-transformer model fallback",
-            model_name=self.model_name,
-        )
-
-        try:
-            from sentence_transformers import SentenceTransformer
-
-            loaded_model = SentenceTransformer(self.model_name, device="cpu")
-            SemanticEmbedder._cached_model = loaded_model
-            SemanticEmbedder._cached_model_name = self.model_name
-            self._model = loaded_model
-
-            logger.info(
-                "Semantic chunking model loaded and cached",
-                model_name=self.model_name,
-            )
-            return self._model
-
-        except Exception as exc:
-            logger.warning(
-                "Failed to load sentence-transformer model for semantic chunking",
-                model_name=self.model_name,
-                error=str(exc),
-            )
-            raise RuntimeError(
-                f"Failed to load semantic chunking model '{self.model_name}': {exc}"
-            ) from exc
+        loaded_model = model_manager.get_dense_embedder(self.model_name)
+        SemanticEmbedder._cached_model = loaded_model
+        SemanticEmbedder._cached_model_name = self.model_name
+        self._model = loaded_model
+        return loaded_model
 
     @classmethod
     def _clear_cache(cls) -> None:

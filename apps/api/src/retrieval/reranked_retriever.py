@@ -4,6 +4,7 @@ from typing import Any
 import structlog
 
 from src.config import settings
+from src.inference.policy import ProviderError
 from src.processing.models.search import RerankedSearchResult
 from src.retrieval.hybrid_retriever import (
     HybridQueryValidationError,
@@ -187,6 +188,8 @@ class RerankedHybridRetriever:
             if filters is not None:
                 search_kwargs["filters"] = filters
             candidates = await self.hybrid_retriever.search(**search_kwargs)
+        except ProviderError:
+            raise
         except (HybridRetrievalError, HybridQueryValidationError) as exc:
             logger.exception(
                 "Hybrid retrieval failed during two-stage search",
@@ -232,6 +235,8 @@ class RerankedHybridRetriever:
             if deduplicate is not None:
                 rerank_kwargs["deduplicate"] = deduplicate
             results = await self.reranker.arerank(**rerank_kwargs)
+        except ProviderError:
+            raise
         except (RerankingError, RerankingValidationError) as exc:
             logger.exception(
                 "Cross-encoder reranking failed during two-stage search",

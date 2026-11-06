@@ -1,9 +1,11 @@
+import asyncio
 import time
 from typing import Any
 
 import structlog
 
 from src.config import settings
+from src.inference.policy import ProviderError
 from src.processing.embedding.dense_embedder import (
     DenseEmbedder,
     DenseEmbeddingError,
@@ -172,7 +174,9 @@ class HybridRetriever:
         # 5. Dense query embedding
         start_dense = time.perf_counter()
         try:
-            dense_vectors = self.dense_embedder.embed_texts([clean_query])
+            dense_vectors = await asyncio.to_thread(self.dense_embedder.embed_query, clean_query)
+        except ProviderError:
+            raise
         except DenseEmbeddingError as exc:
             logger.exception(
                 "Dense query embedding failed during hybrid retrieval",

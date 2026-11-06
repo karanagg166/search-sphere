@@ -1,9 +1,11 @@
+import asyncio
 import time
 from typing import Any
 
 import structlog
 
 from src.config import settings
+from src.inference.policy import ProviderError
 from src.processing.embedding.dense_embedder import (
     DenseEmbedder,
     DenseEmbeddingError,
@@ -144,7 +146,9 @@ class DenseRetriever:
         # 4. Dense query embedding
         start_embed = time.perf_counter()
         try:
-            vectors = self.embedder.embed_texts([clean_query])
+            vectors = await asyncio.to_thread(self.embedder.embed_query, clean_query)
+        except ProviderError:
+            raise
         except DenseEmbeddingError as exc:
             logger.exception(
                 "Dense query embedding failed",

@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -188,7 +188,11 @@ async def test_hybrid_retriever_end_to_end_with_supabase():
     await store.index_document(doc_id, doc)
 
     try:
-        retriever = HybridRetriever(vector_store=store)
+        # Database/interface integration uses a synthetic query vector. Model quality
+        # is verified separately with public fixtures; never download local weights.
+        embedder = MagicMock()
+        embedder.embed_query.return_value = [doc.chunks[0].embedding]
+        retriever = HybridRetriever(vector_store=store, dense_embedder=embedder)
         results = await retriever.search(
             query="distributed transactions architecture",
             top_k=3,

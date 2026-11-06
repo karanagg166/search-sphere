@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from src.config import settings
 from src.db import AsyncSessionLocal
+from src.inference.policy import ProviderNotApprovedError, ProviderQuotaExceededError
 from src.main import app
 from src.models.external_document import ExternalDocument
 from src.processing.models.search import RerankedSearchResult
@@ -23,6 +24,20 @@ from src.services.search_service import get_retriever
 TEST_SERVICE_SECRET = "test-service-secret"
 VALID_AUTH_HEADER = {"Authorization": f"Bearer {TEST_SERVICE_SECRET}"}
 INVALID_AUTH_HEADER = {"Authorization": "Bearer wrong-service-secret"}
+
+
+@pytest.fixture
+def synthetic_query_rewriter():
+    """Isolation tests must not send fixture history to a live model provider."""
+    rewriter = AsyncMock()
+
+    async def rewrite(query, **kwargs):
+        return RewriteResult(original_query=query, retrieval_query=query, rewritten=False)
+
+    rewriter.rewrite.side_effect = rewrite
+    app.dependency_overrides[get_query_rewriter] = lambda: rewriter
+    yield rewriter
+    app.dependency_overrides.pop(get_query_rewriter, None)
 
 
 @pytest.fixture(autouse=True)
@@ -226,7 +241,7 @@ async def test_medical_chat_multi_turn_query_rewriting(sample_patient_documents)
 
 
 @pytest.mark.asyncio
-async def test_medical_chat_patient_filter_and_contamination_defense(sample_patient_documents):
+async def test_medical_chat_patient_filter_and_contamination_defense(sample_patient_documents, synthetic_query_rewriter):
     """
     Search Sphere tests: Patient filter and History contamination defense
     History mentions Patient B facts ('Patient B BP was 180/110').
@@ -326,7 +341,7 @@ async def test_medical_chat_patient_filter_and_contamination_defense(sample_pati
 
 
 @pytest.mark.asyncio
-async def test_medical_chat_fresh_grounding(sample_patient_documents):
+async def test_medical_chat_fresh_grounding(sample_patient_documents, synthetic_query_rewriter):
     """
     Search Sphere tests: Fresh grounding
     Every follow-up query MUST trigger fresh retrieval.
@@ -385,6 +400,32 @@ async def test_medical_chat_fresh_grounding(sample_patient_documents):
             # Verify retrieval was invoked freshly
             assert mock_retriever.search.called
             assert mock_retriever.search.call_count == 1
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [ProviderQuotaExceededError, ProviderNotApprovedError])
+async def test_medical_chat_reports_provider_failure_without_retrieval(
+    sample_patient_documents, synthetic_query_rewriter, failure,
+):
+    synthetic_query_rewriter.rewrite.side_effect = failure("PRIVATE-UPSTREAM-DETAIL")
+    retriever = AsyncMock()
+    app.dependency_overrides[get_retriever] = lambda: retriever
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/internal/medical-rag/chat", headers=VALID_AUTH_HEADER,
+                json={
+                    "patientId": sample_patient_documents["patient_a_id"],
+                    "message": "What about the earlier report?",
+                    "history": [{"role": "user", "content": "PUBLIC SYNTHETIC PRIOR QUESTION"}],
+                },
+            )
+        assert response.status_code == 503
+        assert response.json()["error_code"] == failure.code
+        assert "PRIVATE-UPSTREAM-DETAIL" not in response.text
+        retriever.search.assert_not_awaited()
     finally:
         app.dependency_overrides.clear()
 

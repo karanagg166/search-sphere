@@ -455,26 +455,19 @@ def check_diagnostics() -> None:
     try:
         status, _, payload = http(API + "/diag", timeout=25)
         if status == 200 and isinstance(payload, dict):
-            db_state = str(payload.get("database", "unknown"))
-            fastembed_state = str(payload.get("fastembed", "unknown"))
-            qdrant_state = str(payload.get("qdrant", "unknown"))
-            cross_encoder_state = str(payload.get("cross_encoder", "unknown"))
-            if "embedded" in qdrant_state.lower():
-                fail(
-                    "Diagnostic probe",
-                    f"production vector store is running in ephemeral embedded fallback mode: {qdrant_state}",
-                )
-            if "error" in qdrant_state.lower():
-                fail("Diagnostic probe", f"vector store error: {qdrant_state}")
-            if "error" in cross_encoder_state.lower():
-                fail(
-                    "Diagnostic probe",
-                    f"cross-encoder reranker error: {cross_encoder_state}",
-                )
-            record(
-                "Diagnostic probe",
-                f"db={db_state}, fastembed={fastembed_state}, qdrant={qdrant_state}, cross_encoder={cross_encoder_state}",
-            )
+            inference = payload.get("inference", {})
+            if payload.get("database") != "ok" or payload.get("vector_store") != "supabase":
+                fail("Diagnostic probe", "PostgreSQL/pgvector is not the configured healthy backend")
+            if (
+                not isinstance(inference, dict)
+                or inference.get("provider") != "cohere"
+                or inference.get("mode") != "hosted"
+                or inference.get("embedding_model") != "embed-english-light-v3.0"
+                or inference.get("rerank_model") != "rerank-v3.5"
+                or payload.get("local_model_weights") is not False
+            ):
+                fail("Diagnostic probe", "Hosted-only inference metadata is missing or unexpected")
+            record("Diagnostic probe", "PostgreSQL/pgvector and hosted Cohere configuration verified; inference is tested by the authenticated journey")
         else:
             fail("Diagnostic probe", f"diagnostic endpoint returned HTTP {status}")
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
