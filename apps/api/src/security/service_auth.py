@@ -14,6 +14,12 @@ from src.security.service_context import ServiceContext
 
 logger = structlog.get_logger()
 
+LEGACY_MEDICAL_SCOPES = {
+    "documents:read", "documents:write", "documents:delete",
+    "collections:manage",
+    "search:execute", "answers:generate",
+}
+
 
 def hash_api_key(token: str) -> str:
     """Computes SHA-256 hex digest of a raw API key / service token."""
@@ -83,12 +89,25 @@ async def _authenticate_service_context(
             raise HTTPException(status_code=403, detail="Client identity does not match credential.")
         if tenant_id != "quick_clinic_default":
             raise HTTPException(status_code=403, detail="Legacy credential is not authorized for this tenant.")
+        # Compatibility never grants platform administration. An existing registered
+        # profile can narrow/revoke the legacy credential, never expand its scope.
+        registered = (await session.execute(select(ServiceClient).where(
+            ServiceClient.client_id == client_id,
+        ))).scalar_one_or_none()
+        scopes = set(LEGACY_MEDICAL_SCOPES)
+        if registered:
+            if not registered.is_active():
+                raise HTTPException(status_code=401, detail="Service client access is revoked.")
+            if not registered.is_tenant_authorized(tenant_id):
+                raise HTTPException(status_code=403, detail="Service client tenant is not authorized.")
+            if "*" not in registered.allowed_scopes:
+                scopes.intersection_update(registered.allowed_scopes)
         return ServiceContext(
             client_id=client_id,
             tenant_id=tenant_id,
             subject_id=x_subject_id.strip() if x_subject_id else None,
             collection_id=x_collection_id.strip() if x_collection_id else None,
-            scopes={"*"},
+            scopes=scopes,
             client_name="Quick Clinic Legacy Client",
             is_service_client=True,
         )

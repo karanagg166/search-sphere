@@ -4,11 +4,10 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from src.main import app
-from tests.conftest import VALID_AUTH_HEADER
 
 
 @pytest.mark.asyncio
-async def test_collections_crud_and_tenant_scoping():
+async def test_collections_crud_and_tenant_scoping(admin_auth_header):
     """Verify collections creation, retrieval, listing, deletion, and cross-tenant separation."""
     cid_a = f"alpha_{uuid.uuid4().hex[:6]}"
     cid_b = f"beta_{uuid.uuid4().hex[:6]}"
@@ -18,7 +17,7 @@ async def test_collections_crud_and_tenant_scoping():
         res_a = await client.post(
             "/api/v1/clients",
             json={"client_id": cid_a, "name": "App Alpha", "allowed_scopes": ["collections:manage"], "authorized_tenants": ["*"]},
-            headers=VALID_AUTH_HEADER,
+            headers=admin_auth_header,
         )
         assert res_a.status_code == 201
         key_a = res_a.json()["api_key"]
@@ -26,7 +25,7 @@ async def test_collections_crud_and_tenant_scoping():
         res_b = await client.post(
             "/api/v1/clients",
             json={"client_id": cid_b, "name": "App Beta", "allowed_scopes": ["collections:manage"], "authorized_tenants": ["*"]},
-            headers=VALID_AUTH_HEADER,
+            headers=admin_auth_header,
         )
         assert res_b.status_code == 201
         key_b = res_b.json()["api_key"]

@@ -7,7 +7,6 @@ from httpx import ASGITransport, AsyncClient
 from src.main import app
 from src.storage.object_storage import LocalStorage, get_object_storage
 from tests.binary_fixtures import pdf_bytes
-from tests.conftest import VALID_AUTH_HEADER
 
 SAMPLE_PDF_BYTES = pdf_bytes()
 
@@ -19,7 +18,7 @@ def mock_storage(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_v1_document_lifecycle(mock_storage, monkeypatch):
+async def test_v1_document_lifecycle(mock_storage, monkeypatch, admin_auth_header):
     monkeypatch.setattr("src.services.generic_document_service.enqueue_generic_document", lambda *args, **kwargs: True)
     monkeypatch.setattr("src.routers.v1.documents.QdrantVectorStore", lambda: AsyncMock())
     """Test full document workflow: upload, registration, status check, signed-url, and deletion."""
@@ -37,7 +36,7 @@ async def test_v1_document_lifecycle(mock_storage, monkeypatch):
                     "allowed_scopes": ["documents:write", "documents:read", "documents:delete", "collections:manage"],
                     "authorized_tenants": ["*"],
                 },
-                headers=VALID_AUTH_HEADER,
+                headers=admin_auth_header,
             )
             assert res.status_code == 201
             api_key = res.json()["api_key"]
@@ -125,7 +124,7 @@ async def test_v1_document_lifecycle(mock_storage, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_v1_document_validation(mock_storage):
+async def test_v1_document_validation(mock_storage, admin_auth_header):
     """Test security checks: path traversal rejection, unsupported formats, missing files."""
     app.dependency_overrides[get_object_storage] = lambda: mock_storage
 
@@ -140,7 +139,7 @@ async def test_v1_document_validation(mock_storage):
                     "allowed_scopes": ["documents:write", "documents:read"],
                     "authorized_tenants": ["*"],
                 },
-                headers=VALID_AUTH_HEADER,
+                headers=admin_auth_header,
             )
             assert res.status_code == 201
             api_key = res.json()["api_key"]
