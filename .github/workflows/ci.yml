@@ -82,7 +82,7 @@ jobs:
         env:
           INGESTION_TEST_DATABASE_URL: "postgresql+asyncpg://test_user:test_password@localhost:5432/search_sphere_test"
           PYTHONPATH: "apps/api"
-        run: pytest scripts/tests/test_ingestion_queue_postgres.py scripts/tests/test_atomic_reindex_postgres.py scripts/tests/test_client_bootstrap_postgres.py -v
+        run: pytest scripts/tests/test_ingestion_queue_postgres.py scripts/tests/test_atomic_reindex_postgres.py scripts/tests/test_client_bootstrap_postgres.py scripts/tests/test_inference_data_policy_postgres.py -v
 
       - name: Verify hosted inference eligibility and bounded failures
         env:

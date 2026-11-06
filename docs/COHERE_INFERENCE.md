@@ -63,6 +63,22 @@ classification fails before quota reservation and HTTP. Tests verify concurrent
 scope isolation and denial. API/worker bindings still need to apply this boundary
 to every inference call; adding the gateway alone does not establish that coverage.
 
+Migration 014 adds operator-owned `inference_data_policies`, keyed by client, tenant,
+collection scope and subject scope. A policy requires a nonempty approval reference
+and an expiry. It has no consuming-client write endpoint. Missing policy defaults
+to medical for Quick-Clinic and confidential otherwise. The most specific scope wins;
+equal-specificity conflicts choose the more restrictive classification. A disabled
+or expired specific policy cannot fall through to a broader approval. Client upload
+metadata is never read as approval. Sensitive classifications still require the
+independent provider-level approval described above.
+
+Production inference additionally requires a PostgreSQL authorization validator on
+the scope. The gateway rechecks it after request admission and before quota reservation
+or HTTP transmission. This supports revocation during work. Fixtures prove missing
+validators and revoked authorization cannot send content; real PostgreSQL tests prove
+scoped policy matching, conflict handling, expiry and revocation behavior. Runtime
+source/conversation bindings are tracked separately until their integration checks pass.
+
 Migration 013 adds the RLS-protected quota counter. Real PostgreSQL tests cover
 concurrent reservations, restart persistence, minute limits and transaction rollback.
 Mock-HTTP tests use synthetic inputs for eligibility, batch/model consistency,

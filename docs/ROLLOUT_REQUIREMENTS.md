@@ -248,3 +248,21 @@ medical key. Three registered-profile tests cover revocation, tenant denial and
 scope narrowing. Client lifecycle/isolation tests now bootstrap a dedicated synthetic
 platform administrator instead of relying on the old wildcard. Fourteen focused
 service-client/integration tests passed against isolated PostgreSQL.
+
+The legacy scope/bootstrap repair [#36](https://github.com/karanagg166/search-sphere/pull/36)
+merged at `bdfef5edee7e64e57f96fc9dc46fdd80d5ce4569` after all four jobs passed
+([42208663460](https://github.com/karanagg166/search-sphere/actions/runs/42208663460)).
+It has not been deployed independently of the pending runtime repair.
+
+### PostgreSQL data eligibility foundation
+
+Migration 014 and `inference/data_policy.py` make classification approvals server-owned
+and scope-aware. Missing, expired or revoked approval fails closed; a specific denial
+cannot fall through to a broader grant. Conflicting grants use the more restrictive
+classification. No client metadata or API operation can approve itself. Production
+model calls require an authorization validator and recheck it before transmission.
+The gateway also treats permanent 4xx provider rejection as nonretryable.
+
+Two real PostgreSQL policy tests and synthetic gateway denial/revalidation tests are
+required in CI. The durable worker/source binding is a separate following PR. This
+foundation is not a claim that all conversation/resource paths are wired yet.
