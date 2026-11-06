@@ -663,7 +663,15 @@ class MedicalObservationExtractor:
         for page in extracted_doc.pages:
             page_num = getattr(page, "page_number", 1)
             page_text = getattr(page, "text", "") or ""
-            if not page_text and hasattr(page, "combined_text"):
+            if hasattr(page, "blocks"):
+                # Generated captions, chart estimates, and unreviewed OCR may not
+                # enter the exact clinical lookup path as verified observations.
+                page_text = "\n\n".join(block.content for block in page.blocks if (
+                    block.block_type != "image" and block.block_type != "chart"
+                    and not getattr(block, "provenance", {}).get("ocr_review_required")
+                    and not getattr(block, "structured", {}).get("review_required")
+                ))
+            elif not page_text and hasattr(page, "combined_text"):
                 page_text = page.combined_text()
 
             page_obs = self.extract_from_text(

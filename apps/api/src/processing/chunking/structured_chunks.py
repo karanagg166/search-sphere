@@ -1,5 +1,6 @@
 """Keep native tables whole or split only at row boundaries, repeating headers."""
 
+import json
 from dataclasses import replace
 
 from src.inference.cohere_gateway import EMBEDDING_TOKEN_LIMIT, CohereGateway
@@ -36,6 +37,34 @@ async def table_chunks(block, page_number, gateway=None):
     return output
 
 
+async def chart_chunks(block, page_number, gateway=None):
+    gateway = gateway or CohereGateway()
+    data = block.structured
+    base = {key: data[key] for key in ("evidence_id", "title", "caption", "axes", "legend", "units", "visible_text") if key in data}
+    points = [{"series": series["name"], **point} for series in data.get("series", []) for point in series["points"]]
+    output = []
+
+    async def fit(start, end):
+        content = "Chart evidence; generated extraction requires review. Exact comparisons are unavailable.\n" + json.dumps(
+            {**base, "points": points[start:end]}, ensure_ascii=False,
+        )
+        count = await gateway.token_count(content, background=True) if len(content) <= 65536 else EMBEDDING_TOKEN_LIMIT + 1
+        if count <= EMBEDDING_TOKEN_LIMIT:
+            output.append(DocumentChunk(0, content, count, page_number, page_number, [page_number], ["chart"], [{
+                **block.provenance, "evidence_id": data["evidence_id"], "point_start": start, "point_end": end,
+                "structured_kind": "chart", "exact_comparisons_allowed": False,
+            }]))
+            return
+        if end - start <= 1:
+            raise ValueError("Chart context and point exceed the embedding limit; review required")
+        middle = (start + end) // 2
+        await fit(start, middle)
+        await fit(middle, end)
+
+    await fit(0, len(points))
+    return output
+
+
 async def chunk_with_structures(document, chunker, gateway=None):
     """Prose keeps semantic chunking; structured evidence cannot mix with prose."""
     import asyncio
@@ -53,9 +82,10 @@ async def chunk_with_structures(document, chunker, gateway=None):
 
     for page in document.pages:
         for block in page.blocks:
-            if block.block_type == "table":
+            if block.block_type in {"table", "chart"}:
                 await flush_prose()
-                output.extend(await table_chunks(block, page.page_number, gateway))
+                builder = table_chunks if block.block_type == "table" else chart_chunks
+                output.extend(await builder(block, page.page_number, gateway))
             else:
                 if not prose or prose[-1].page_number != page.page_number:
                     prose.append(CleanedPage(page.page_number, []))

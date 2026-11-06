@@ -1,9 +1,10 @@
 """Revoke searchable evidence and fence ingestion before private object cleanup."""
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from src.models.document import Document
 from src.models.document_chunk import DocumentChunk
@@ -60,6 +61,11 @@ async def delete_registered_document(db, kind, document_id, client_id, tenant_id
     # pgvector and relational metadata share the same transaction. A failed delete
     # rolls everything back; a committed delete immediately hides all evidence.
     await db.execute(delete(DocumentChunk).where(*chunk_scope(row)))
+    await db.execute(update(DocumentDeletion).where(
+        DocumentDeletion.kind == "asset", DocumentDeletion.source_record_id == document.id,
+        DocumentDeletion.client_id == client_id, DocumentDeletion.tenant_id == tenant_id,
+        DocumentDeletion.status != "COMPLETE",
+    ).values(status="QUEUED", available_at=datetime.now(UTC) + timedelta(seconds=180), lease_token=None, lease_expires_at=None))
     await db.execute(delete(DocumentEvidence).where(
         DocumentEvidence.document_kind == kind, DocumentEvidence.source_record_id == document.id,
     ))

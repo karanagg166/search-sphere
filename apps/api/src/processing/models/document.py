@@ -16,6 +16,7 @@ class ExtractedBlock:
     content: str
     provenance: dict[str, Any] = field(default_factory=dict)
     structured: dict[str, Any] = field(default_factory=dict)
+    crop: bytes | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)

@@ -200,3 +200,16 @@ async def get_document_evidence(
 
     document = await GenericDocumentService(db, storage).get_document(context, document_id)
     return await read_structured_evidence(db, "external", document.id, evidence_id)
+
+
+@router.get("/{document_id}/evidence/{evidence_id}/crop", summary="Read a delegated private source crop")
+async def get_document_evidence_crop(
+    document_id: str, evidence_id: str,
+    asset_id: str | None = Query(None, max_length=36),
+    context: ServiceContext = Depends(get_service_context(required_scopes={"documents:read"})),
+    db: AsyncSession = Depends(get_db), storage: ObjectStorage = Depends(get_object_storage),
+) -> dict:
+    from src.services.structured_evidence import structured_crop_access
+
+    document = await GenericDocumentService(db, storage).get_document(context, document_id)
+    return await structured_crop_access(db, storage, "external", document.id, evidence_id, asset_id)

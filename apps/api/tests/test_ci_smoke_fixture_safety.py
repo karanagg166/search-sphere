@@ -73,7 +73,7 @@ def test_snapshot_iteration_cleans_all_fixtures(tmp_manifest, monkeypatch):
             return 200, {}, {"status": "ok"}
         if method == "POST" and "/search" in url:
             return 200, {}, {"results": []}
-        return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True}
+        return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True, "derived_objects_remaining": 0}
 
     monkeypatch.setattr(smoke, "http", mock_http)
 
@@ -130,7 +130,7 @@ def test_provenance_and_ownership_protects_user_documents(tmp_manifest, monkeypa
 
     def mock_http(url, method="GET", headers=None, data=None, timeout=15):
         if url.endswith("/cleanup"):
-            return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True}
+            return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True, "derived_objects_remaining": 0}
         if method == "GET" and "/documents" in url:
             if "page=1" in url or "page" not in url:
                 return 200, {}, {"documents": mock_docs_page_1, "total": len(mock_docs_page_1)}
@@ -139,7 +139,7 @@ def test_provenance_and_ownership_protects_user_documents(tmp_manifest, monkeypa
             doc_id = url.split("/")[-1]
             deleted_calls.append(doc_id)
             return 204, {}, {}
-        return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True}
+        return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True, "derived_objects_remaining": 0}
 
     monkeypatch.setattr(smoke, "http", mock_http)
 
@@ -168,7 +168,7 @@ def test_multi_page_pagination(tmp_manifest, monkeypatch):
 
     def mock_http(url, method="GET", headers=None, data=None, timeout=15):
         if url.endswith("/cleanup"):
-            return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True}
+            return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True, "derived_objects_remaining": 0}
         if method == "GET" and "/documents" in url:
             import urllib.parse
             parsed = urllib.parse.urlparse(url)
@@ -181,8 +181,8 @@ def test_multi_page_pagination(tmp_manifest, monkeypatch):
                 return 200, {}, {"documents": page_2, "total": 51}
             return 200, {}, {"documents": []}
         if method == "DELETE":
-            return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True}
-        return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True}
+            return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True, "derived_objects_remaining": 0}
+        return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True, "derived_objects_remaining": 0}
 
     monkeypatch.setattr(smoke, "http", mock_http)
 
@@ -212,7 +212,7 @@ def test_cleanup_retries_on_transient_error(tmp_manifest, monkeypatch):
             return 200, {}, {"status": "ok"}
         if method == "POST" and "/search" in url:
             return 200, {}, {"results": []}
-        return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True}
+        return 200, {}, {"document_id": url.split("/")[-2], "status": "complete", "vectors_remaining": 0, "object_deleted": True, "derived_objects_remaining": 0}
 
     monkeypatch.setattr(smoke, "http", mock_http)
 
