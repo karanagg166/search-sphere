@@ -22,6 +22,7 @@ from src.models.conversation import Conversation
 from src.models.document import Document
 from src.models.document_chunk import DocumentChunk
 from src.models.external_document import ExternalDocument
+from src.models.message import Message
 from src.models.service_client import ServiceClient
 from src.models.user import User
 from src.security.jwt import get_current_user
@@ -57,6 +58,10 @@ class QueryAccess:
     conversation_id: str | None = None
     classification: object = None
     evidence: dict[str, str] = field(default_factory=dict, repr=False)
+    history: list = field(default_factory=list, repr=False)
+    history_hashes: dict[str, str] = field(default_factory=dict, repr=False)
+    selected_message_ids: list[str] = field(default_factory=list)
+    requires_history: bool = False
 
     async def validate(self):
         async with self.sessions() as db:
@@ -85,6 +90,15 @@ class QueryAccess:
                     Conversation.id == self.conversation_id, Conversation.user_id == context.user_id,
                 ))).scalar_one_or_none() is None:
                     raise ProviderNotApprovedError("Conversation access was revoked.")
+            if self.history_hashes:
+                messages = (await db.execute(select(Message).where(
+                    Message.conversation_id == self.conversation_id, Message.id.in_(list(self.history_hashes)),
+                ))).scalars().all()
+                if len(messages) != len(self.history_hashes) or any(
+                    hashlib.sha256(message.content.encode()).hexdigest() != self.history_hashes.get(message.id)
+                    for message in messages
+                ):
+                    raise ProviderNotApprovedError("Selected conversation context changed.")
             rows = []
             if self.evidence:
                 rows = (await db.execute(self.chunk_query().where(DocumentChunk.point_id.in_(list(self.evidence))))).scalars().all()
@@ -192,7 +206,7 @@ async def query_inference(access):
 async def native_query_inference(request: Request, user=Depends(get_current_user), db=Depends(get_db)):
     body = await request.json()
     document_id = scope_value(body, "document_id")
-    conversation_id = request.path_params.get("conversation_id")
+    conversation_id = request.path_params.get("conversation_id") or scope_value(body, "conversation_id", 36)
     if document_id and (await db.execute(select(Document.id).where(Document.id == document_id, Document.user_id == user.id))).scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="Document not found.")
     if conversation_id and (await db.execute(select(Conversation.id).where(Conversation.id == conversation_id, Conversation.user_id == user.id))).scalar_one_or_none() is None:

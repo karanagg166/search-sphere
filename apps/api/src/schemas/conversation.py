@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from src.config import settings
 from src.schemas.answer import AnswerSource
+from src.schemas.query_route import QueryRoute
 
 
 class ConversationCreate(BaseModel):
@@ -170,3 +171,6 @@ class ConversationAnswerResponse(BaseModel):
     rewritten: bool
     answer: str
     sources: list[AnswerSource] = []
+    requires_history: bool = False
+    route: QueryRoute = QueryRoute.RAG
+    context_message_ids: list[str] = Field(default_factory=list)

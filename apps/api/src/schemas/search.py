@@ -3,6 +3,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.config import settings
+from src.schemas.query_route import QueryRoute
 
 
 class ConversationMessage(BaseModel):
@@ -80,9 +81,10 @@ class SearchRequest(BaseModel):
         description="Search query string.",
         min_length=1,
     )
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=36)
     conversation_context: list[ConversationMessage] | None = Field(
         default=None,
-        description="Optional recent conversation history to resolve contextual queries.",
+        description="Deprecated compatibility field; native query routes load authorized PostgreSQL history using conversation_id.",
     )
     top_k: int = Field(
         default_factory=lambda: settings.RERANKER_TOP_K,
@@ -186,6 +188,10 @@ class SearchResponse(BaseModel):
     )
     total: int
     results: list[SearchResultResponse]
+    requires_history: bool = False
+    route: QueryRoute = QueryRoute.RAG
+    clarification: str | None = None
+    context_message_ids: list[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod

@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.schemas.search import ConversationMessage
+from src.schemas.search import ConversationMessage, RewriteResult
 from src.services.query_rewriter import (
     BaseQueryRewriteProvider,
     CohereQueryRewriteProvider,
@@ -498,3 +498,19 @@ async def test_accepts_dict_conversation_context() -> None:
 
     assert result.rewritten is True
     assert result.retrieval_query == "Which Redis eviction policy is best?"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('candidate', [
+    'What maternity leave applies to Mira after 2026-04-03 under ML-42?',
+    'What maternity leave applies to Sarah after 2025-04-03 under ML-42?',
+    'What maternity leave applies to Sarah after 2026-04-03 under ML-43?',
+    'What maternity leave applies to Sarah after 2026-04-03 under ML-42 for 90 days?',
+])
+async def test_rewrite_rejects_changed_names_dates_ids_and_invented_numbers(candidate):
+    query = 'What about Sarah after 2026-04-03 under ML-42?'
+    provider = AsyncMock(spec=BaseQueryRewriteProvider)
+    provider.rewrite.return_value = RewriteResult(original_query=query, retrieval_query=candidate, rewritten=True)
+    result = await QueryRewriter(provider=provider).rewrite(query, [ConversationMessage(role='user', content='Explain maternity leave policy.')])
+    assert result.rewritten is False
+    assert result.retrieval_query == query

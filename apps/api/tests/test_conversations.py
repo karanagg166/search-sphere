@@ -7,6 +7,7 @@ from httpx import ASGITransport, AsyncClient
 from src.db import AsyncSessionLocal
 from src.main import app
 from src.models.document import Document
+from src.models.document_chunk import DocumentChunk
 from src.processing.models.search import RerankedSearchResult
 from src.retrieval.reranked_retriever import RerankedHybridRetriever
 from src.schemas.search import RewriteResult
@@ -226,7 +227,12 @@ async def test_conversation_answer_flow_and_context_history():
 
         # Prepare mocks for retrieval, query rewriting, and answer generation
         mock_retriever = AsyncMock(spec=RerankedHybridRetriever)
-        mock_sample_chunk = make_sample_chunk(document_id=doc.id)
+        mock_sample_chunk = make_sample_chunk(point_id=str(uuid.uuid4()), document_id=doc.id)
+        async with AsyncSessionLocal() as db:
+            db.add(DocumentChunk(point_id=mock_sample_chunk.point_id, document_id=doc.id, chunk_index=0,
+                content=mock_sample_chunk.content, embedding=[1.0] + [0.0] * 383,
+                metadata_json={"embedding_model": "embed-english-light-v3.0", "source_record_id": doc.id}))
+            await db.commit()
         mock_retriever.search = AsyncMock(return_value=[mock_sample_chunk])
 
         captured_contexts = []
