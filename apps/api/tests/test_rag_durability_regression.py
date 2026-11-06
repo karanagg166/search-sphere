@@ -1,11 +1,8 @@
-from unittest.mock import AsyncMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from src.config import settings
 from src.models.document import Document
 from src.models.external_document import ExternalDocument
-from src.services.document_service import DocumentService
 from src.services.model_manager import RERANKER_MODEL_ALIASES
 from src.vector_store.qdrant_store import (
     QdrantConnectionError,
@@ -50,41 +47,8 @@ def test_qdrant_connection_error_classification():
     assert isinstance(classified_sock, QdrantConnectionError)
 
 
-@pytest.mark.asyncio
-async def test_document_deletion_purges_vectors_and_handles_partial_failures():
-    """Verify document deletion removes Qdrant points and completes DB deletion even if storage deletion fails."""
-    mock_db = AsyncMock()
-    mock_storage = AsyncMock()
-    mock_storage.delete.side_effect = Exception("Storage temporary failure")
-    mock_repo = AsyncMock()
-
-    test_doc = Document(
-        id="test-doc-id-123",
-        user_id="user-123",
-        filename="test.pdf",
-        storage_key="user-123/test.pdf",
-        status="indexed",
-        chunk_count=5,
-    )
-    mock_repo.get_by_id.return_value = test_doc
-
-    mock_v_store = AsyncMock()
-
-    service = DocumentService(
-        db=mock_db,
-        storage=mock_storage,
-        repository=mock_repo,
-        vector_store=mock_v_store,
-    )
-
-    await service.delete_user_document(document_id="test-doc-id-123", user_id="user-123")
-
-    # 1. Vector points must be deleted
-    mock_v_store.delete_document_points.assert_awaited_once_with(document_id="test-doc-id-123")
-    # 2. Storage delete was attempted
-    mock_storage.delete.assert_awaited_once_with("user-123/test.pdf")
-    # 3. Database record is deleted despite storage error
-    mock_repo.delete.assert_awaited_once_with(test_doc)
+# Deletion failure/restart regressions use real PostgreSQL/pgvector in
+# scripts/tests/test_document_cleanup_postgres.py.
 
 
 def test_chunk_count_model_attributes():

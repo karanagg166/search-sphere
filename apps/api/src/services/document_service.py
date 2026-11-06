@@ -166,6 +166,13 @@ class DocumentService:
         return document
 
     async def reindex_user_document(self, document_id, user_id):
+        from src.repositories.document_deletion import (
+            lock_document_identity,
+            reject_deleted_identity,
+        )
+
+        await lock_document_identity(self.db, "standalone", "search_sphere", user_id, document_id)
+        await reject_deleted_identity(self.db, "standalone", "search_sphere", user_id, document_id)
         document = await self.get_user_document(document_id, user_id)
         job = await ingestion_queue.enqueue(self.db, "standalone", document.id, reset=True)
         await ingestion_queue.mirror_document_state(self.db, job)
@@ -194,45 +201,12 @@ class DocumentService:
         return queued
 
     async def delete_user_document(self, document_id: str, user_id: str) -> None:
-        """Deletes document points from Qdrant vector store, file from Object Storage, and PostgreSQL metadata."""
-        document = await self.repository.get_by_id(document_id, user_id)
-        if not document:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Document not found.",
-            )
+        from sqlalchemy.ext.asyncio import async_sessionmaker
 
-        # 1. Purge points from Qdrant vector store
-        v_store = self.vector_store
-        if v_store is None:
-            try:
-                from src.vector_store import get_vector_store
-                v_store = get_vector_store()
-            except Exception as exc:
-                logger.warning("Could not initialize vector store for point deletion", error=str(exc))
-                v_store = None
+        from src.services.cleanup_worker import DocumentCleanupWorker
+        from src.services.document_deletion import delete_registered_document
 
-        if v_store is not None:
-            try:
-                await v_store.delete_document_points(document_id=document.id)
-                logger.info("Deleted Qdrant vector points for document", document_id=document_id, user_id=user_id)
-            except Exception as exc:
-                logger.warning(
-                    "Failed to delete Qdrant points during document deletion (proceeding with storage and DB cleanup)",
-                    document_id=document_id,
-                    error=str(exc),
-                )
-
-        # 2. Remove from Object Storage
-        try:
-            await self.storage.delete(document.storage_key)
-        except Exception as exc:
-            logger.warning(
-                "Failed to delete file from object storage (proceeding with DB cleanup)",
-                storage_key=document.storage_key,
-                error=str(exc),
-            )
-
-        # 3. Remove from Database
-        await self.repository.delete(document)
-        logger.info("Document deleted successfully", document_id=document_id, user_id=user_id)
+        deletion = await delete_registered_document(self.db, "standalone", document_id, "search_sphere", user_id)
+        await self.db.commit()
+        worker = DocumentCleanupWorker(async_sessionmaker(self.db.bind, expire_on_commit=False), lambda: self.storage)
+        await worker.run_once(deletion.id)

@@ -1,7 +1,7 @@
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -309,22 +309,16 @@ async def test_delete_medical_document_index():
         await session.commit()
 
     transport = ASGITransport(app=app)
-    with patch("src.routers.internal_medical_ingestion.QdrantVectorStore") as mock_qdrant_cls:
-        mock_instance = AsyncMock()
-        mock_instance.delete_document_points = AsyncMock(return_value=True)
-        mock_instance.close = AsyncMock()
-        mock_qdrant_cls.return_value = mock_instance
-
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.delete(
-                f"/internal/medical-documents/{doc_id}/index",
-                headers=VALID_AUTH_HEADER,
-            )
-            assert resp.status_code == 200
-            assert resp.json()["success"] is True
-
-            # Verify Qdrant delete was called
-            mock_instance.delete_document_points.assert_awaited_once_with(doc_id, filters={"client_id": "quick_clinic", "tenant_id": "quick_clinic_default", "collection_id": patient_collection_id(patient_id), "owner_subject_id": patient_id})
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.delete(f"/internal/medical-documents/{doc_id}/index", headers=VALID_AUTH_HEADER)
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+        receipt = await client.get(f"/internal/medical-documents/{doc_id}/cleanup", headers=VALID_AUTH_HEADER)
+        assert receipt.status_code == 200
+        assert receipt.json()["vectors_remaining"] == 0
+        assert receipt.json()["status"] == "complete"
+        replay = await client.delete(f"/internal/medical-documents/{doc_id}/index", headers=VALID_AUTH_HEADER)
+        assert replay.status_code == 200
 
     # Verify record was deleted from database
     async with AsyncSessionLocal() as session:

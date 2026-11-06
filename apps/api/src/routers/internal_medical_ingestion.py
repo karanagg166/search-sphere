@@ -10,13 +10,12 @@ from fastapi import (
     Response,
     status,
 )
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import get_db
 from src.models.external_document import ExternalDocument
 from src.models.ingestion_job import IngestionJob
-from src.models.medical_observation import MedicalObservation
 from src.repositories.external_registration import register_external_document
 from src.repositories.ingestion_queue import ingestion_queue
 from src.routers.internal_medical_documents import (
@@ -274,25 +273,38 @@ async def delete_medical_document_index(
     ))
     record = result.scalar_one_or_none()
     if not record:
+        from src.repositories.document_deletion import find_deletion
+
+        prior = await find_deletion(session, "external", _auth.client_id, _auth.tenant_id, clean_document_id, context=_auth)
+        if prior:
+            return MedicalDocumentDeleteIndexResponse(success=True, message="Document deletion already accepted.")
         raise HTTPException(status_code=404, detail="Medical document not found.")
     scope = bind_patient(_auth, record.external_patient_id)
-    vector_store = QdrantVectorStore()
-    try:
-        await vector_store.delete_document_points(clean_document_id, filters=scope.to_qdrant_filter())
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Document deletion is temporarily unavailable.") from exc
-    finally:
-        await vector_store.close()
-    await session.execute(delete(MedicalObservation).where(
-        MedicalObservation.source_system == scope.client_id,
-        MedicalObservation.tenant_id == scope.tenant_id,
-        MedicalObservation.external_patient_id == scope.subject_id,
-        MedicalObservation.external_document_id == clean_document_id,
-    ))
-    await session.delete(record)
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from src.services.cleanup_worker import DocumentCleanupWorker
+    from src.services.document_deletion import delete_registered_document
+    from src.storage.object_storage import get_object_storage
+
+    deletion = await delete_registered_document(
+        session, "external", clean_document_id, scope.client_id, scope.tenant_id, context=scope,
+    )
     await session.commit()
+    await DocumentCleanupWorker(async_sessionmaker(session.bind, expire_on_commit=False), get_object_storage).run_once(deletion.id)
 
     return MedicalDocumentDeleteIndexResponse(
         success=True,
-        message="Medical document index and content cleaned up successfully",
+        message="Document access revoked. Poll cleanup to verify physical deletion.",
     )
+
+
+@router.get("/{document_id}/cleanup", summary="Verify authorized medical document physical cleanup")
+async def get_medical_document_cleanup(
+    document_id: str,
+    _auth: ServiceContext = Depends(get_medical_context),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    from src.repositories.document_deletion import cleanup_receipt, find_deletion
+
+    row = await find_deletion(session, "external", _auth.client_id, _auth.tenant_id, document_id, context=_auth)
+    return await cleanup_receipt(session, row)

@@ -14,7 +14,9 @@ from fastapi import (
     status,
 )
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.db import get_db
 from src.security.medical_context import (
     bind_patient,
     get_medical_context,
@@ -145,6 +147,7 @@ async def upload_medical_document(
     document_id: str = Form(..., description="Unique medical document identifier"),
     _auth: ServiceContext = Depends(get_medical_context),
     storage: ObjectStorage = Depends(get_object_storage),
+    db: AsyncSession = Depends(get_db),
 ) -> MedicalDocumentUploadResponse:
     clean_patient_id = sanitize_identifier(patient_id, "patient_id")
     _auth = bind_patient(_auth, clean_patient_id)
@@ -168,6 +171,23 @@ async def upload_medical_document(
 
     storage_path = f"medical-documents/{clean_patient_id}/{clean_document_id}/{clean_filename}"
     validate_storage_scope(_auth, storage_path)
+
+    from sqlalchemy import select
+
+    from src.models.external_document import ExternalDocument
+    from src.repositories.document_deletion import (
+        lock_document_identity,
+        reject_deleted_identity,
+    )
+
+    await lock_document_identity(db, "external", _auth.client_id, _auth.tenant_id, clean_document_id)
+    await reject_deleted_identity(db, "external", _auth.client_id, _auth.tenant_id, clean_document_id)
+    existing = (await db.execute(select(ExternalDocument.id).where(
+        ExternalDocument.source_system == _auth.client_id, ExternalDocument.tenant_id == _auth.tenant_id,
+        ExternalDocument.external_document_id == clean_document_id,
+    ))).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=409, detail="Registered document bytes cannot be overwritten. Use a new version.")
 
     logger.info(
         "Persisting medical document to storage",
@@ -210,6 +230,7 @@ async def get_medical_document_signed_url(
     expires_in: int = Query(600, alias="expiresIn", ge=300, le=900, description="Expiration time in seconds (300 to 900)"),
     _auth: ServiceContext = Depends(get_medical_context),
     storage: ObjectStorage = Depends(get_object_storage),
+    db: AsyncSession = Depends(get_db),
 ) -> SignedUrlResponse:
     cleaned_path = storage_path.strip()
     validate_storage_scope(_auth, cleaned_path)
@@ -223,6 +244,11 @@ async def get_medical_document_signed_url(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Path traversal is not permitted.",
         )
+
+    from src.repositories.document_deletion import find_deletion
+
+    if await find_deletion(db, "external", _auth.client_id, _auth.tenant_id, cleaned_path.split("/")[2], context=_auth):
+        raise HTTPException(status_code=404, detail="Document was deleted.")
 
     try:
         signed_url = await storage.create_signed_url(key=cleaned_path, expires_in=expires_in)
@@ -255,6 +281,7 @@ async def delete_medical_document(
     body: DeleteRequestBody | None = Body(None),
     _auth: ServiceContext = Depends(get_medical_context),
     storage: ObjectStorage = Depends(get_object_storage),
+    db: AsyncSession = Depends(get_db),
 ) -> DeleteResponse:
     target_path = (storage_path or (body.storage_path if body else None) or "").strip()
 
@@ -277,23 +304,12 @@ async def delete_medical_document(
             detail="Path traversal is not permitted.",
         )
 
-    try:
-        deleted = await storage.delete(key=target_path)
-    except Exception as exc:
-        logger.error(
-            "Exception during medical document deletion",
-            path=target_path,
-            error=str(exc),
-        )
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Failed to communicate with storage service.",
-        ) from exc
+    from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    if not deleted:
-        logger.warning("Object was not found or could not be deleted", path=target_path)
+    from src.services.cleanup_worker import DocumentCleanupWorker
+    from src.services.document_deletion import delete_medical_object
 
-    return DeleteResponse(
-        success=True,
-        message="Medical document deleted successfully",
-    )
+    deletion = await delete_medical_object(db, _auth, target_path)
+    await db.commit()
+    await DocumentCleanupWorker(async_sessionmaker(db.bind, expire_on_commit=False), lambda: storage).run_once(deletion.id)
+    return DeleteResponse(success=True, message="Document access revoked; poll cleanup to verify physical deletion.")

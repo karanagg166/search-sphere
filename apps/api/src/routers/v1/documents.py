@@ -165,14 +165,22 @@ async def delete_document(
     storage: ObjectStorage = Depends(get_object_storage),
 ) -> DocumentDeleteResponse:
     service = GenericDocumentService(db, storage, delete_extension=delete_observations)
-    vector_store = QdrantVectorStore()
-    try:
-        await service.delete_document(context, document_id, vector_store=vector_store)
-    finally:
-        await vector_store.close()
+    await service.delete_document(context, document_id)
 
     return DocumentDeleteResponse(
         success=True,
-        message=f"Document '{document_id}' successfully deleted.",
+        message="Document access revoked. Poll the cleanup receipt to verify physical deletion.",
         document_id=document_id,
     )
+
+
+@router.get("/{document_id}/cleanup", summary="Verify scoped physical document cleanup")
+async def get_document_cleanup(
+    document_id: str,
+    context: ServiceContext = Depends(get_service_context(required_scopes={"documents:read"})),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from src.repositories.document_deletion import cleanup_receipt, find_deletion
+
+    row = await find_deletion(db, "external", context.client_id, context.tenant_id, document_id, context=context)
+    return await cleanup_receipt(db, row)

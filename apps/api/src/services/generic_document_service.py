@@ -139,6 +139,13 @@ class GenericDocumentService:
 
         context = context.resolve_scope(collection_id)
         collection_id = context.collection_id
+        from src.repositories.document_deletion import (
+            lock_document_identity,
+            reject_deleted_identity,
+        )
+
+        await lock_document_identity(self.db, "external", context.client_id, context.tenant_id, document_id)
+        await reject_deleted_identity(self.db, "external", context.client_id, context.tenant_id, document_id)
         existing = (await self.db.execute(select(ExternalDocument).where(
             ExternalDocument.source_system == context.client_id,
             ExternalDocument.tenant_id == context.tenant_id,
@@ -146,6 +153,8 @@ class GenericDocumentService:
         ))).scalar_one_or_none()
         if existing and (existing.owner_subject_id != context.subject_id or existing.collection_id != collection_id):
             raise HTTPException(status_code=403, detail="Document belongs to another scope.")
+        if existing:
+            raise HTTPException(status_code=409, detail="Registered document bytes cannot be overwritten. Use a new version.")
         detected_mime = detect_and_validate_file_type(file_bytes, content_type)
         clean_doc_id = sanitize_path_segment(document_id, "document_id")
         clean_filename = sanitize_filename(original_filename)
@@ -303,42 +312,24 @@ class GenericDocumentService:
         doc_id_or_external_id: str,
         vector_store: QdrantVectorStore | None = None,
     ) -> bool:
-        """Deletes document from database, object storage, and vector store with strict tenant isolation."""
-        doc = await self.get_document(context, doc_id_or_external_id)
+        """Commit immediate evidence revocation and retain durable cleanup state."""
+        from sqlalchemy.ext.asyncio import async_sessionmaker
 
-        # External IDs can collide across clients; every mutation uses the scope.
-        v_store = vector_store
-        if v_store is None:
-            try:
-                v_store = QdrantVectorStore()
-            except Exception as exc:
-                logger.warning("Could not instantiate vector store for external document deletion", error=str(exc))
-                v_store = None
-        if v_store is not None:
-            try:
-                await v_store.delete_document_points(doc.external_document_id, filters={
-                    "client_id": doc.client_id, "tenant_id": doc.tenant_id,
-                })
-            except Exception as exc:
-                raise HTTPException(status_code=503, detail="Document deletion is temporarily unavailable.") from exc
-        try:
-            await self.storage.delete(key=doc.storage_path)
-        except Exception as exc:
-            raise HTTPException(status_code=503, detail="Document deletion is temporarily unavailable.") from exc
+        from src.repositories.document_deletion import find_deletion
+        from src.services.cleanup_worker import DocumentCleanupWorker
+        from src.services.document_deletion import delete_registered_document
 
-        if self.delete_extension is not None:
-            await self.delete_extension(self.db, doc)
-
-        # 3. Delete database record
-        await self.db.delete(doc)
+        prior = await find_deletion(self.db, "external", context.client_id, context.tenant_id, doc_id_or_external_id, context=context)
+        if prior:
+            deletion = prior
+        else:
+            doc = await self.get_document(context, doc_id_or_external_id)
+            deletion = await delete_registered_document(
+                self.db, "external", doc.external_document_id, context.client_id, context.tenant_id, context=context,
+            )
         await self.db.commit()
-
-        logger.info(
-            "Document deleted successfully",
-            doc_id=doc.id,
-            client_id=context.client_id,
-            tenant_id=context.tenant_id,
-        )
+        worker = DocumentCleanupWorker(async_sessionmaker(self.db.bind, expire_on_commit=False), lambda: self.storage)
+        await worker.run_once(deletion.id)
         return True
 
     async def get_signed_url(

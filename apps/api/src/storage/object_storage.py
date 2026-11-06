@@ -152,7 +152,7 @@ class SupabaseStorage(ObjectStorage):
             # 2. Fallback to direct key endpoint
             url_direct = f"{self.base_url}/storage/v1/object/{self.bucket}/{key}"
             resp_direct = await client.delete(url_direct, headers=self._headers())
-            return resp_direct.status_code in (200, 204)
+            return resp_direct.status_code in (200, 204, 404)
 
     async def download(self, key: str) -> bytes:
         url = f"{self.base_url}/storage/v1/object/{self.bucket}/{key}"
@@ -181,10 +181,16 @@ class SupabaseStorage(ObjectStorage):
                 return True
             if resp.status_code == 404:
                 return False
-            # Some reverse proxies reject HEAD; fallback to byte-range GET
+            # An outage or auth failure must never be mistaken for absence.
+            if resp.status_code not in (405, 501):
+                raise RuntimeError("Storage existence check unavailable")
             headers["Range"] = "bytes=0-0"
-            resp_get = await client.get(url, headers=headers)
-            return resp_get.status_code in (200, 206)
+            async with client.stream("GET", url, headers=headers) as response:
+                if response.status_code in (200, 206):
+                    return True
+                if response.status_code == 404:
+                    return False
+                raise RuntimeError("Storage existence check unavailable")
 
 
 class LocalStorage(ObjectStorage):

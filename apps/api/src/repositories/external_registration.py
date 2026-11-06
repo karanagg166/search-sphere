@@ -6,11 +6,17 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from src.models.external_document import ExternalDocument
+from src.repositories.document_deletion import (
+    lock_document_identity,
+    reject_deleted_identity,
+)
 from src.repositories.ingestion_queue import ingestion_queue
 
 
 async def register_external_document(db, values, *, reindex=False):
     identity = (values["source_system"], values["tenant_id"], values["external_document_id"])
+    await lock_document_identity(db, "external", *identity)
+    await reject_deleted_identity(db, "external", *identity)
     query = select(ExternalDocument).where(
         ExternalDocument.source_system == identity[0],
         ExternalDocument.tenant_id == identity[1],
