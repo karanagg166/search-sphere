@@ -12,7 +12,9 @@ FILES += ["scripts/tests/test_worker_runtime_source.py","scripts/tests/test_host
 
 
 def main():
-    environment={**os.environ,"PYTHONPATH":str(ROOT/"apps/api"),"ENVIRONMENT":"test"}
+    environment={**os.environ,"PYTHONPATH":str(ROOT/"apps/api"),"ENVIRONMENT":"test",
+        "DATABASE_URL":"sqlite+aiosqlite:////tmp/ss_worker_unit_test.db","COHERE_API_KEY":"synthetic-unit-test-key",
+        "SUPABASE_SECRET_KEY":"","STORAGE_BACKEND":"local"}
     return subprocess.call([sys.executable,"-m","pytest","-c","apps/api/pyproject.toml","--rootdir",".",
         "-o","pythonpath=apps/api","--import-mode=importlib",*FILES,"-v"],cwd=ROOT,env=environment)
 
