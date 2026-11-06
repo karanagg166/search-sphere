@@ -191,6 +191,7 @@ class SearchResponse(BaseModel):
     requires_history: bool = False
     route: QueryRoute = QueryRoute.RAG
     clarification: str | None = None
+    response: str | None = None
     context_message_ids: list[str] = Field(default_factory=list)
 
     @model_validator(mode="before")

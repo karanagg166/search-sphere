@@ -16,7 +16,6 @@ from src.retrieval.reranked_retriever import (
 )
 from src.schemas.query_route import QueryRoute
 from src.schemas.search import (
-    RewriteResult,
     SearchRequest,
     SearchResponse,
     SearchResultResponse,
@@ -24,9 +23,10 @@ from src.schemas.search import (
 from src.security.query_access import current_query_access
 from src.services.conversation_context import (
     prior_answer_chunks,
-    select_conversation_context,
+    resolve_query_context,
 )
 from src.services.query_rewriter import QueryRewriter, get_query_rewriter
+from src.services.query_routes import execute_non_rag
 from src.services.workload_scheduler import workload_scheduler
 
 logger = structlog.get_logger()
@@ -91,14 +91,15 @@ class SearchService:
         target_document_id: str | None = None
         target_document_ids: list[str] | None = None
         access = current_query_access()
-        selection = await select_conversation_context(access, request.query)
-        if access is not None:
-            access.history = selection.history
-            access.selected_message_ids = selection.message_ids
-            access.requires_history = selection.requires_history
+        selection, rewrite_result = await resolve_query_context(access, request.query, self.query_rewriter)
+        if access and access.intent.route != QueryRoute.RAG:
+            answer = await execute_non_rag(access.intent, request.query, access)
+            return SearchResponse(query=request.query, retrieval_query=rewrite_result.retrieval_query, rewritten=rewrite_result.rewritten,
+                total=0,results=[],requires_history=selection.requires_history,route=access.intent.route,
+                clarification=selection.clarification, response=answer,context_message_ids=selection.message_ids)
         if selection.clarification:
-            return SearchResponse(query=request.query, retrieval_query=request.query, total=0, results=[],
-                requires_history=True, route=QueryRoute.CLARIFICATION, clarification=selection.clarification)
+            return SearchResponse(query=request.query,retrieval_query=request.query,total=0,results=[],requires_history=True,
+                route=QueryRoute.CLARIFICATION,clarification=selection.clarification)
 
         # 1. Authorization & Scoping
         if request.document_id is not None:
@@ -137,15 +138,7 @@ class SearchService:
 
         # 2. Query Reformulation & Retrieval under interactive RAG guardrails
         async with workload_scheduler.interactive_rag_scope():
-            rewrite_result = RewriteResult(original_query=request.query, retrieval_query=request.query) if selection.exact_previous_answer is not None else await self.query_rewriter.rewrite(
-                query=request.query,
-                conversation_context=selection.history,
-            )
             retrieval_query = rewrite_result.retrieval_query
-            if selection.requires_history and not rewrite_result.rewritten and selection.exact_previous_answer is None:
-                return SearchResponse(query=request.query, retrieval_query=request.query, total=0, results=[],
-                    requires_history=True, route=QueryRoute.CLARIFICATION, context_message_ids=selection.message_ids,
-                    clarification="Please specify the topic or policy for this follow-up.")
 
             # 3. Execute two-stage reranked retrieval pipeline
             try:

@@ -21,6 +21,7 @@ from src.schemas.internal_medical_rag import (
     MedicalRagAnswerRequest,
     MedicalRagAnswerResponse,
 )
+from src.schemas.query_route import QueryRoute
 from src.security.medical_context import bind_patient, get_medical_context
 from src.security.query_access import current_query_access, medical_query_inference
 from src.security.service_context import ServiceContext
@@ -53,6 +54,7 @@ from src.services.medical_query_router import (
     get_medical_query_router,
 )
 from src.services.query_rewriter import QueryRewriter, get_query_rewriter
+from src.services.query_routes import execute_non_rag
 from src.services.search_service import get_retriever
 
 logger = structlog.get_logger()
@@ -416,6 +418,8 @@ async def generate_medical_answer(
     session: AsyncSession = Depends(get_db),
     retriever: RerankedHybridRetriever = Depends(get_retriever),
     answer_generator: AnswerGenerator = Depends(get_answer_generator),
+    query_rewriter: QueryRewriter = Depends(get_query_rewriter),
+    query_router: MedicalQueryRouter = Depends(get_medical_query_router),
 ) -> MedicalRagAnswerResponse:
     clean_patient_id = sanitize_identifier(body.patient_id, "patient_id")
     _auth = bind_patient(_auth, clean_patient_id)
@@ -426,9 +430,16 @@ async def generate_medical_answer(
             detail="Query cannot be empty or whitespace only.",
         )
 
+    selection, rewrite = await prepare_medical_context(clean_query, query_rewriter, query_router)
+    access = current_query_access()
+    if access and access.intent.route != QueryRoute.RAG:
+        answer = await execute_non_rag(access.intent, clean_query, access)
+        return MedicalRagAnswerResponse(answer=answer, citations=[], result_count=0, route=access.intent.route,
+            requires_history=selection.requires_history)
+
     ready_chunks, ready_docs = await _retrieve_patient_ready_chunks(
         patient_id=clean_patient_id,
-        query=clean_query,
+        query=rewrite.retrieval_query,
         limit=body.limit,
         document_type=body.document_type,
         session=session,
@@ -502,6 +513,11 @@ async def _generate_medical_chat(
 
     selection, rewrite_result = await prepare_medical_context(clean_message, query_rewriter, query_router)
     conversation_context = selection.history
+    access = current_query_access()
+    if access and access.intent.route != QueryRoute.RAG:
+        answer = await execute_non_rag(access.intent,clean_message,access)
+        return MedicalChatResponse(answer=answer,retrieval_query=rewrite_result.retrieval_query,rewritten=rewrite_result.rewritten,
+            answer_mode=access.intent.route.value,route=access.intent.route)
     if selection.clarification:
         return MedicalChatResponse(answer=selection.clarification, retrieval_query=clean_message, answer_mode="CLARIFICATION")
     effective_query, rewritten = rewrite_result.retrieval_query, rewrite_result.rewritten

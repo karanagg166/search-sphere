@@ -13,6 +13,7 @@ from src.models.ingestion_job import IngestionJob
 from src.models.medical_observation import MedicalObservation
 from src.models.message import Message
 from src.models.provider_usage import ProviderUsage
+from src.models.query_policy import QueryPolicy
 from src.models.service_client import ServiceClient
 from src.models.user import User
 
@@ -32,6 +33,7 @@ __all__ = [
     "Feedback",
     "IngestionJob",
     "ProviderUsage",
+    "QueryPolicy",
     "ServiceClient",
     "DocumentCollection",
 ]

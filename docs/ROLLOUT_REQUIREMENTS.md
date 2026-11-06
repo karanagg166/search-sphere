@@ -622,3 +622,37 @@ Vercel health/Actions deployment verification remains available. Its local CLI
 management credential returns HTTP 403 even for `/v2/user`; billing-plan verification
 is pending reconnection or the owner's dashboard confirmation. No paid resource was
 created or upgraded. This limitation does not block local code/CI work.
+
+### Shared validated query routing
+
+Native search/answers/conversations, versioned search/answers, and medical answers/
+chat now classify context dependence, select authorized history and rewrite before
+intent execution. `QueryRoute` is validated across DIRECT, RAG, GENERAL_LLM, TOOL_API
+and CLARIFICATION. Deterministic greetings/thanks avoid inference; ambiguous references
+and unregistered actions clarify. RAG remains the default document capability.
+
+Migration 018 adds one missing server policy table scoped by client/tenant, with RLS.
+General generation and optional hosted semantic classification default off. Strict
+hosted routing rejects unknown enums/fields and nonfinite confidence; confidence below
+0.75 clarifies. General generation requires the explicit policy and no history, uses
+no private retrieval, and rejects invented document citations. The only registered
+tool is read-only `document.status`; PostgreSQL checks resource scopes and credentials
+before execution. No generic URL/SQL/side-effect tool is registered. Policy changes
+are rechecked during inference, including changes while a result is in flight.
+
+Thirteen real PostgreSQL routing tests cover defaults, confidence/enum validation,
+general-policy gates, no private context, policy revocation during generation,
+registered-tool/owner checks, delegated patient/collection boundaries/read-scope
+revocation, and DIRECT through native/versioned/medical APIs without retrieval.
+The API suite and focused clinical/migration regressions pass. Complete claim support
+validation, all streaming guards, compact memory, versioned replacement/cutover,
+caches, labeled performance evaluation and the three full authenticated production
+journeys remain open.
+
+[Search Sphere #49](https://github.com/karanagg166/search-sphere/pull/49) merged at
+`f50664620c3a05b8727386721f76647b1d030fbd`; required CI passed in
+[42252964139](https://github.com/karanagg166/search-sphere/actions/runs/42252964139).
+[Quick-Clinic #163](https://github.com/karanagg166/Quick-Clinic/pull/163) passed
+[42253283898](https://github.com/karanagg166/Quick-Clinic/actions/runs/42253283898)
+and merged. Exact new consumer deployment verification continues; the backend remains
+on the last verified production `8288c9d` until the pinned rollout gates run.

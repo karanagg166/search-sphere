@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.schemas.query_route import QueryRoute
+
 
 class MedicalRagAnswerRequest(BaseModel):
     """Request schema for internal medical RAG grounded answer generation."""
@@ -44,6 +46,8 @@ class MedicalRagAnswerResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     answer: str
+    route: QueryRoute = QueryRoute.RAG
+    requires_history: bool = Field(default=False, alias="requiresHistory", serialization_alias="requiresHistory")
     citations: list[MedicalAnswerCitation] = Field(default_factory=list)
     result_count: int = Field(default=0, alias="resultCount", serialization_alias="resultCount")
 
@@ -77,6 +81,7 @@ class MedicalChatResponse(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
+    route: QueryRoute = QueryRoute.RAG
     answer: str
     citations: list[MedicalAnswerCitation] = Field(default_factory=list)
     result_count: int = Field(default=0, alias="resultCount", serialization_alias="resultCount")

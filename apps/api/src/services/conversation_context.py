@@ -12,9 +12,11 @@ from src.models.document_chunk import DocumentChunk
 from src.models.medical_observation import MedicalObservation
 from src.models.message import Message
 from src.processing.models.search import RerankedSearchResult
+from src.schemas.query_route import QueryRoute
 from src.schemas.search import ConversationMessage, RewriteResult
 from src.security.conversation_access import conversation_query
 from src.security.structured_access import observation_fingerprint, observation_query
+from src.services.query_intent import QueryIntent, classify_intent
 
 _DIRECT = re.compile(r"^(?:hi|hello|hey|good (?:morning|evening|afternoon)|thanks?|thank you|bye|you['’]?re welcome|happy to help|ok(?:ay)?|got it)[!.\s]*$", re.I)
 _REFERENCE = re.compile(r"\b(?:what about|how about|and for|also for|previous (?:answer|response|message)|last (?:answer|response)|summari[sz]e (?:that|it)|explain (?:that|it)|those|that policy|this policy|their eligibility|what does it|what is it|what are they|which one|how does (?:it|that)|how do they|when was it|when were they|why did it|what did they)\b", re.I)
@@ -168,13 +170,22 @@ async def resolve_query_context(access, query, rewriter, *, deterministic_rewrit
         access.requires_history = selection.requires_history
         access.exact_previous_answer = selection.exact_previous_answer
     unchanged = RewriteResult(original_query=query, retrieval_query=query, rewritten=False)
-    if selection.clarification or selection.exact_previous_answer is not None:
+    if selection.clarification:
+        if access is not None:
+            access.intent = QueryIntent(QueryRoute.CLARIFICATION, response=selection.clarification)
+        return selection, unchanged
+    if selection.exact_previous_answer is not None:
+        if access is not None:
+            access.intent = await classify_intent(query, access, requires_history=True, exact_previous=True)
         return selection, unchanged
     result = deterministic_rewrite(query, selection.history) if selection.requires_history and deterministic_rewrite else None
     if result is None:
         result = await rewriter.rewrite(query=query, conversation_context=selection.history)
     if selection.requires_history and not result.rewritten:
         selection.clarification = "Please specify the topic or policy for this follow-up."
+    if access is not None:
+        access.intent = QueryIntent(QueryRoute.CLARIFICATION, response=selection.clarification) if selection.clarification else await classify_intent(
+            result.retrieval_query, access, requires_history=selection.requires_history, selected_document=access.document_id)
     return selection, result
 
 
