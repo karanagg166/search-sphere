@@ -848,6 +848,10 @@ async def test_observation_query_pagination_and_deterministic_order():
 
     base_date = datetime(2026, 10, 1, 10, 0, 0, tzinfo=UTC)
     async with AsyncSessionLocal() as session:
+        session.add(ExternalDocument(source_system="quick_clinic", tenant_id="quick_clinic_default",
+            external_patient_id=patient_id, owner_subject_id=patient_id, collection_id=patient_collection_id(patient_id),
+            external_document_id=doc_id, file_name="public-synthetic.pdf", storage_path="public/synthetic.pdf",
+            mime_type="application/pdf", file_size=32, document_type="LAB_REPORT", status="READY"))
         for i in range(5):
             obs = MedicalObservation(
                 id=f"obs-pag-{uuid.uuid4().hex[:8]}-{i:03d}",

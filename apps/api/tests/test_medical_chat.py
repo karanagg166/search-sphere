@@ -5,12 +5,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from src.config import settings
 from src.db import AsyncSessionLocal
 from src.inference.policy import ProviderNotApprovedError, ProviderQuotaExceededError
 from src.main import app
+from src.models.conversation import Conversation
+from src.models.document_chunk import DocumentChunk
 from src.models.external_document import ExternalDocument
 from src.processing.models.search import RerankedSearchResult
 from src.schemas.search import RewriteResult
@@ -24,6 +26,24 @@ from src.services.search_service import get_retriever
 TEST_SERVICE_SECRET = "test-service-secret"
 VALID_AUTH_HEADER = {"Authorization": f"Bearer {TEST_SERVICE_SECRET}"}
 INVALID_AUTH_HEADER = {"Authorization": "Bearer wrong-service-secret"}
+
+
+async def seed_query_chunks(chunks):
+    """Seed current authoritative vectors for mocked retrieval contract tests."""
+    async with AsyncSessionLocal() as db:
+        for chunk in chunks:
+            doc = (await db.execute(select(ExternalDocument).where(
+                ExternalDocument.external_document_id == chunk.document_id,
+                ExternalDocument.source_system == chunk.client_id,
+                ExternalDocument.owner_subject_id == chunk.owner_subject_id,
+            ))).scalar_one_or_none()
+            if doc is None:
+                continue
+            db.add(DocumentChunk(point_id=chunk.point_id, document_id=chunk.document_id, chunk_index=chunk.chunk_index,
+                content=chunk.content, embedding=[1.0] + [0.0] * 383, client_id=chunk.client_id, tenant_id=chunk.tenant_id,
+                collection_id=chunk.collection_id, owner_subject_id=chunk.owner_subject_id, patient_id=chunk.patient_id,
+                source_system="quick_clinic", metadata_json={"embedding_model": "embed-english-light-v3.0", "source_record_id": doc.id}))
+        await db.commit()
 
 
 @pytest.fixture
@@ -97,6 +117,8 @@ async def sample_patient_documents():
     }
 
     async with AsyncSessionLocal() as session:
+        await session.execute(delete(DocumentChunk).where(DocumentChunk.document_id.in_([doc_a1_id, doc_b1_id])))
+        await session.execute(delete(Conversation).where(Conversation.client_id == "quick_clinic", Conversation.subject_id.in_([patient_a_id, patient_b_id])))
         res = await session.execute(
             select(ExternalDocument).where(
                 ExternalDocument.external_document_id.in_([doc_a1_id, doc_b1_id])
@@ -192,6 +214,7 @@ async def test_medical_chat_multi_turn_query_rewriting(sample_patient_documents)
         mock_retriever.search.return_value,
     )
 
+    await seed_query_chunks(mock_retriever.search.return_value)
     app.dependency_overrides[get_retriever] = lambda: mock_retriever
     app.dependency_overrides[get_query_rewriter] = lambda: mock_rewriter
     app.dependency_overrides[get_answer_generator] = lambda: mock_generator
@@ -214,28 +237,12 @@ async def test_medical_chat_multi_turn_query_rewriting(sample_patient_documents)
             assert resp.status_code == 200
             body = resp.json()
 
-            # Verify query rewriter was called with history
-            assert mock_rewriter.rewrite.called
-            call_kwargs = mock_rewriter.rewrite.call_args.kwargs
-            assert call_kwargs["query"] == "What about the later one?"
-            assert len(call_kwargs["conversation_context"]) == 2
-
-            # Verify retriever was called with the REWRITTEN query
-            assert mock_retriever.search.called
-            retrieval_query_used = mock_retriever.search.call_args.kwargs["query"]
-            assert retrieval_query_used == "later blood pressure reading in patient medical reports"
-
-            # Verify patient filter
-            filters = mock_retriever.search.call_args.kwargs["filters"]
-            assert filters["source_system"] == "quick_clinic"
-            assert filters["patient_id"] == patient_a
-
-            # Verify response
-            assert "125/82 mmHg [1]" in body["answer"]
-            assert body["rewritten"] is True
-            assert body["retrievalQuery"] == "later blood pressure reading in patient medical reports"
-            assert len(body["citations"]) == 1
-            assert body["citations"][0]["documentId"] == doc_a1
+            # Caller history cannot resolve a reference without a bound conversation.
+            mock_rewriter.rewrite.assert_not_called()
+            mock_retriever.search.assert_not_called()
+            mock_generator.generate_answer.assert_not_called()
+            assert body["answerMode"] == "CLARIFICATION"
+            assert body["requiresHistory"] is True and body["citations"] == []
     finally:
         app.dependency_overrides.clear()
 
@@ -307,6 +314,7 @@ async def test_medical_chat_patient_filter_and_contamination_defense(sample_pati
 
     mock_generator.generate_answer.side_effect = mock_gen
 
+    await seed_query_chunks(mock_retriever.search.return_value)
     app.dependency_overrides[get_retriever] = lambda: mock_retriever
     app.dependency_overrides[get_answer_generator] = lambda: mock_generator
 
@@ -318,7 +326,7 @@ async def test_medical_chat_patient_filter_and_contamination_defense(sample_pati
                 headers=VALID_AUTH_HEADER,
                 json={
                     "patientId": patient_a,
-                    "message": "What about the other patient's value?",
+                    "message": "Find the blood pressure in this patient record",
                     "history": [
                         {"role": "user", "content": "Patient B BP was 180/110"},
                     ],
@@ -378,6 +386,7 @@ async def test_medical_chat_fresh_grounding(sample_patient_documents, synthetic_
         mock_retriever.search.return_value,
     )
 
+    await seed_query_chunks(mock_retriever.search.return_value)
     app.dependency_overrides[get_retriever] = lambda: mock_retriever
     app.dependency_overrides[get_answer_generator] = lambda: mock_generator
 
@@ -418,7 +427,7 @@ async def test_medical_chat_reports_provider_failure_without_retrieval(
                 "/internal/medical-rag/chat", headers=VALID_AUTH_HEADER,
                 json={
                     "patientId": sample_patient_documents["patient_a_id"],
-                    "message": "What about the earlier report?",
+                    "message": "Explain this patient record",
                     "history": [{"role": "user", "content": "PUBLIC SYNTHETIC PRIOR QUESTION"}],
                 },
             )
@@ -473,8 +482,9 @@ async def test_medical_chat_streaming_sse_flow(sample_patient_documents):
             yield t
 
     mock_generator = AsyncMock()
-    mock_generator.generate_answer_stream.return_value = (mock_token_stream(), [chunk])
+    mock_generator.generate_answer.return_value = ("The patient fasting glucose is 95 mg/dL [1].", [chunk])
 
+    await seed_query_chunks(mock_retriever.search.return_value)
     app.dependency_overrides[get_retriever] = lambda: mock_retriever
     app.dependency_overrides[get_answer_generator] = lambda: mock_generator
 
@@ -541,8 +551,9 @@ async def test_medical_chat_streaming_error_handling(sample_patient_documents):
     mock_retriever.search.return_value = [chunk]
 
     mock_generator = AsyncMock()
-    mock_generator.generate_answer_stream.side_effect = RuntimeError("Provider failure")
+    mock_generator.generate_answer.side_effect = RuntimeError("Provider failure")
 
+    await seed_query_chunks(mock_retriever.search.return_value)
     app.dependency_overrides[get_retriever] = lambda: mock_retriever
     app.dependency_overrides[get_answer_generator] = lambda: mock_generator
 
@@ -557,9 +568,8 @@ async def test_medical_chat_streaming_error_handling(sample_patient_documents):
                     "message": "What is the reading?",
                 },
             )
-            assert resp.status_code == 200
-            content = resp.text
-            assert "event: error" in content
-            assert "Unable to generate answer" in content
+            assert resp.status_code == 500
+            assert "event: token" not in resp.text and "event: done" not in resp.text
+            assert "Provider failure" not in resp.text
     finally:
         app.dependency_overrides.clear()

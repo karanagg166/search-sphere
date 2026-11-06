@@ -63,6 +63,7 @@ class MedicalChatRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     patient_id: str = Field(..., alias="patientId", min_length=1, max_length=128)
+    conversation_id: str | None = Field(default=None, alias="conversationId", min_length=1, max_length=255)
     message: str = Field(..., min_length=1, max_length=2000)
     history: list[MedicalChatMessage] = Field(default_factory=list)
     limit: int = Field(default=8, ge=1, le=20)
@@ -83,6 +84,9 @@ class MedicalChatResponse(BaseModel):
         default=None, alias="retrievalQuery", serialization_alias="retrievalQuery"
     )
     rewritten: bool = False
+    requires_history: bool = Field(default=False, alias="requiresHistory", serialization_alias="requiresHistory")
+    context_message_ids: list[str] = Field(default_factory=list, alias="contextMessageIds", serialization_alias="contextMessageIds")
+    message_id: str | None = Field(default=None, alias="messageId", serialization_alias="messageId")
     answer_mode: str | None = Field(
         default=None, alias="answerMode", serialization_alias="answerMode"
     )

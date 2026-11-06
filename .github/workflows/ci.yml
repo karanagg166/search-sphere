@@ -94,7 +94,8 @@ jobs:
           scripts/tests/test_query_access_postgres.py
           scripts/tests/test_conversation_context_postgres.py
           scripts/tests/test_delegated_conversations_postgres.py
-          scripts/tests/test_versioned_context_postgres.py -v
+          scripts/tests/test_versioned_context_postgres.py
+          scripts/tests/test_medical_context_postgres.py -v
 
       - name: Verify hosted inference eligibility and bounded failures
         env:

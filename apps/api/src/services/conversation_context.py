@@ -9,13 +9,15 @@ from sqlalchemy import or_, select
 
 from src.models.conversation import Conversation
 from src.models.document_chunk import DocumentChunk
+from src.models.medical_observation import MedicalObservation
 from src.models.message import Message
 from src.processing.models.search import RerankedSearchResult
 from src.schemas.search import ConversationMessage, RewriteResult
 from src.security.conversation_access import conversation_query
+from src.security.structured_access import observation_fingerprint, observation_query
 
 _DIRECT = re.compile(r"^(?:hi|hello|hey|good (?:morning|evening|afternoon)|thanks?|thank you|bye|you['’]?re welcome|happy to help|ok(?:ay)?|got it)[!.\s]*$", re.I)
-_REFERENCE = re.compile(r"\b(?:what about|how about|and for|also for|previous (?:answer|response|message)|last (?:answer|response)|summari[sz]e (?:that|it)|explain (?:that|it)|those|that policy|this policy|their eligibility|what does it|what is it|what are they|which one|how does (?:it|that)|how do they)\b", re.I)
+_REFERENCE = re.compile(r"\b(?:what about|how about|and for|also for|previous (?:answer|response|message)|last (?:answer|response)|summari[sz]e (?:that|it)|explain (?:that|it)|those|that policy|this policy|their eligibility|what does it|what is it|what are they|which one|how does (?:it|that)|how do they|when was it|when were they|why did it|what did they)\b", re.I)
 _MESSAGE_ID = re.compile(r"\b(?:message|response)\s+([0-9a-f-]{36})\b", re.I)
 _STOP = {"what", "about", "does", "have", "with", "this", "that", "from", "your", "which", "where", "when", "please", "tell", "more", "previous", "answer", "response", "summarize", "summarise"}
 
@@ -23,7 +25,8 @@ _STOP = {"what", "about", "does", "have", "with", "this", "that", "from", "your"
 def requires_history(query):
     if _DIRECT.fullmatch(query.strip()):
         return False
-    return bool(_REFERENCE.search(query) or _MESSAGE_ID.search(query) or re.match(r"^(?:and|but|also)\b", query.strip(), re.I))
+    return bool(_REFERENCE.search(query) or _MESSAGE_ID.search(query) or re.match(r"^(?:and|but|also)\b", query.strip(), re.I)
+        or re.match(r"^(?:only\s+)?(?:the\s+)?(?:(?:last|past)\s+\d+\s+(?:days?|weeks?|months?)|today|yesterday)[.!?\s]*$", query.strip(), re.I))
 
 
 def terms(text):
@@ -43,9 +46,19 @@ async def message_evidence(db, access, message):
     if not message.sources:
         return {}
     verified = {}
+    observed = {}
     if not isinstance(message.sources, list) or len(message.sources) > 20:
         return None
     for source in message.sources:
+        if isinstance(source, dict) and source.get("source_type") == "OBSERVATION":
+            row = (await db.execute(observation_query(access.context).where(
+                MedicalObservation.id == source.get("observation_id"),
+                MedicalObservation.external_document_id == source.get("document_id"),
+            ))).scalar_one_or_none()
+            if row is None or observation_fingerprint(row) != source.get("content_sha256"):
+                return None
+            observed[row.id] = source["content_sha256"]
+            continue
         if not isinstance(source, dict) or not source.get("document_id") or type(source.get("chunk_index")) is not int:
             return None
         row = (await db.execute(access.chunk_query().where(
@@ -62,6 +75,7 @@ async def message_evidence(db, access, message):
         elif not source.get("content") or source["content"] != row.content:
             return None
         verified[row.point_id] = digest
+    access.observation_evidence.update(observed)
     return verified
 
 
@@ -145,17 +159,20 @@ async def select_conversation_context(access, query):
     return selection
 
 
-async def resolve_query_context(access, query, rewriter):
+async def resolve_query_context(access, query, rewriter, *, deterministic_rewrite=None):
     """Shared context-first preparation; callers never supply provider history."""
     selection = await select_conversation_context(access, query)
     if access is not None:
         access.history = selection.history
         access.selected_message_ids = selection.message_ids
         access.requires_history = selection.requires_history
+        access.exact_previous_answer = selection.exact_previous_answer
     unchanged = RewriteResult(original_query=query, retrieval_query=query, rewritten=False)
     if selection.clarification or selection.exact_previous_answer is not None:
         return selection, unchanged
-    result = await rewriter.rewrite(query=query, conversation_context=selection.history)
+    result = deterministic_rewrite(query, selection.history) if selection.requires_history and deterministic_rewrite else None
+    if result is None:
+        result = await rewriter.rewrite(query=query, conversation_context=selection.history)
     if selection.requires_history and not result.rewritten:
         selection.clarification = "Please specify the topic or policy for this follow-up."
     return selection, result

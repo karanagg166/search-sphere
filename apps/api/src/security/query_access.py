@@ -22,6 +22,7 @@ from src.models.conversation import Conversation
 from src.models.document import Document
 from src.models.document_chunk import DocumentChunk
 from src.models.external_document import ExternalDocument
+from src.models.medical_observation import MedicalObservation
 from src.models.message import Message
 from src.models.service_client import ServiceClient
 from src.models.user import User
@@ -34,6 +35,7 @@ from src.security.service_auth import (
     hash_api_key,
 )
 from src.security.service_context import ServiceContext
+from src.security.structured_access import observation_fingerprint, observation_query
 
 _access: ContextVar["QueryAccess | None"] = ContextVar("query_access", default=None)
 
@@ -59,10 +61,12 @@ class QueryAccess:
     conversation_id: str | None = None
     classification: object = None
     evidence: dict[str, str] = field(default_factory=dict, repr=False)
+    observation_evidence: dict[str, str] = field(default_factory=dict, repr=False)
     history: list = field(default_factory=list, repr=False)
     history_hashes: dict[str, str] = field(default_factory=dict, repr=False)
     selected_message_ids: list[str] = field(default_factory=list)
     requires_history: bool = False
+    exact_previous_answer: str | None = field(default=None, repr=False)
 
     async def validate(self):
         async with self.sessions() as db:
@@ -101,6 +105,14 @@ class QueryAccess:
                 ):
                     raise ProviderNotApprovedError("Selected conversation context changed.")
             rows = []
+            if self.observation_evidence:
+                observations = (await db.execute(observation_query(context).where(
+                    MedicalObservation.id.in_(list(self.observation_evidence)),
+                ))).scalars().all()
+                if len(observations) != len(self.observation_evidence) or any(
+                    observation_fingerprint(row) != self.observation_evidence.get(row.id) for row in observations
+                ):
+                    raise ProviderNotApprovedError("Structured evidence access or version changed.")
             if self.evidence:
                 rows = (await db.execute(self.chunk_query().where(DocumentChunk.point_id.in_(list(self.evidence))))).scalars().all()
                 if len(rows) != len(self.evidence) or any(hashlib.sha256(row.content.encode()).hexdigest() != self.evidence.get(row.point_id) for row in rows):
@@ -246,5 +258,11 @@ async def medical_query_inference(request: Request, context=Depends(get_medical_
     context.require_scope(operation)
     access = QueryAccess(async_sessionmaker(db.bind, expire_on_commit=False), context, operation,
         key_hash=hash_api_key(request.headers.get("Authorization", "")[7:].strip()))
+    reference = scope_value(body, "conversationId", 255) or scope_value(body, "conversation_id", 255)
+    if reference:
+        from src.services.delegated_conversations import register_conversation
+
+        access.conversation_id = (await register_conversation(db, context, reference)).id
+        await db.commit()
     async with query_inference(access):
         yield
