@@ -565,3 +565,19 @@ def test_conversation_cleanup_failure_preserves_original_provider_failure(monkey
     monkeypatch.setattr(smoke, "cleanup_synthetic_conversation", lambda *a: (_ for _ in ()).throw(AssertionError("secondary cleanup failure")))
     with pytest.raises(AssertionError, match="original provider timeout"):
         smoke.run_rag_suite()
+
+
+@pytest.mark.parametrize("code,expected", [("provider_timeout", "provider_timeout"),
+    ("provider_quota", "provider_quota"), ("PRIVATE upstream diagnostic", "unknown"),
+    (["unexpected-object"], "unknown"), (None, "unknown")])
+def test_standalone_sse_failure_reports_only_safe_error_enum(monkeypatch, code, expected):
+    def response(url, **kwargs):
+        if url.endswith('/search'):
+            return 200, {}, {"results": [{"document_id": "doc", "content": "MARKER", "rerank_score": 0.8}]}
+        return 200, {}, {"answer": "MARKER [1]", "sources": [valid_source("doc", "MARKER")]}
+    monkeypatch.setattr(smoke, "http", response)
+    monkeypatch.setattr(smoke, "read_sse_stream", lambda *a, **kw: [("error", {"code": code, "detail": "PRIVATE provider contents"})])
+    with pytest.raises(AssertionError) as caught:
+        smoke.run_real_rag_pipeline("token", "doc", "MARKER", do_answer=True)
+    assert expected in str(caught.value) and "PRIVATE" not in str(caught.value)
+    assert not any("PASS SSE" in result for result in smoke.RESULTS)
