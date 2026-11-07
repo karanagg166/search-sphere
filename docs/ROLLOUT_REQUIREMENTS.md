@@ -1318,3 +1318,21 @@ rollback, scope isolation, memory removal and the HTTP 409 contract. Six Data AP
 security cases pass, including RLS denial after an accidental read grant on the
 fence table. Ruff and diff checks pass. These are local synthetic checks; deployment
 and the compatible Quick-Clinic forwarding/history repairs remain open.
+
+
+## Compatible medical conversation deletion
+
+Search Sphere #72 merged the reference-fence repair as
+`a081dac`; required [42414743499](https://github.com/karanagg166/search-sphere/actions/runs/42414743499)
+passed. A separate medical compatibility router now exposes scoped reference
+deletion without reading a chat body or entering inference dependencies. It
+requires both existing medical deletion and answer capabilities plus actor/patient
+binding; it does not broaden legacy grants.
+
+Thirteen real PostgreSQL adapter cases pass: turns and memory are removed, missing
+threads are fenced without creation, retries are idempotent, late chat returns 409,
+required scopes/identity are enforced, and another doctor/patient/client/tenant/
+collection cannot remove the original thread. No provider call occurred. The
+combined adapter/delegated/deletion group passed 38 cases; Ruff and diff checks
+passed. Quick-Clinic forwarding and cached-history validation still need their own
+repair and deployment proof.
