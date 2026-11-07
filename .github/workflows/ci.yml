@@ -103,6 +103,8 @@ jobs:
           scripts/tests/test_retrieval_cache_postgres.py
           scripts/tests/test_document_versions_postgres.py
           scripts/tests/test_ingestion_timeouts_postgres.py
+          scripts/tests/test_index_recovery_postgres.py
+          scripts/tests/test_index_recovery_cli.py
           scripts/tests/test_release_identity_postgres.py -v
 
       - name: Verify hosted inference eligibility and bounded failures
