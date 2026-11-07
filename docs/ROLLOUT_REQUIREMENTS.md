@@ -1376,3 +1376,57 @@ passed, including browser checks. #167 adds cached-history patient/publication
 checks and grant refresh; 76 focused local checks pass. Full medical journey
 provisioning, live deletion/permission cases and overall three-app acceptance
 remain open. The ordinary native account's uncertain content stays provider-blocked.
+
+
+## Current evaluation outcomes and provider terms recheck
+
+Search Sphere #74 is merged as `0127db3fd20dec20115c7e0c7f6d988e72327398`
+(controller/docs only; serving API remains `370c311`). Repeat deployed evaluation
+[42417637853](https://github.com/karanagg166/search-sphere/actions/runs/42417637853)
+again uploaded/indexed a new PDF and verified retrieval plus grounded JSON, then
+failed SSE with the newly visible allowlisted `provider_timeout` category. Cleanup
+verified zero physical vectors and deleted private original. Scope-only live gate
+[42418348287](https://github.com/karanagg166/search-sphere/actions/runs/42418348287)
+passed at the current serving revision. No provider deadline was extended and no
+failed response was relabeled successful.
+
+ExamArena [42417055080](https://github.com/karanagg166/ExamArena/actions/runs/42417055080)
+passed all three fresh uploads/indexes, authorized marker retrieval and foreign
+school/class denial, then returned 502 on grounded answer. Sanitized Vercel logs
+show the consumer HTTP read deadline expired; Render telemetry shows chat
+completed shortly after that consumer timeout. Cleanup verification failed for
+two signed receipts, while one completed. A subsequent independent authenticated
+check revalidated signed ownership, observed 404 metadata and 200 complete cleanup
+receipts with zero vectors/derived objects and deleted originals for all three,
+and verified empty retrieval in each exact class. Original failed-run receipts
+remain available for the next trusted restoration/reverification. #41 adds a
+separate bounded consumer answer deadline and safe failure contract; it has 46
+unit and 47 distinct PostgreSQL API/catalog/cleanup checks passing locally.
+
+Quick-Clinic #166/#167 merged after CI; exact deployed
+`ef5b2b7e74abf0436b737673b188c1ea9d1a0f83` and main CI
+[42417587912](https://github.com/karanagg166/Quick-Clinic/actions/runs/42417587912)
+passed. Contract [42418221198](https://github.com/karanagg166/Quick-Clinic/actions/runs/42418221198)
+passed. Full authenticated medical fixture provisioning/journey remains open.
+
+The owner confirmed Vercel Hobby/free on 2026-11-08 (Asia/Kolkata). A credential-safe
+budget query observed 169 app-reserved Cohere calls in the current month under the
+hard 900 cap; it excludes use of that same key outside this application.
+
+Fresh primary-source checks on 2026-11-08 found:
+- [Cohere rate limits](https://docs.cohere.com/docs/rate-limits): trial keys are free,
+  limited to 1,000 monthly calls, with per-endpoint/model minute limits.
+- [Cohere pricing](https://cohere.com/pricing): trial keys are not permitted for
+  production/commercial use; production keys are metered. This prevents declaring
+  unrestricted production enablement complete under the current $0/trial constraint.
+- [Data commitments](https://cohere.com/enterprise-data-commitments): enterprise
+  commitments apply to paying customers; trial data uses ordinary terms/privacy.
+- [R7B model documentation](https://docs.cohere.com/docs/command-r7b) and a models-only
+  API call confirmed the candidate exists. No inference comparison or model change
+  was performed; availability alone is not production eligibility or accuracy proof.
+
+Deployed synthetic/public evaluation can continue, but final production inference
+requires a provider-approved $0 arrangement and relevant data approval. No paid
+key/feature was activated, no uncertain record was transmitted and no new provider
+was added. Version replacement, broader evaluation, forced recovery/failure gates
+and all three current-revision complete journeys still remain open.
