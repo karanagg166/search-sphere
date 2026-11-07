@@ -608,6 +608,14 @@ def verify_grounded_marker(answer: Any, sources: Any, document_id: str, marker: 
         fail(label, "missing or fabricated citation reference")
 
 
+def safe_stream_errors(events):
+    """Report only server-owned error enums, never provider text or event data."""
+    known = {"provider_timeout", "provider_quota", "provider_rate_limit", "provider_not_approved",
+             "provider_invalid_response", "provider_unavailable", "answer_unavailable"}
+    return [value.get("code") if isinstance(value.get("code"), str) and value["code"] in known else "unknown"
+            for kind, value in events if kind == "error" and isinstance(value, dict)][:8]
+
+
 def run_real_rag_pipeline(
     token: str,
     document_id: str,
@@ -657,7 +665,7 @@ def run_real_rag_pipeline(
                 not event_types or event_types[0] != "metadata" or event_types[-1] != "done"
                 or event_types.count("done") != 1 or "error" in event_types
             ):
-                fail("SSE answer streaming", f"missing expected SSE lifecycle events (saw {event_types})")
+                fail("SSE answer streaming", "completion missing; safe error codes=" + str(safe_stream_errors(events)))
             streamed_sources = [e[1].get("sources") for e in events if e[0] == "source"]
             if len(streamed_sources) != 1:
                 fail("SSE answer streaming", "exactly one source event is required")
@@ -726,10 +734,7 @@ def run_conversation_journey(token: str, user_id: str, document_id: str, marker:
     events = read_sse_stream(url + "/answer/stream", data=payload, headers=headers, timeout=70)
     types = [kind for kind, _ in events]
     if types != ["metadata", "source", "token", "done"]:
-        known = {"provider_timeout", "provider_quota", "provider_rate_limit", "provider_not_approved",
-                 "provider_invalid_response", "provider_unavailable", "answer_unavailable"}
-        codes = [value.get("code") if value.get("code") in known else "unknown" for kind, value in events if kind == "error"]
-        fail("Conversation SSE", "completion missing; safe error codes=" + str(codes))
+        fail("Conversation SSE", "completion missing; safe error codes=" + str(safe_stream_errors(events)))
     verify_grounded_marker(events[-1][1].get("answer"), events[1][1].get("sources"), document_id, marker, "Conversation SSE")
     if events[2][1].get("token") != events[-1][1].get("answer") or not events[-1][1].get("message_id"):
         fail("Conversation SSE", "token/completion or saved message mismatch")

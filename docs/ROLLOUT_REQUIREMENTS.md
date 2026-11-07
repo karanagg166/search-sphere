@@ -1336,3 +1336,43 @@ collection cannot remove the original thread. No provider call occurred. The
 combined adapter/delegated/deletion group passed 38 cases; Ruff and diff checks
 passed. Quick-Clinic forwarding and cached-history validation still need their own
 repair and deployment proof.
+
+
+## New deletion release and consumer configuration follow-up
+
+Search Sphere #71–#73 are merged. Exact main
+`370c311ee3a2a10f439bc4221ae789dbbcf58ab7` passed CI
+[42415311711](https://github.com/karanagg166/search-sphere/actions/runs/42415311711).
+Pinned release [42416819329](https://github.com/karanagg166/search-sphere/actions/runs/42416819329)
+passed admission, migration 022/private-surface checks and exact deployment. Its
+new PDF indexed and passed marker retrieval/reranking and a grounded JSON answer;
+standalone SSE failed completion. Render's content-free inference telemetry shows
+`purpose=chat`, `stage=provider`, `outcome=provider_timeout`, 26375 ms at that
+request. Physical vector/private-object cleanup passed. This release journey is
+failed and remains open; the older successful revision does not establish its
+acceptance. No timeout was extended and no provider retry/fallback was added.
+
+The standalone smoke previously reported only a missing lifecycle event, hiding
+the safe provider category. It now reports allowlisted error enums consistently
+with the conversation check, while retaining the failing assertion. Five new
+offline cases prove known codes survive and arbitrary provider text/objects do
+not enter reports; the combined smoke/release group passes 86 cases.
+
+The newly connected Vercel tool resolves the earlier project-access blocker. The
+prepared exact two-school ExamArena key was installed as a production-only Secret,
+with the backend URL/client ID as production config. A production-only environment
+setting was split from the existing preview/development configuration. Redeploy
+`dpl_E5d7C1VZWD7bLjCnNtPzCca7j7WZ` serves the unchanged tested ExamArena
+`5bc1a09dcd9c91c271484c23e3540e75d165eccc`; health now reports production.
+Authenticated journey [42417055080](https://github.com/karanagg166/ExamArena/actions/runs/42417055080)
+is running; it is not yet acceptance evidence. Vercel billing reports no cost data
+for the requested period; rolling-release eligibility says the current plan does
+not support Pro/Enterprise features. Neither is treated as an explicit plan or
+zero-cost proof. No paid feature was enabled.
+
+Quick-Clinic #166 merged the upstream-memory cleanup repair after required
+[42415288228](https://github.com/karanagg166/Quick-Clinic/actions/runs/42415288228)
+passed, including browser checks. #167 adds cached-history patient/publication
+checks and grant refresh; 76 focused local checks pass. Full medical journey
+provisioning, live deletion/permission cases and overall three-app acceptance
+remain open. The ordinary native account's uncertain content stays provider-blocked.
