@@ -98,7 +98,7 @@ class CohereQueryRewriteProvider(BaseQueryRewriteProvider):
         self.timeout_seconds = (
             timeout_seconds
             if timeout_seconds is not None
-            else getattr(settings, "QUERY_REWRITE_TIMEOUT_SECONDS", 25.0)
+            else getattr(settings, "QUERY_REWRITE_TIMEOUT_SECONDS", 35.0)
         )
         self._client = client
 

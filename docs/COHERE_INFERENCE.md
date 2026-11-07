@@ -31,11 +31,16 @@ timeouts, rather than assuming a failed HTTP response was free. A rejected minut
 reservation rolls back its monthly reservation. This cannot account for use of the
 same key outside this database; Cohere's trial rejection remains authoritative.
 
-The gateway makes one request, has a 15s timeout and 3s connection timeout, rejects
+The gateway makes one request, has a 25s chat HTTP timeout (15s for other endpoints)
+and 3s connection timeout, rejects
 redirects, validates responses, and never retries implicitly. Quota, eligibility,
 invalid responses and transient unavailability have separate safe error codes.
-The runtime shares two concurrent HTTP slots per process, with a 20s deadline
-covering slot admission, budget verification and the request. No quota is reserved
+The runtime shares two concurrent HTTP slots per process, with a 30s chat deadline
+(20s for other operations) covering slot admission, SQL authorization, budget
+verification, the request and SQL reauthorization. Generation/rewrite defaults are
+35s so they can enclose that deadline. These are bounded limits, not measured P95.
+Safe telemetry records only purpose, stage, outcome and elapsed milliseconds;
+payloads, identities, credentials and upstream diagnostics are omitted. No quota is reserved
 while waiting for a slot. A cancelled/timed-out sent request retains its reservation.
 Database budget failures deny inference before network transmission. Counters store
 only a key fingerprint, counts and expiry, never input or output text.
