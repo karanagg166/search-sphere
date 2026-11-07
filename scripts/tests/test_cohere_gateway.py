@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
@@ -242,6 +242,56 @@ async def test_timeout_and_network_failures_remain_distinct_from_evidence_absenc
     assert caught.value.code == code
     assert 'private diagnostic' not in str(caught.value)
     assert len(attempts) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("purpose,http_deadline,total_deadline", [("chat", 25, 30), ("embed", 15, 20)])
+async def test_generation_has_a_separate_bounded_deadline_and_keeps_both_authorization_checks(
+    monkeypatch, purpose, http_deadline, total_deadline,
+):
+    deadlines = []
+    attempts = []
+    timeout = asyncio.timeout
+    def bounded(seconds):
+        deadlines.append(seconds)
+        return timeout(seconds)
+    monkeypatch.setattr("src.inference.cohere_gateway.asyncio.timeout", bounded)
+    def response(request):
+        attempts.append(request)
+        assert request.extensions["timeout"]["read"] == http_deadline
+        assert request.extensions["timeout"]["connect"] == 3
+        return httpx.Response(200, json={"public": "synthetic"})
+    client = gateway(response)
+    validator = AsyncMock()
+    with inference_scope(DataClassification.SYNTHETIC, "fixture", "fixture", validator=validator):
+        assert await client._post("/v2/chat" if purpose == "chat" else "/v2/embed", {"text":"PUBLIC SYNTHETIC"}, purpose) == {"public":"synthetic"}
+    assert deadlines == [total_deadline]
+    assert len(attempts) == 1
+    assert validator.await_count == 2
+    client.budget.reserve.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["provider", "reauthorization"])
+async def test_timeout_telemetry_identifies_stage_without_payload_or_diagnostics(monkeypatch, phase):
+    logger = Mock()
+    monkeypatch.setattr("src.inference.cohere_gateway.logger", logger)
+    def response(request):
+        if phase == "provider":
+            raise httpx.ReadTimeout("SENSITIVE DIAGNOSTIC")
+        return httpx.Response(200, json={"public":"synthetic"})
+    validator = AsyncMock(side_effect=[None, TimeoutError("SENSITIVE DIAGNOSTIC")]) if phase == "reauthorization" else AsyncMock()
+    client = gateway(response)
+    with (inference_scope(DataClassification.SYNTHETIC, "PRIVATE IDENTITY", "PRIVATE TENANT", validator=validator),
+          pytest.raises(ProviderError) as caught):
+        await client._post("/v2/chat", {"text":"SYNTHETIC PAYLOAD"}, "chat")
+    assert caught.value.code == "provider_timeout"
+    event = logger.info.call_args.kwargs
+    assert set(event) == {"purpose", "stage", "outcome", "elapsed_ms"}
+    assert event["stage"] == phase and event["outcome"] == "provider_timeout"
+    assert type(event["elapsed_ms"]) is int and event["elapsed_ms"] >= 0
+    assert all(value not in str(logger.info.call_args) for value in [KEY, "PRIVATE", "SENSITIVE", "PAYLOAD"])
+    client.budget.reserve.assert_awaited_once()
 
 
 @pytest.mark.asyncio

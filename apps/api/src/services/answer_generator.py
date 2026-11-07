@@ -260,7 +260,7 @@ class CohereAnswerProvider(BaseAnswerProvider):
         self.timeout_seconds = (
             timeout_seconds
             if timeout_seconds is not None
-            else getattr(settings, "RAG_GENERATION_TIMEOUT_SECONDS", 25.0)
+            else getattr(settings, "RAG_GENERATION_TIMEOUT_SECONDS", 35.0)
         )
         self._client = client
 

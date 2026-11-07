@@ -5,10 +5,12 @@ import base64
 import hashlib
 import json
 import math
+import time
 from typing import Any
 from weakref import WeakKeyDictionary
 
 import httpx
+import structlog
 
 from src.config import settings
 from src.inference.policy import (
@@ -22,6 +24,8 @@ from src.inference.policy import (
 )
 from src.inference.usage import CohereUsageBudget
 from src.security.data_screening import contains_secrets
+
+logger = structlog.get_logger()
 
 EMBEDDING_MODEL = "embed-english-light-v3.0"
 EMBEDDING_DIMENSION = 384
@@ -53,27 +57,49 @@ class CohereGateway:
         serialized=json.dumps(payload,ensure_ascii=False)
         if contains_secrets(serialized) or (len(self.api_key)>=8 and self.api_key in serialized):
             raise ProviderNotApprovedError("Inference input failed credential screening.")
+        started = time.monotonic()
+        stage = "admission"
+        outcome = "completed"
         try:
             loop = asyncio.get_running_loop()
             slots = _request_slots.setdefault(loop, asyncio.Semaphore(2))
-            async with asyncio.timeout(20), slots:
+            # Hosted generation can take longer than embeddings/reranking. Keep
+            # admission, SQL checks and inference under one bounded deadline.
+            async with asyncio.timeout(30 if purpose == "chat" else 20), slots:
+                stage = "authorization"
                 if scope.validator is not None:
                     await scope.validator()
+                stage = "budget"
                 await self.budget.reserve(self.api_key, purpose, units)
+                stage = "provider"
                 data = await self._request(endpoint, payload)
+                stage = "reauthorization"
                 if scope.validator is not None:
                     await scope.validator()
+                stage = "complete"
                 return data
         except (TimeoutError, httpx.TimeoutException) as exc:
+            outcome = "provider_timeout"
             raise ProviderTimeoutError("Cohere request timed out.") from exc
         except httpx.NetworkError as exc:
+            outcome = "provider_unavailable"
             raise ProviderError("Cohere request is unavailable.") from exc
+        except ProviderError as exc:
+            outcome = exc.code
+            raise
+        except BaseException:
+            outcome = "interrupted"
+            raise
+        finally:
+            # Never log payloads, identities, keys, upstream bodies or errors.
+            logger.info("Hosted inference request", purpose=purpose, stage=stage,
+                        outcome=outcome, elapsed_ms=round((time.monotonic()-started)*1000))
 
     async def _request(self, endpoint: str, payload: dict) -> dict:
         async with httpx.AsyncClient(
                 base_url="https://api.cohere.com",
                 transport=self.transport,
-                timeout=httpx.Timeout(15.0, connect=3.0),
+                timeout=httpx.Timeout(25.0 if endpoint == "/v2/chat" else 15.0, connect=3.0),
                 limits=httpx.Limits(max_connections=2),
                 follow_redirects=False,
         ) as client:

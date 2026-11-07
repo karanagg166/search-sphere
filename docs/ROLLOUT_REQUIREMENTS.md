@@ -1031,3 +1031,20 @@ this check remains open and is being diagnosed separately. The conversation was
 deleted with verified 404, and the document's scoped cleanup receipt reached
 COMPLETE with zero vectors and verified original-object deletion. These manual
 conversation checks do not replace the required GitHub Actions consumer journeys.
+
+The web repair #63 merged at `9069fcd54ac8bc6fb7a29a12d6bc6049460ca610`
+after required CI [42365190616](https://github.com/karanagg166/search-sphere/actions/runs/42365190616).
+Its exact-main CI [42365409708](https://github.com/karanagg166/search-sphere/actions/runs/42365409708)
+also passed. GitHub production deployment `7620130900` reports success for that
+frontend revision; the backend remains at the pinned `e6e26d0` runtime.
+
+A second fresh production PDF confirmed the JSON/citation/one-turn result and
+complete vector/object cleanup. Its SSE follow-up reported `provider_timeout`,
+with no response content emitted. The application quota counter was 74 of its
+900-call monthly cap, with at most two chat calls in a minute; this is not evidence
+of quota exhaustion. Current gateway errors do not distinguish the HTTP deadline
+from admission/SQL deadlines. The next candidate repair gives chat a 25s HTTP / 30s
+whole-operation bound and 35s outer generation/rewrite default, preserving shorter
+embedding/reranking limits, one-attempt behavior and both authorization checks.
+Payload-free stage/outcome/duration telemetry will make further timeouts diagnosable.
+This change is not a claim of recovered conversation SSE until a new live check passes.
