@@ -1078,3 +1078,30 @@ of a local receipt. A mere name prefix or another owner's signature cannot autho
 deletion. Missing done, duplicate turns, unsupported citations, a provider error or
 503 during cleanup must fail the gate without replaying generation. Smoke/release
 offline regressions passed (81 cases); this expanded live coverage is not yet run.
+
+## Verified fresh-PDF persistent conversation recovery
+
+Release [42366356255](https://github.com/karanagg166/search-sphere/actions/runs/42366356255)
+finished successfully: Render `dep-dbnga7lg1s2s73ckiuhg` serves exact backend
+`f1d9e72ca5fde0d6cd51b0d9379ad00b397fc76c`, and the standalone authenticated journey
+passed through physical vector/object cleanup (134.9 MiB initially, 180.2 MiB finally).
+
+The expanded smoke #66 merged at `ac1af4501028c29ffba34d5de52fa54201a39a3a`
+after required CI [42366913124](https://github.com/karanagg166/search-sphere/actions/runs/42366913124).
+Its protected main-only post-deployment run
+[42367181169](https://github.com/karanagg166/search-sphere/actions/runs/42367181169)
+passed against that exact backend. It uploaded a NEW synthetic PDF, indexed two
+chunks, retrieved its unique marker, and verified both standalone and native
+conversation JSON/SSE grounded answers with valid page citations. The conversation
+had exactly one saved user/assistant pair per explicit request, with matching message
+IDs and answer text. SSE emitted sources and done, and token text matched completion.
+The conversation was deleted with a subsequent 404. Document cleanup verified zero
+physical vectors, no derived objects and deleted private original. Final memory was
+182.3 MiB. These are observed journey results, not broad P95/capacity measurements.
+
+This satisfies the requested deployed new-PDF question check and closes the reproduced
+synthetic conversation timeout. The reported ordinary account still has no approved
+classification and its documents were identified as uncertain; no trial eligibility
+exception was made. The overall rollout remains open, including both complete
+consumer production journeys, remaining version/recovery/evaluation work and budget
+verification for the Vercel account.
