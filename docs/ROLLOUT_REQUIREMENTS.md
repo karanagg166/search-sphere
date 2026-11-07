@@ -962,3 +962,18 @@ Neither result is an authenticated consumer journey. Vercel management still ret
 403 / `forbidden` / `Not authorized`; free-plan verification and management setup
 through that credential remain open. Anonymous HEAD-only probes of users, service
 clients and medical observations continue to return 404 without record contents.
+
+The diagnostic rerun preserved the original failure: the authenticated `/answer`
+request returned HTTP 504 after successful indexing and retrieval. The generation
+provider's default outer timeout was 15 seconds, shorter than the gateway's bounded
+20-second authorization/quota/inference/reauthorization window. Aligning default
+generation and rewrite deadlines to 25 seconds leaves room for that guarded window;
+the gateway's 20-second cap and 15-second HTTP timeout remain unchanged. Existing
+explicit timeout overrides remain supported. Answer/rewrite/gateway regressions
+passed (63 cases); live recovery still needs verification, so this is a candidate
+repair rather than a claim that the provider cause is proven.
+
+Storage/diagnostic repair #59 merged at `46f2283a52dd53fd6881233daee6d9bfb073e564`;
+required CI [42358322960](https://github.com/karanagg166/search-sphere/actions/runs/42358322960)
+passed. Production is still serving `b3138a042c6e30c7b954d9ade9611b6da9ad2355`
+until the subsequent pinned recovery release passes admission.
