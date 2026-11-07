@@ -19,6 +19,9 @@ from src.routers.auth import router as auth_router
 from src.routers.conversations import router as conversations_router
 from src.routers.documents import router as documents_router
 from src.routers.feedback import router as feedback_router
+from src.routers.internal_medical_conversations import (
+    router as internal_medical_conversations_router,
+)
 from src.routers.internal_medical_documents import (
     router as internal_medical_docs_router,
 )
@@ -194,6 +197,7 @@ app.include_router(internal_medical_ingest_router)
 app.include_router(internal_medical_retrieval_router)
 app.include_router(internal_medical_obs_router)
 app.include_router(internal_medical_rag_router)
+app.include_router(internal_medical_conversations_router)
 
 # Include Generic Multi-Tenant V1 Microservice Routes
 app.include_router(v1_clients_router)

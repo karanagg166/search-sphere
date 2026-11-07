@@ -98,6 +98,7 @@ jobs:
           scripts/tests/test_conversation_deletion_postgres.py
           scripts/tests/test_versioned_context_postgres.py
           scripts/tests/test_medical_context_postgres.py
+          scripts/tests/test_medical_conversation_delete_postgres.py
           scripts/tests/test_query_routing_postgres.py
           scripts/tests/test_native_streams_postgres.py
           scripts/tests/test_grounded_guardrails_postgres.py
