@@ -161,7 +161,11 @@ async def test_orphaned_and_unreviewed_ocr_observations_cannot_supply_exact_valu
             db.add(row)
             fixture.observation_ids.append(row.id)
     result=await chat(medical,"What is the latest blood pressure reading?")
-    assert result.status_code==200 and "120/80" in result.json()["answer"] and "999" not in result.text
+    assert result.status_code==200
+    payload=result.json()
+    assert "120/80" in payload["answer"] and "999/999" not in payload["answer"]
+    assert all("999/999" not in (citation.get("content") or "") for citation in payload["citations"])
+    assert all(citation.get("observationId") not in fixture.observation_ids[-2:] for citation in payload["citations"])
 
 
 @pytest.mark.asyncio
