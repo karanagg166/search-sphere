@@ -1,5 +1,7 @@
 """Idempotent registration and scoped access using existing conversation/message tables."""
 
+import hashlib
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -7,6 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import delete, select, text
 
 from src.models.conversation import Conversation
+from src.models.conversation_deletion import ConversationDeletion
 from src.models.message import Message
 from src.security.conversation_access import conversation_query
 from src.security.data_screening import contains_secrets
@@ -27,9 +30,9 @@ async def register_conversation(db, context, external_reference=None):
     if not context.is_service_client:
         raise HTTPException(status_code=403, detail="Delegated conversation registration requires a service client.")
     reference = external_reference or str(uuid.uuid4())
-    # The scoped registration lock contains IDs only, never content/credentials.
-    lock = "/".join([context.client_id, context.tenant_id, context.actor_id, context.collection_id or "", context.subject_id or "", reference])
-    await db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 32))"), {"key": lock})
+    fingerprint = await lock_reference(db, context, reference)
+    if await db.get(ConversationDeletion, fingerprint) is not None:
+        raise HTTPException(status_code=409, detail="Conversation was deleted. Start a new conversation reference.")
     row = (await db.execute(query.where(Conversation.external_reference == reference))).scalar_one_or_none()
     if row is None:
         row = Conversation(client_id=context.client_id, tenant_id=context.tenant_id, actor_id=context.actor_id,
@@ -77,6 +80,39 @@ async def append_turn(db, access, query, answer, sources, retrieval_query=None, 
 
 
 async def remove_conversation(db, context, conversation_id):
+    # Take the reference lock before the row lock, like registration/reference deletion.
+    # This order avoids deadlocking concurrent requests through the two delete APIs.
+    if context.is_service_client:
+        row = await get_conversation(db, context, conversation_id)
+        await remove_conversation_reference(db, context, row.external_reference)
+        return
     row = await get_conversation(db, context, conversation_id, lock=True)
+    await delete_row(db, row)
+
+
+async def lock_reference(db, context, reference):
+    conversation_query(context)  # Validate actor before acquiring a lock or writing a fence.
+    if not context.is_service_client:
+        raise HTTPException(status_code=403, detail="Delegated references require a service client.")
+    identity = [context.client_id, context.tenant_id, context.actor_id,
+                context.collection_id, context.subject_id, reference]
+    fingerprint = hashlib.sha256(json.dumps(identity, separators=(",", ":")).encode()).hexdigest()
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 32))"), {"key": fingerprint})
+    return fingerprint
+
+
+async def remove_conversation_reference(db, context, reference):
+    """Idempotent deletion even when a consumer thread never reached this service."""
+    fingerprint = await lock_reference(db, context, reference)
+    if await db.get(ConversationDeletion, fingerprint) is None:
+        db.add(ConversationDeletion(reference_hash=fingerprint, client_id=context.client_id))
+    row = (await db.execute(conversation_query(context).where(
+        Conversation.external_reference == reference).with_for_update())).scalar_one_or_none()
+    if row is not None:
+        await delete_row(db, row)
+    await db.flush()
+
+
+async def delete_row(db, row):
     await db.execute(delete(Message).where(Message.conversation_id == row.id))
     await db.delete(row)

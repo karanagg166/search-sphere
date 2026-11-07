@@ -121,6 +121,11 @@ async def test_conversation_delete_removes_messages_and_denies_later_access(fixt
         assert await db.scalar(select(func.count()).select_from(Message).where(Message.conversation_id == cid)) == 0
     with pytest.raises(ProviderNotApprovedError, match="Conversation access"):
         await access.validate()
+    # A late consumer request must not resurrect an explicitly deleted thread.
+    async with fixture.sessions() as db, db.begin():
+        with pytest.raises(HTTPException) as caught:
+            await register_conversation(db, context, "public-thread")
+        assert caught.value.status_code == 409
 
 
 @pytest.mark.asyncio
@@ -147,5 +152,9 @@ async def test_http_actor_required_scope_binding_and_pagination(fixture):
             messages = await client.get(f"/api/v1/conversations/{cid}/messages?limit=1&offset=1", headers=headers)
             assert messages.status_code == 200 and messages.json()["offset"] == 1
             assert (await client.delete("/api/v1/conversations/" + cid, headers=headers)).status_code == 200
+            late = await client.post("/api/v1/conversations", headers=headers, json={"external_reference": "consumer-thread"})
+            assert late.status_code == 409
+            replacement = await client.post("/api/v1/conversations", headers=headers, json={"external_reference": "new-consumer-thread"})
+            assert replacement.status_code == 201
     finally:
         app.dependency_overrides.pop(get_db, None)

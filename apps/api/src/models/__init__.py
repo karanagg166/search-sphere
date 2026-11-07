@@ -1,5 +1,6 @@
 from src.models.collection import DocumentCollection
 from src.models.conversation import Conversation
+from src.models.conversation_deletion import ConversationDeletion
 from src.models.conversation_memory import ConversationMemory
 from src.models.document import Document
 from src.models.document_chunk import DocumentChunk
@@ -33,6 +34,7 @@ __all__ = [
     "ExternalDocumentContent",
     "MedicalObservation",
     "Conversation",
+    "ConversationDeletion",
     "ConversationMemory",
     "Message",
     "Feedback",

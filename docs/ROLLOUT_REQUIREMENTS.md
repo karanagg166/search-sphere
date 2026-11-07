@@ -1293,3 +1293,28 @@ scope gate. No production conversation or medical record contents were fetched.
 
 These are open memory/deletion requirements, independently of the passing native
 conversation journey. No account classification or provider eligibility is changed.
+
+
+## Delegated conversation deletion fence
+
+The pre-repair regression reproduced external-reference resurrection after an
+explicit deletion. Migration `022_conversation_deletions` and
+`services/delegated_conversations.py` now serialize registration and reference
+deletion with the same canonical scope-hash advisory lock. Deletion records a
+content-free fence and removes messages, memory and the conversation in one SQL
+transaction. Late registration returns 409; callers must choose a new reference.
+An absent upstream thread can also be fenced idempotently, so a delayed first
+request cannot establish it after a consumer deletes its local thread.
+
+The fence includes client, tenant, actor, collection, subject and reference in its
+hash, preserving null boundaries. It contains no message, source text, credentials
+or direct patient/actor reference. RLS and explicit browser-grant revocation protect
+the new table; a downgrade refuses to discard nonempty fences. Native conversation
+IDs keep their existing behavior.
+
+Thirty-six PostgreSQL delegated/history/compact-memory/medical-context/versioned-
+context cases pass, including concurrent registration and both deletion paths,
+rollback, scope isolation, memory removal and the HTTP 409 contract. Six Data API
+security cases pass, including RLS denial after an accidental read grant on the
+fence table. Ruff and diff checks pass. These are local synthetic checks; deployment
+and the compatible Quick-Clinic forwarding/history repairs remain open.

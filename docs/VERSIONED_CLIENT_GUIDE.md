@@ -198,3 +198,21 @@ retrieval → cited answer/SSE completion → verified cleanup journey through t
 consumer's authenticated API. Seed a second patient/school/class and assert its
 evidence is inaccessible. Required CI must fail when credentials or assertions are
 missing. Deployment contract checks alone do not establish this journey.
+
+
+### Deleted conversation references
+
+Deleting a delegated conversation permanently fences its external reference inside
+the exact client, tenant, actor, collection and subject scope. A late registration
+of that reference returns HTTP 409; start a new thread with a new reference. The
+same label in another authorized scope is independent. Deletion removes messages
+and compact memory atomically. A private content-free SHA-256 scope/reference
+fingerprint remains in `conversation_deletions`; it contains no message or source
+text and is not exposed through the Data API. Do not clear these fences during
+retries, restarts or routine retention cleanup, since that would allow late requests
+to recreate deleted conversations.
+
+Migration `022_conversation_deletions` enables RLS and revokes browser-role grants.
+Its downgrade refuses to discard nonempty fences. No provider call is needed for
+reference registration or deletion. Consumer forwarding and cached-history source
+validation are separate requirements and are not established by this fence.
