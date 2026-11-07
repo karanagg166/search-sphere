@@ -1005,3 +1005,29 @@ seven medical PostgreSQL cases passed. It merged at
 Overall rollout remains open: both authenticated consumer journeys, remaining
 replacement/recovery/evaluation/integration work, required production failure/restart
 cases, and Vercel/free-tier account verification have not been completed.
+
+## Conversation provider errors and fresh production PDF check
+
+A reported conversation 503 was investigated using ownership/policy metadata only;
+no questions, filenames, passages or credentials were fetched. Its owner has no
+approved inference data policy. The server consequently defaults to confidential,
+which is ineligible for the configured public/synthetic-only Cohere trial. The owner
+is unsure of the files' classification, so no exception or account-wide approval
+has been created. That account's inference remains blocked pending classification
+and provider eligibility review.
+
+The web client now maps provider error codes to useful messages and automatically
+falls back to JSON only when the streaming endpoint explicitly returns 404/405.
+Provider refusals, quota errors, empty streams and transport losses cannot silently
+start a second generation. Five page-level regressions cover HTTP/SSE refusal,
+transport interruption and compatibility fallback; all 44 frontend tests, type
+checking and lint passed (four existing auth navigation warnings).
+
+A fresh PDF uploaded through the deployed API on 2026-11-07 reached indexed status
+with two chunks. A new conversation's JSON answer returned HTTP 200, contained its
+unique synthetic marker and valid page citations, and persisted exactly one turn.
+The subsequent conversation SSE request returned a terminal error rather than done;
+this check remains open and is being diagnosed separately. The conversation was
+deleted with verified 404, and the document's scoped cleanup receipt reached
+COMPLETE with zero vectors and verified original-object deletion. These manual
+conversation checks do not replace the required GitHub Actions consumer journeys.

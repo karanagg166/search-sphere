@@ -1,4 +1,5 @@
 import { AnswerSource } from "./search";
+import { inferenceErrorMessage, StreamFailure } from "./inference-errors";
 
 export interface StreamMetadata {
   query: string;
@@ -17,7 +18,7 @@ export interface StreamEventHandlers {
   onSources?: (sources: AnswerSource[]) => void;
   onToken?: (token: string) => void;
   onDone?: (payload: StreamDonePayload) => void;
-  onError?: (error: string) => void;
+  onError?: (error: string, failure?: StreamFailure) => void;
 }
 
 /**
@@ -52,23 +53,29 @@ export async function streamAnswer(
     if (!response.ok) {
       const errorText = await response.text();
       let detail = errorText;
+      let code: string | undefined;
       try {
         const parsed = JSON.parse(errorText);
         detail = parsed.detail || detail;
+        code = typeof parsed.error_code === "string" ? parsed.error_code : undefined;
       } catch {
         // keep raw error text
       }
       const retryAfter = response.headers?.get ? response.headers.get("Retry-After") : null;
+      if (code) {
+        handlers.onError?.(inferenceErrorMessage(code, "Unable to generate an answer."), { status: response.status, code });
+        return;
+      }
       if (response.status === 429) {
         handlers.onError?.(
-          detail || `Search capacity is currently limited. Please retry in ${retryAfter || 5} seconds.`
+          detail || `Search capacity is currently limited. Please retry in ${retryAfter || 5} seconds.`, { status: response.status }
         );
       } else if (response.status === 503) {
         handlers.onError?.(
-          detail || `Service is temporarily busy. Please retry in ${retryAfter || 5} seconds.`
+          detail || `Service is temporarily busy. Please retry in ${retryAfter || 5} seconds.`, { status: response.status }
         );
       } else {
-        handlers.onError?.(detail || `HTTP Error ${response.status}`);
+        handlers.onError?.(detail || `HTTP Error ${response.status}`, { status: response.status });
       }
       return;
     }
@@ -108,7 +115,8 @@ export async function streamAnswer(
             sources: parsed.sources || [],
           });
         } else if (eventType === "error") {
-          handlers.onError?.(parsed.error || parsed.detail || "Streaming error occurred.");
+          const code = parsed.code || parsed.error_code;
+          handlers.onError?.(inferenceErrorMessage(code, parsed.error || parsed.detail || "Streaming error occurred."), { code });
         } else {
           // Untyped / message event fallback
           if (parsed.token !== undefined || parsed.text !== undefined) {
