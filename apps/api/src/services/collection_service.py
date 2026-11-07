@@ -17,6 +17,7 @@ class CollectionService:
     async def create_collection(
         self, context: ServiceContext, request: CollectionCreateRequest
     ) -> DocumentCollection:
+        context.resolve_scope(collection_id=request.collection_id)
         stmt = select(DocumentCollection).where(
             DocumentCollection.client_id == context.client_id,
             DocumentCollection.tenant_id == context.tenant_id,
@@ -52,6 +53,7 @@ class CollectionService:
     async def get_collection(
         self, context: ServiceContext, collection_id: str
     ) -> DocumentCollection | None:
+        context.resolve_scope(collection_id=collection_id)
         stmt = select(DocumentCollection).where(
             DocumentCollection.client_id == context.client_id,
             DocumentCollection.tenant_id == context.tenant_id,
@@ -63,10 +65,14 @@ class CollectionService:
     async def list_collections(
         self, context: ServiceContext, limit: int = 50, offset: int = 0
     ) -> tuple[list[DocumentCollection], int]:
+        if context.subject_id is not None and context.collection_id is None:
+            raise HTTPException(status_code=403, detail="Subject-scoped catalog access requires an explicit collection.")
         base_stmt = select(DocumentCollection).where(
             DocumentCollection.client_id == context.client_id,
             DocumentCollection.tenant_id == context.tenant_id,
         )
+        if context.collection_id is not None:
+            base_stmt = base_stmt.where(DocumentCollection.collection_id == context.collection_id)
         count_stmt = select(func.count()).select_from(base_stmt.subquery())
         total = (await self.db.execute(count_stmt)).scalar() or 0
 

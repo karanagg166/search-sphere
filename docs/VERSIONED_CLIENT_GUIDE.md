@@ -65,6 +65,14 @@ does not establish the consumer's doctor assignment or enrollment rules. Never
 forward unverified browser-supplied scope headers. Recheck consumer access before
 returning evidence, including when membership changes during a request.
 
+For collection metadata, `X-Collection-ID` bounds create/get/delete to that exact
+collection and filters list rows/counts before pagination. A conflicting body/path
+returns 403. A subject-scoped collection list must also delegate its authorized
+collection; omitting that bound is rejected. Tenant-wide `collections:manage`
+listing remains available to an authorized server request without subject or
+collection bounds. Collection metadata is client/tenant-owned; document subject
+ownership is rechecked separately on document and evidence operations.
+
 Inference eligibility is separate: an operator must review classification and add
 an expiring, exact-scope `inference_data_policies` approval. An upload's metadata
 cannot approve itself. Missing approval defaults to confidential (medical for
