@@ -24,6 +24,8 @@ except ModuleNotFoundError:
 @pytest.fixture(autouse=True)
 def clean_state(monkeypatch, tmp_path):
     smoke.SYNTHETIC_DOCUMENT_IDS.clear()
+    smoke.SYNTHETIC_CONVERSATION_IDS.clear()
+    monkeypatch.setattr(smoke, "ACTIVE_CI_TOKEN", None)
     monkeypatch.setenv("PROD_SMOKE_FIXTURE_KEY", "synthetic-signing-key-for-offline-tests-only")
     monkeypatch.setattr(smoke, "fixture_manager", smoke.FixtureManager(tmp_path / "manifest.json", "a" * 32))
     smoke.RESULTS.clear()
@@ -423,6 +425,7 @@ def test_cleanup_cannot_mask_original_answer_failure(monkeypatch):
     monkeypatch.setattr(smoke,"acquire_ci_auth",lambda:("synthetic-token",{}))
     monkeypatch.setattr(smoke,"http",lambda *a,**kw:(200,{}, {"id":"synthetic-user"}))
     monkeypatch.setattr(smoke,"sweep_dangling_synthetic_documents",lambda *a,**kw:None)
+    monkeypatch.setattr(smoke,"sweep_synthetic_conversations",lambda *a,**kw:None)
     monkeypatch.setattr(smoke,"check_auth_boundary",lambda *a,**kw:None)
     monkeypatch.setattr(smoke,"ensure_synthetic_document",lambda *a,**kw:("synthetic-document",True))
     monkeypatch.setattr(smoke,"run_real_rag_pipeline",lambda *a,**kw:(_ for _ in ()).throw(AssertionError("original answer failure")))
@@ -460,3 +463,105 @@ def test_sse_requires_successful_matching_completion(monkeypatch, events):
     monkeypatch.setattr(smoke, 'read_sse_stream', lambda *a, **kw: events)
     with pytest.raises(AssertionError, match="SSE answer streaming"):
         smoke.run_real_rag_pipeline("token", "doc", "MARKER", do_answer=True)
+
+
+def conversation_http(monkeypatch, *, duplicate_turn=False):
+    calls = []
+    reads = 0
+    def fake(url, **kwargs):
+        nonlocal reads
+        calls.append((url, kwargs.get("method", "GET")))
+        if url.endswith('/conversations'):
+            return 201, {}, {"id":"thread"}
+        if url.endswith('/answer'):
+            return 200, {}, {"answer":"MARKER [1]", "sources":[valid_source("doc","MARKER")], "message":{"id":"a1"}}
+        reads += 1
+        messages = [{"role":"user", "id":"u1"}, {"role":"assistant", "id":"a1", "content":"MARKER [1]"}]
+        if reads > 1:
+            messages += [{"role":"user", "id":"u2"}, {"role":"assistant", "id":"a2", "content":"MARKER [1]"}]
+            if duplicate_turn:
+                messages += [{"role":"user", "id":"u3"}, {"role":"assistant", "id":"a3", "content":"MARKER [1]"}]
+        return 200, {}, {"id":"thread", "messages":messages}
+    monkeypatch.setattr(smoke, "http", fake)
+    return calls
+
+
+def conversation_events():
+    return [("metadata", {}), ("source", {"sources":[valid_source("doc","MARKER")]}),
+            ("token", {"token":"MARKER [1]"}), ("done", {"answer":"MARKER [1]", "message_id":"a2"})]
+
+
+def test_conversation_journey_proves_citations_completion_and_exactly_two_turns(monkeypatch):
+    calls = conversation_http(monkeypatch)
+    monkeypatch.setattr(smoke, "read_sse_stream", lambda *a, **kw: conversation_events())
+    smoke.run_conversation_journey("synthetic-token", "owner", "doc", "MARKER")
+    assert sum(method == 'POST' and url.endswith('/answer') for url, method in calls) == 1
+    assert "thread" in smoke.SYNTHETIC_CONVERSATION_IDS
+    assert any("PASS Conversation SSE" in result for result in smoke.RESULTS)
+    receipt = smoke.fixture_manager.load_manifest()["runs"]["a"*32]["conversations"][0]
+    assert receipt["conversation_id"] == "thread" and receipt["status"] == "pending_cleanup"
+    assert "synthetic-token" not in str(receipt)
+
+
+@pytest.mark.parametrize("events", [
+    [("error", {"code":"provider_timeout"})],
+    conversation_events()[:-1],
+    conversation_events()+[conversation_events()[-1]],
+    [("metadata", {}), ("source", {"sources":[valid_source("other","MARKER")]}),
+     ("token", {"token":"MARKER [1]"}), ("done", {"answer":"MARKER [1]", "message_id":"a2"})],
+])
+def test_conversation_failure_never_replays_generation_or_marks_pass(monkeypatch, events):
+    calls = conversation_http(monkeypatch)
+    monkeypatch.setattr(smoke, "read_sse_stream", lambda *a, **kw: events)
+    with pytest.raises(AssertionError, match="Conversation SSE"):
+        smoke.run_conversation_journey("synthetic-token", "owner", "doc", "MARKER")
+    assert sum(method == 'POST' and url.endswith('/answer') for url, method in calls) == 1
+    assert "thread" in smoke.SYNTHETIC_CONVERSATION_IDS
+    assert not any("PASS Conversation SSE" in result for result in smoke.RESULTS)
+
+
+def test_conversation_journey_rejects_duplicate_saved_turns(monkeypatch):
+    conversation_http(monkeypatch, duplicate_turn=True)
+    monkeypatch.setattr(smoke, "read_sse_stream", lambda *a, **kw: conversation_events())
+    with pytest.raises(AssertionError, match="exactly one additional"):
+        smoke.run_conversation_journey("synthetic-token", "owner", "doc", "MARKER")
+
+
+def test_conversation_sweep_recovers_signed_owner_titles_after_lost_receipt(monkeypatch):
+    from smoke_fixtures import signed_conversation_title
+    rows = [
+        {"id":"trusted", "user_id":"owner", "title":signed_conversation_title("owner","a"*32)},
+        {"id":"wrong-owner", "user_id":"other", "title":signed_conversation_title("owner","b"*32)},
+        {"id":"forged", "user_id":"owner", "title":signed_conversation_title("other","c"*32)},
+        {"id":"name-only", "user_id":"owner", "title":"ssci_thread_v1_plain"},
+    ]
+    deleted = []
+    monkeypatch.setattr(smoke, "http", lambda *a, **kw: (200, {}, rows))
+    monkeypatch.setattr(smoke, "cleanup_synthetic_conversation", lambda token, cid: deleted.append(cid))
+    smoke.sweep_synthetic_conversations("synthetic-token", "owner")
+    assert deleted == ["trusted"]
+
+
+def test_conversation_cleanup_cannot_accept_a_503_read_denial(monkeypatch):
+    smoke.SYNTHETIC_CONVERSATION_IDS.add("thread")
+    monkeypatch.setattr(smoke, "http", lambda *a, **kw: (204, {}, {}) if kw.get('method') == 'DELETE' else (503, {}, {}))
+    with pytest.raises(AssertionError, match="Conversation cleanup"):
+        smoke.cleanup_synthetic_conversation("synthetic-token", "thread")
+    assert "thread" in smoke.SYNTHETIC_CONVERSATION_IDS
+
+
+def test_conversation_cleanup_failure_preserves_original_provider_failure(monkeypatch):
+    monkeypatch.setattr(smoke, "acquire_ci_auth", lambda: ("synthetic-token", "owner"))
+    monkeypatch.setattr(smoke, "http", lambda *a, **kw: (200, {}, {"id":"owner"}))
+    monkeypatch.setattr(smoke, "sweep_dangling_synthetic_documents", lambda *a, **kw: None)
+    monkeypatch.setattr(smoke, "sweep_synthetic_conversations", lambda *a, **kw: None)
+    monkeypatch.setattr(smoke, "check_auth_boundary", lambda *a, **kw: None)
+    monkeypatch.setattr(smoke, "ensure_synthetic_document", lambda *a, **kw: ("doc", True))
+    monkeypatch.setattr(smoke, "run_real_rag_pipeline", lambda *a, **kw: None)
+    def failed(*args):
+        smoke.SYNTHETIC_CONVERSATION_IDS.add("thread")
+        raise AssertionError("original provider timeout")
+    monkeypatch.setattr(smoke, "run_conversation_journey", failed)
+    monkeypatch.setattr(smoke, "cleanup_synthetic_conversation", lambda *a: (_ for _ in ()).throw(AssertionError("secondary cleanup failure")))
+    with pytest.raises(AssertionError, match="original provider timeout"):
+        smoke.run_rag_suite()

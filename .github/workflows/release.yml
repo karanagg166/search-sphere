@@ -86,7 +86,7 @@ jobs:
         run: python scripts/release_gate.py deploy
 
   post-deployment:
-    name: Authenticated standalone journey after successful deployment
+    name: Authenticated standalone and conversation journeys after deployment
     needs: deployment
     environment: search-sphere-release
     runs-on: ubuntu-latest
@@ -110,7 +110,7 @@ jobs:
               assert os.environ.get(name), 'Required protected credential missing: ' + name
           assert len(os.environ['PROD_SMOKE_FIXTURE_KEY'].encode()) >= 32
           PY
-      - name: Upload, index, retrieve marker, answer with citations, complete SSE and verify cleanup
+      - name: Upload, index, retrieve, verify standalone/conversation answers and SSE, and clean up
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
           PROD_SMOKE_USER_EMAIL: ${{ secrets.RELEASE_SMOKE_EMAIL }}

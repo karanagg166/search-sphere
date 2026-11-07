@@ -1048,3 +1048,33 @@ whole-operation bound and 35s outer generation/rewrite default, preserving short
 embedding/reranking limits, one-attempt behavior and both authorization checks.
 Payload-free stage/outcome/duration telemetry will make further timeouts diagnosable.
 This change is not a claim of recovered conversation SSE until a new live check passes.
+
+## Pinned generation recovery and conversation release coverage
+
+The deadline/telemetry repair #64 merged at
+`f1d9e72ca5fde0d6cd51b0d9379ad00b397fc76c` after required CI
+[42365873054](https://github.com/karanagg166/search-sphere/actions/runs/42365873054)
+and exact-main CI
+[42366138364](https://github.com/karanagg166/search-sphere/actions/runs/42366138364).
+Release [42366356255](https://github.com/karanagg166/search-sphere/actions/runs/42366356255)
+passed admission/migrations and pinned deployment; its post-deployment result is
+still pending at this checkpoint. Payload-free Render telemetry records completed
+guarded chat operations of 20.5s and 22.9s, longer than the old 20s total deadline.
+These are individual measurements, not P95 or capacity estimates.
+
+Future-client onboarding #65 merged at
+`6dd68d57bb6bb30a2a1d0aa07bd3e3db59731b18` after required CI
+[42366143582](https://github.com/karanagg166/search-sphere/actions/runs/42366143582).
+`VERSIONED_CLIENT_GUIDE.md` documents the actual upload/register/poll/query/conversation/
+cleanup contracts and identifies version-replacement limitations. Operator bootstrap
+now accepts the existing conversation scopes; five PostgreSQL bootstrap cases passed.
+The old ExamArena Qdrant/local-model walkthrough is explicitly superseded.
+
+The next smoke repair requires the native conversation JSON and SSE routes using
+the newly uploaded PDF, correct supporting citations, exact saved message IDs/text
+and exactly one additional turn per explicit request. Signed conversation titles
+and private receipts allow same-owner cleanup after interruption, including loss
+of a local receipt. A mere name prefix or another owner's signature cannot authorize
+deletion. Missing done, duplicate turns, unsupported citations, a provider error or
+503 during cleanup must fail the gate without replaying generation. Smoke/release
+offline regressions passed (81 cases); this expanded live coverage is not yet run.

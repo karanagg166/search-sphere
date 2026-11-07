@@ -35,6 +35,18 @@ def verified_filename(filename: str, user_id: str) -> bool:
     return bool(match and user_id and hmac.compare_digest(filename, signed_filename(user_id, match[1])))
 
 
+def signed_conversation_title(user_id: str, run_id: str) -> str:
+    if not user_id or not re.fullmatch(r"[0-9a-f]{32}", run_id):
+        raise AssertionError("Fixture provenance: authenticated owner and valid run ID required")
+    signature = hmac.new(signing_key(), f"native_conversation\n{user_id}\n{run_id}".encode(), hashlib.sha256).hexdigest()
+    return f"ssci_thread_v1_{run_id}_{signature}"
+
+
+def verified_conversation_title(title: str, user_id: str) -> bool:
+    match = re.fullmatch(r"ssci_thread_v1_([0-9a-f]{32})_([0-9a-f]{64})", title)
+    return bool(match and user_id and hmac.compare_digest(title, signed_conversation_title(user_id, match[1])))
+
+
 class FixtureManager:
     """Atomic local receipts. Corruption or write failure must fail the gate."""
 
@@ -77,11 +89,21 @@ class FixtureManager:
         })
         self.save_manifest(data)
 
-    def _mark(self, doc_id: str, **values: Any) -> None:
+    def register_conversation(self, conversation_id: str, title: str, user_id: str) -> None:
+        data = self.load_manifest()
+        entry = data["runs"].setdefault(self.run_id, {
+            "run_id": self.run_id, "user_id": user_id, "created_at": time.time(), "documents": [],
+        })
+        entry.setdefault("conversations", []).append({
+            "conversation_id": conversation_id, "title": title, "created_at": time.time(), "status": "pending_cleanup",
+        })
+        self.save_manifest(data)
+
+    def _mark(self, doc_id: str, *, kind: str = "documents", **values: Any) -> None:
         data = self.load_manifest()
         for entry in data["runs"].values():
-            for doc in entry.get("documents", []):
-                if doc.get("doc_id") == doc_id:
+            for doc in entry.get(kind, []):
+                if doc.get("doc_id" if kind == "documents" else "conversation_id") == doc_id:
                     doc.update(values)
         self.save_manifest(data)
 
@@ -90,6 +112,9 @@ class FixtureManager:
 
     def mark_fixture_failed(self, doc_id: str, reason: str = "") -> None:
         self._mark(doc_id, status="failed_cleanup", failure_reason=reason)
+
+    def mark_conversation_cleaned(self, conversation_id: str) -> None:
+        self._mark(conversation_id, kind="conversations", status="cleaned_up", cleaned_at=time.time())
 
     def get_uncleaned_fixtures(self) -> list[dict[str, Any]]:
         return [
