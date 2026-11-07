@@ -21,15 +21,19 @@ from typing import Any
 if __package__:
     from .smoke_fixtures import (
         FixtureManager,
+        signed_conversation_title,
         signed_filename,
         signing_key,
+        verified_conversation_title,
         verified_filename,
     )
 else:
     from smoke_fixtures import (
         FixtureManager,
+        signed_conversation_title,
         signed_filename,
         signing_key,
+        verified_conversation_title,
         verified_filename,
     )
 
@@ -41,6 +45,7 @@ MAX_MEMORY_MIB = 420.0
 WAIT_SECONDS = 240
 RESULTS: list[str] = []
 SYNTHETIC_DOCUMENT_IDS: set[str] = set()
+SYNTHETIC_CONVERSATION_IDS: set[str] = set()
 ACTIVE_CI_TOKEN: str | None = None
 ACTIVE_CI_USER_ID: str | None = None
 ACTIVE_CI_EMAIL: str | None = None
@@ -665,6 +670,79 @@ def run_real_rag_pipeline(
             fail("SSE answer streaming", f"stream probe failed: {exc}")
 
 
+def cleanup_synthetic_conversation(token: str, conversation_id: str) -> None:
+    headers = {"Authorization": f"Bearer {token}"}
+    status, _, _ = http(f"{API}/conversations/{conversation_id}", method="DELETE", headers=headers, timeout=25)
+    if status not in (200, 204, 404):
+        fail("Conversation cleanup", f"deletion returned HTTP {status}")
+    status, _, _ = http(f"{API}/conversations/{conversation_id}", headers=headers, timeout=25)
+    if status != 404:
+        fail("Conversation cleanup", f"read denial unverified (HTTP {status})")
+    fixture_manager.mark_conversation_cleaned(conversation_id)
+    SYNTHETIC_CONVERSATION_IDS.discard(conversation_id)
+    record("Synthetic conversation cleanup", "deleted with authorized read returning 404")
+
+
+def sweep_synthetic_conversations(token: str, user_id: str) -> None:
+    status, _, rows = http(f"{API}/conversations", headers={"Authorization": f"Bearer {token}"}, timeout=25)
+    if status != 200 or not isinstance(rows, list) or len(rows) > 2500:
+        fail("Conversation fixture listing", f"invalid owner listing (HTTP {status})")
+    seen = set()
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("id"), str) or row["id"] in seen:
+            fail("Conversation fixture listing", "invalid or duplicate identity")
+        seen.add(row["id"])
+        title = row.get("title")
+        if row.get("user_id") == user_id and isinstance(title, str) and verified_conversation_title(title, user_id):
+            SYNTHETIC_CONVERSATION_IDS.add(row["id"])
+            cleanup_synthetic_conversation(token, row["id"])
+
+
+def run_conversation_journey(token: str, user_id: str, document_id: str, marker: str) -> None:
+    headers = {"Authorization": f"Bearer {token}"}
+    title = signed_conversation_title(user_id, CI_RUN_ID)
+    status, _, created = http(f"{API}/conversations", method="POST", headers=headers, data={"title": title}, timeout=25)
+    if status != 201 or not isinstance(created, dict):
+        fail("Conversation registration", f"expected HTTP 201 object, got HTTP {status}")
+    conversation_id = created.get("id")
+    if not isinstance(conversation_id, str) or not conversation_id:
+        fail("Conversation registration", "missing identity")
+    SYNTHETIC_CONVERSATION_IDS.add(conversation_id)
+    fixture_manager.register_conversation(conversation_id, title, user_id)
+    url = f"{API}/conversations/{conversation_id}"
+    payload = {"query": "What is the unique CI verification code in the synthetic test document?",
+               "document_id": document_id, "top_k": 3, "candidate_k": 8}
+    status, _, result = http(url + "/answer", method="POST", headers=headers, data=payload, timeout=70)
+    answer = require_json(status, result, "Conversation grounded answer")
+    verify_grounded_marker(answer.get("answer"), answer.get("sources"), document_id, marker, "Conversation grounded answer")
+    record("Conversation grounded answer", "new PDF marker and verified page citations")
+    status, _, history = http(url, headers=headers, timeout=25)
+    history = require_json(status, history, "Conversation persistence")
+    messages = history.get("messages")
+    if (history.get("id") != conversation_id or not isinstance(messages, list) or not all(isinstance(message, dict) for message in messages)
+        or [message.get("role") for message in messages] != ["user", "assistant"]
+        or messages[-1].get("content") != answer.get("answer") or messages[-1].get("id") != (answer.get("message") or {}).get("id")):
+        fail("Conversation persistence", "exactly one completed turn is required")
+    events = read_sse_stream(url + "/answer/stream", data=payload, headers=headers, timeout=70)
+    types = [kind for kind, _ in events]
+    if types != ["metadata", "source", "token", "done"]:
+        known = {"provider_timeout", "provider_quota", "provider_rate_limit", "provider_not_approved",
+                 "provider_invalid_response", "provider_unavailable", "answer_unavailable"}
+        codes = [value.get("code") if value.get("code") in known else "unknown" for kind, value in events if kind == "error"]
+        fail("Conversation SSE", "completion missing; safe error codes=" + str(codes))
+    verify_grounded_marker(events[-1][1].get("answer"), events[1][1].get("sources"), document_id, marker, "Conversation SSE")
+    if events[2][1].get("token") != events[-1][1].get("answer") or not events[-1][1].get("message_id"):
+        fail("Conversation SSE", "token/completion or saved message mismatch")
+    status, _, history = http(url, headers=headers, timeout=25)
+    history = require_json(status, history, "Conversation persistence")
+    messages = history.get("messages")
+    if (history.get("id") != conversation_id or not isinstance(messages, list) or not all(isinstance(message, dict) for message in messages)
+        or [message.get("role") for message in messages] != ["user", "assistant", "user", "assistant"]
+        or messages[-1].get("content") != events[-1][1].get("answer") or messages[-1].get("id") != events[-1][1].get("message_id")):
+        fail("Conversation persistence", "stream must save exactly one additional completed turn")
+    record("Conversation SSE", "validated citation lifecycle, done and exactly one additional persisted turn")
+
+
 def run_rag_suite() -> None:
     global ACTIVE_CI_TOKEN, ACTIVE_CI_USER_ID, ACTIVE_CI_EMAIL
     signing_key()
@@ -685,6 +763,7 @@ def run_rag_suite() -> None:
 
     # Proactively sweep dangling synthetic fixtures from prior runs with verified provenance
     sweep_dangling_synthetic_documents(token, user_id=user_id, user_email=email)
+    sweep_synthetic_conversations(token, user_id)
 
     # Multi-tenant isolation checks with valid token
     check_auth_boundary(auth_token=token)
@@ -700,12 +779,18 @@ def run_rag_suite() -> None:
         if was_created:
             created_id = doc_id
         run_real_rag_pipeline(token, doc_id, marker, do_answer=True)
+        run_conversation_journey(token, user_id, doc_id, marker)
     except (AssertionError, OSError, TimeoutError) as error:
         print(f"::error::Journey failed before cleanup: {error}", flush=True)
         raise
     finally:
         primary_failure = sys.exc_info()[0] is not None
         cleanup_failed = False
+        for conversation_id in list(SYNTHETIC_CONVERSATION_IDS):
+            try:
+                cleanup_synthetic_conversation(token, conversation_id)
+            except (AssertionError, OSError, TimeoutError):
+                cleanup_failed = True
         for pending_id in list(SYNTHETIC_DOCUMENT_IDS):
             try:
                 cleanup_synthetic_document(token, pending_id, marker=marker if pending_id == created_id else None)
@@ -713,9 +798,9 @@ def run_rag_suite() -> None:
                 cleanup_failed = True
         if cleanup_failed:
             if primary_failure:
-                print("::warning::Synthetic physical cleanup remains unverified; preserving the original journey failure.", flush=True)
+                print("::warning::Synthetic fixture cleanup remains unverified; preserving the original journey failure.", flush=True)
             else:
-                fail("Synthetic document cleanup", "one or more physical cleanup assertions failed")
+                fail("Synthetic fixture cleanup", "one or more cleanup assertions failed")
 
 
 def save_summary() -> None:
@@ -776,6 +861,12 @@ def main() -> int:
         RESULTS.append(f"FAIL {str(exc).replace('|', '/')}")
         return 1
     finally:
+        if ACTIVE_CI_TOKEN:
+            for conversation_id in list(SYNTHETIC_CONVERSATION_IDS):
+                try:
+                    cleanup_synthetic_conversation(ACTIVE_CI_TOKEN, conversation_id)
+                except (AssertionError, urllib.error.URLError, TimeoutError, OSError):
+                    print("::warning::Conversation cleanup remains unverified; signed ownership permits recovery on the next run.")
         if ACTIVE_CI_TOKEN and SYNTHETIC_DOCUMENT_IDS:
             for s_id in list(SYNTHETIC_DOCUMENT_IDS):
                 try:

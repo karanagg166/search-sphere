@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   production-smoke:
-    name: Authenticated standalone release journey
+    name: Authenticated standalone and conversation release journeys
     if: github.ref == 'refs/heads/main'
     environment: search-sphere-release
     runs-on: ubuntu-latest
@@ -48,7 +48,7 @@ jobs:
           assert len(os.environ['PROD_SMOKE_FIXTURE_KEY'].encode()) >= 32, 'Fixture key is too short'
           PY
 
-      - name: Verify upload, indexing, retrieval, grounded answer, SSE, and physical cleanup
+      - name: Verify upload, indexing, standalone/conversation answers, SSE, and cleanup
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
           PROD_SMOKE_USER_EMAIL: ${{ secrets.RELEASE_SMOKE_EMAIL }}
