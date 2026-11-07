@@ -155,7 +155,7 @@ belong on the compatible structured medical path.
 Versioned SSE uses `data:` JSON frames with an `event` field (`metadata`, `token`,
 `citations`, `done`, or `error`) followed by `data: [DONE]`. Token text is in `text`;
 the citations frame contains a `citations` array. Require the `done` event and
-terminal sentinel; `[DONE]` after an error is not an answer. Validate the source
+terminal sentinel; `[DONE]` after an error is not an answer. Validate the citations
 frame and completed answer before marking success. Standalone native routes use
 named SSE events, a different wire format. Never replay generation automatically
 after an ambiguous disconnect; a completed turn might already have been saved.
