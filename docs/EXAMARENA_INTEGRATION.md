@@ -1,5 +1,12 @@
 # ExamArena Integration Walkthrough
 
+Historical walkthrough: its Qdrant/local-model references and client prompt examples
+are superseded by the current [versioned API guide](VERSIONED_CLIENT_GUIDE.md).
+Production uses PostgreSQL/pgvector, private Storage and approved hosted Cohere calls;
+client `system_prompt`/history cannot override server policy. ExamArena's school/class
+checks and the current acceptance record remain in its consumer code and
+[ACCEPTANCE_MATRIX.md](ACCEPTANCE_MATRIX.md).
+
 This guide provides a comprehensive walkthrough for integrating **ExamArena** (an online learning and examination platform) with Search-Sphere as a multi-tenant client.
 
 ---
