@@ -150,3 +150,18 @@ async def test_data_api_exposes_only_an_empty_schema(db):
         )
         == 0
     )
+
+
+@pytest.mark.asyncio
+async def test_conversation_deletion_fences_are_private_and_rls_protected(db):
+    assert await db.fetchval(
+        "SELECT relrowsecurity FROM pg_class WHERE oid='public.conversation_deletions'::regclass"
+    ) is True
+    await db.execute("INSERT INTO conversation_deletions(reference_hash,client_id) VALUES (repeat('a',64),'synthetic')")
+    for role in ("anon", "authenticated"):
+        await denied(db, role, "SELECT reference_hash FROM conversation_deletions LIMIT 0")
+        await db.execute(f"GRANT SELECT ON conversation_deletions TO {role}")
+        async with db.transaction():
+            await db.execute(f"SET LOCAL ROLE {role}")
+            assert await db.fetchval("SELECT count(*) FROM conversation_deletions") == 0
+        await db.execute("RESET ROLE")
