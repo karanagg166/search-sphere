@@ -1105,3 +1105,52 @@ classification and its documents were identified as uncertain; no trial eligibil
 exception was made. The overall rollout remains open, including both complete
 consumer production journeys, remaining version/recovery/evaluation work and budget
 verification for the Vercel account.
+
+## Consumer authorization/cleanup repairs and bounded index reconciliation
+
+ExamArena #32 (`82c0639db90a2b204c5206731bc383287274cb8b`) closes same-school
+other-class catalog metadata reads and validates upload class ownership. The existing
+staff school-wide policy is retained. The gap was reproduced before repair; 26
+PostgreSQL API cases passed. Required CI runs
+[42368316692](https://github.com/karanagg166/ExamArena/actions/runs/42368316692) and
+[42368484482](https://github.com/karanagg166/ExamArena/actions/runs/42368484482) passed.
+ExamArena #33 (`08952fa89634334e0e6bf3f0ddacd62ca3053934`) adds staff-only scoped
+physical cleanup receipts that survive local metadata deletion, with strict validated
+counts/status and no raw upstream diagnostic output. Fifty-seven related PostgreSQL
+API/client cases passed; required CI
+[42369924308](https://github.com/karanagg166/ExamArena/actions/runs/42369924308) passed.
+Production serves that exact revision and deployment-contract
+[42371383560](https://github.com/karanagg166/ExamArena/actions/runs/42371383560) passed.
+
+Quick-Clinic #164 (`0c1f3f1b4477cac068f9450b72c48144f7f2f499`) adds the patient-only
+physical cleanup receipt using the verified session/profile and hashed patient
+collection, even after local document deletion. Seventy-five focused tests passed
+and required CI
+[42369566465](https://github.com/karanagg166/Quick-Clinic/actions/runs/42369566465) passed.
+Quick-Clinic #165 (`9a225701b96ef4d6a099e50ed21f009e046aca62`) buffers and validates
+complete medical SSE before emitting answer text, prevents unvalidated partial
+message persistence, and refreshes account/doctor/appointment/thread authorization
+after inference. Eighty-two focused regressions and required CI
+[42370695996](https://github.com/karanagg166/Quick-Clinic/actions/runs/42370695996) passed.
+Production serves that exact revision and deployment-contract
+[42371384509](https://github.com/karanagg166/Quick-Clinic/actions/runs/42371384509) passed.
+Neither consumer's contract run substitutes for its required seeded, authenticated
+upload/answer/SSE/negative-isolation/cleanup journey.
+
+The bounded recovery inventory/plan is in `docs/INDEX_RECOVERY.md`. The new operator
+controller selects no more than 20 published sources in an exact client/tenant/
+collection/subject scope, counts only authoritative current-model/version vectors,
+and writes private, expiring dry-run receipts. Applying a reviewed digest repeats
+scope/state/policy/vector checks under the existing lock order and resets one durable
+job generation. It neither loads models nor downloads originals. Duplicate/concurrent
+applications, working indexes, pending jobs, deletion and revoked approvals are
+covered by real PostgreSQL tests; recovery itself goes through the normal worker.
+The focused recovery/receipt/timeout/reindex group passed 26 cases.
+
+A READ ONLY production dry run for the reported conversation owner found exactly
+one published source without a usable current index. Its action was
+`provider_not_approved`; there were zero writes and zero provider HTTP calls. The
+receipt remains private outside the repository. Classification remains uncertain,
+so neither its policy nor index was changed. Reconciliation for that source remains
+open pending classification/provider eligibility, independently of the successful
+dedicated synthetic account's production journey.
