@@ -1154,3 +1154,142 @@ receipt remains private outside the repository. Classification remains uncertain
 so neither its policy nor index was changed. Reconciliation for that source remains
 open pending classification/provider eligibility, independently of the successful
 dedicated synthetic account's production journey.
+
+## Consumer caller revocation, fixtures and authenticated release gates
+
+Search Sphere #68 is merged as `816aa99cb1f3cb8f8bd92f4bc67f11dc244e9833`;
+required CI [42371828184](https://github.com/karanagg166/search-sphere/actions/runs/42371828184)
+and main [42372242502](https://github.com/karanagg166/search-sphere/actions/runs/42372242502)
+passed. The private-source recovery plan remains unapplied and provider-blocked.
+
+ExamArena #34 reproduced six search/answer leaks after a caller changed school,
+class or role during the upstream request. Fresh role and affiliation/enrollment
+column reads now withhold evidence before returning search, answer or cleanup.
+All eight revocation cases passed, together with the existing 50-case API/catalog/
+cleanup suite and 13 client cases. Required CI passed; production initially served
+`247ea8f83375febe45fa3c41c947e2c94dbd9e36`, with contract
+[42373916560](https://github.com/karanagg166/ExamArena/actions/runs/42373916560) passing.
+
+The pre-implementation fixture inventory/plan is in ExamArena's
+`docs/SYNTHETIC_RELEASE_FIXTURES.md`. #35 added a private, dry-run-first bootstrap
+for two synthetic schools, four logins and three classes (13 records). It uses
+owned HMAC-derived identities, atomic SQL inserts and refuses partial/colliding/
+changed fixtures. The first actual login check exposed `.invalid` rejection by
+the existing `EmailStr` schema; #36 uses reserved `example.com` addresses and
+validates the actual login schema. A production ownership precheck also exposed
+the older timestamp-without-timezone birth-date column. Comparison now normalizes
+only the fixed synthetic UTC date, with a real PostgreSQL legacy-column regression.
+
+The reviewed production correction locked and verified all 13 owned records,
+changed only four fixture email fields, and preserved passwords, roles and
+school/class grants. All four real production logins then passed. Twenty-one
+bootstrap cases passed; the credentials are stored only in the protected consumer
+release environment. Neither a general development seed nor real user data was used.
+
+ExamArena #37 added bounded cookie-aware, redirect-refusing HTTP and signed fixture
+journals. #38 added the authenticated controller: three new public PDFs, actual
+index-state polling, marker retrieval, expected cited answers, school/class negatives,
+and verified physical cleanup. #39 added a separate protected-main workflow and
+prior trusted-artifact restoration. It rejects missing/expired/foreign provenance
+from a mutating run. The combined fixture/controller/transport/provenance suite
+passed 53 cases. The final merged revision `e80f89e33ab5b81d0b070c4e389a13ee921a0671`
+passed main CI [42390051184](https://github.com/karanagg166/ExamArena/actions/runs/42390051184),
+serves from Vercel deployment `7623622261`, and passed deployment contracts
+[42409364562](https://github.com/karanagg166/ExamArena/actions/runs/42409364562).
+
+A dry-run/reviewed SQL bootstrap registered `exam_arena` with six application
+scopes, exactly two synthetic school tenants, and no wildcard/platform-management
+grant. Three exact synthetic collection policies expire after 30 days. The server
+key is private outside the repository, not a consumer CI or browser credential.
+Direct deployed collection probes returned 200 for both permitted fixture tenants
+and 403 for a foreign tenant and wrong client. Initial allowed reads timed out
+before warmup, so they are not evidence of completed cold-start acceptance.
+
+The first protected authenticated run
+[42409361800](https://github.com/karanagg166/ExamArena/actions/runs/42409361800) failed
+on a 15-second health timeout before login; its empty signed journal was preserved.
+A separate deployed synthetic upload returned 502 and identified missing server
+`SEARCH_SPHERE_API_KEY`; the subsequent authenticated catalog check found zero
+created diagnostic documents. Bounded read-only health recovery is being repaired
+separately. Vercel management still returns 403, so installing the prepared scoped
+key, inspecting platform logs and verifying the Hobby/free plan require owner
+access. Full authenticated ExamArena/Quick-Clinic journeys, forced restart and
+bounded-provider-failure production cases, broader evaluation and changed-file
+version cutover remain open. No uncertain/private source was reclassified and no
+paid infrastructure or inference provider was added.
+
+## Deployed catalog bounds and cold-read follow-up
+
+Search Sphere #69 reproduced seven collection-bound CRUD/list/count failures and
+a further subject-only tenant-catalog expansion. It reuses the existing request
+scope resolver, filters before count/offset, and rejects a subject-scoped list
+without its collection. Nine new cases plus eight existing collection/legacy
+regressions pass against real PostgreSQL. The current contract is in
+`docs/VERSIONED_CLIENT_GUIDE.md`; no schema or inference behavior changed.
+
+#70 added the separate protected-main collection scope gate with a dedicated key
+limited to `collections:manage` in one synthetic tenant. It cannot read documents,
+infer or administer clients. Signed logical catalog IDs support lost-response and
+interrupted-run cleanup without recording keys or content. Thirteen new offline
+cases plus existing smoke/release checks pass (94 total). Required PR CI
+[42411611596](https://github.com/karanagg166/search-sphere/actions/runs/42411611596) and
+exact main [42412324291](https://github.com/karanagg166/search-sphere/actions/runs/42412324291)
+passed for the final `38e5830ffb38824762a07a1fac217de7c96202a6` tree.
+
+Pinned release [42412645430](https://github.com/karanagg166/search-sphere/actions/runs/42412645430)
+verified the existing free Render Docker service, owner-approved Cohere trial
+fingerprint/model settings and 900-call cap, production migration head
+`021_document_versions`, denied browser-role table/column privileges, and private
+original bucket. It deployed `dep-dbnosje7bikc73d544lg`, verified the exact serving
+revision, then uploaded a new PDF and passed standalone and new-conversation JSON
+answers, supporting page citations, SSE completion, exact persisted turns and
+physical vector/object cleanup. Memory measured 135.3 MiB initially and 181.6 MiB
+afterward. Deployed scope gate
+[42413367038](https://github.com/karanagg166/search-sphere/actions/runs/42413367038)
+also passed all conflicting CRUD, subject/list/count/offset, tenant/client denial,
+metadata-only key denial and signed cleanup assertions without inference.
+
+ExamArena #40 adds four bounded attempts only to transient health/readiness GETs;
+wrong revisions or malformed responses fail immediately. Forty focused checks
+pass. Exact serving `5bc1a09dcd9c91c271484c23e3540e75d165eccc` from deployment
+`7626614760` passed main CI
+[42411134515](https://github.com/karanagg166/ExamArena/actions/runs/42411134515) and
+deployment contracts [42412380764](https://github.com/karanagg166/ExamArena/actions/runs/42412380764).
+Its protected authenticated run
+[42412378062](https://github.com/karanagg166/ExamArena/actions/runs/42412378062) now
+passed exact health/readiness, all four logins and prior receipt restoration, then
+failed fresh upload with HTTP 502. The independent deployed diagnostic identified
+missing `SEARCH_SPHERE_API_KEY` and zero created document metadata. The signed
+journal was preserved; this is a failed journey, not integration success.
+
+Fresh Vercel account and ExamArena-project management probes both return 403.
+Owner access is still needed to install the private scoped key and verify the
+free/Hobby plan. Quick-Clinic's complete authenticated journey, forced restart and
+bounded-provider-failure production cases, changed-file version cutover and broad
+quality/capacity evaluation remain open. The standalone successful PDF fixture
+does not approve the ordinary account's uncertain content for Cohere trial.
+
+
+## Consumer history and delegated deletion inventory before repair
+
+The following missing behavior was found by source inspection after the deployed
+scope gate. No production conversation or medical record contents were fetched.
+
+- **Working:** Search Sphere `services/delegated_conversations.py::visible_messages`
+  reauthorizes saved evidence and withholds stale answers. Messages and compact
+  memory are scoped by `security/conversation_access.py::conversation_query`.
+- **Partial:** Quick-Clinic
+  `src/app/api/doctors/me/patients/[patientId]/medical-chat/conversations/[conversationId]/route.ts::GET`
+  verifies doctor, patient and thread ownership but returns cached assistant
+  content/citations without checking current source existence/version/access.
+- **Missing:** that route's `DELETE` removes only local Prisma conversation data;
+  delegated Search Sphere messages and compact memory remain. A compatible scoped
+  medical deletion contract and consumer forwarding are required.
+- **Missing:** Search Sphere
+  `services/delegated_conversations.py::register_conversation` can recreate an
+  explicitly deleted external reference. A late request can therefore reestablish
+  a deleted thread. Deletion needs a scope-bound, content-free fence shared with
+  registration, plus PostgreSQL concurrency and isolation checks.
+
+These are open memory/deletion requirements, independently of the passing native
+conversation journey. No account classification or provider eligibility is changed.
