@@ -216,3 +216,22 @@ Migration `022_conversation_deletions` enables RLS and revokes browser-role gran
 Its downgrade refuses to discard nonempty fences. No provider call is needed for
 reference registration or deletion. Consumer forwarding and cached-history source
 validation are separate requirements and are not established by this fence.
+
+
+### Quick-Clinic compatibility conversation cleanup
+
+The existing medical adapter accepts
+`DELETE /internal/medical-rag/conversations/{external_reference}` without a body.
+It requires the Quick-Clinic credential in the supported clinic tenant, both
+`documents:delete` and `answers:generate`, and server-derived `X-Actor-ID` and
+`X-Subject-ID`. A supplied `X-Collection-ID` must equal the patient collection
+derived by Search Sphere. Quick-Clinic must verify doctor-to-patient and thread
+ownership before delegating this operation. No generic conversation-management
+scope or inference approval is granted by this compatibility route.
+
+A successful deletion returns `{"deleted": true}` after committing removal of
+messages/compact memory and the persistent reference fence. Repeating it is safe,
+including when the local conversation never sent an upstream message. An unknown
+reference cannot disclose whether another actor/patient has the same label.
+Inference dependencies are not attached to this route. Future apps use the
+versioned conversation API described above.
