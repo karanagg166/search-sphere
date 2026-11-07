@@ -1422,8 +1422,12 @@ Fresh primary-source checks on 2026-11-08 found:
 - [Data commitments](https://cohere.com/enterprise-data-commitments): enterprise
   commitments apply to paying customers; trial data uses ordinary terms/privacy.
 - [R7B model documentation](https://docs.cohere.com/docs/command-r7b) and a models-only
-  API call confirmed the candidate exists. No inference comparison or model change
-  was performed; availability alone is not production eligibility or accuracy proof.
+  API call confirmed the candidate exists. A subsequent fixed synthetic functional
+  check passed; a six-case evidence-selection check passed four and failed the
+  required negation/exact-policy-ID assertions. It used the existing dedicated
+  synthetic identity, PostgreSQL eligibility validation and normal quota reservation.
+  No model/configuration change was made. These small functional cases are not a
+  capacity, P95 or general accuracy result.
 
 Deployed synthetic/public evaluation can continue, but final production inference
 requires a provider-approved $0 arrangement and relevant data approval. No paid

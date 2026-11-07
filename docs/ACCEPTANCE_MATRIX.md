@@ -86,7 +86,8 @@ Cohere's [pricing](https://cohere.com/pricing) says trial calls are free and res
 them from production/commercial use. Its [data commitments](https://cohere.com/enterprise-data-commitments)
 apply enterprise protections to paying customers; trial data uses its ordinary
 terms/privacy policy. Only public/synthetic evaluation tests have been run. No
-new model or paid provider was selected. A provider-approved $0 production
+new model or paid provider was selected. The faster candidate failed two of six
+required synthetic selection cases and was not deployed. A provider-approved $0 production
 arrangement remains an external requirement, alongside sensitive-data approval.
 
 The production cold-start/restart and bounded-provider-failure assertions still need
