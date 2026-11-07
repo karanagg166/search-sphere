@@ -35,6 +35,7 @@ import {
   ConversationSummary,
 } from "@/lib/api/conversations";
 import { streamAnswer } from "@/lib/api/streaming";
+import { canFallbackToJson, inferenceErrorMessage, StreamFailure } from "@/lib/api/inference-errors";
 import { submitMessageFeedback, submitGenericFeedback } from "@/lib/api/feedback";
 import { ConversationSidebar } from "@/components/conversations/conversation-sidebar";
 import { AuthModal } from "@/components/auth-modal";
@@ -289,6 +290,7 @@ export default function SearchPage() {
       let accumulatedText = "";
       let receivedDone = false;
       let streamError: string | null = null;
+      let streamFailure: StreamFailure | null = null;
 
       try {
         await streamAnswer(
@@ -357,8 +359,9 @@ export default function SearchPage() {
               );
               refetchConversations();
             },
-            onError: (errMsg) => {
+            onError: (errMsg, failure) => {
               streamError = errMsg;
+              streamFailure = failure || null;
             },
           }
         );
@@ -386,8 +389,13 @@ export default function SearchPage() {
         return;
       }
 
-      // If streaming failed upfront before receiving any tokens, perform fallback
-      if (!receivedDone || !accumulatedText.trim()) {
+      if (receivedDone) return;
+      if (!canFallbackToJson(streamFailure)) {
+        throw new Error(streamError || "The answer did not finish. Please retry manually.");
+      }
+
+      // A missing/unsupported SSE route can safely use the compatible JSON route.
+      if (!receivedDone) {
         try {
           const directResp = await answerInConversation(targetConvId, {
             query: queryText,
@@ -442,6 +450,7 @@ export default function SearchPage() {
               directErr?.message ||
               "Unable to generate answer. Please try again.";
           }
+          finalErrMsg = inferenceErrorMessage(directErr?.response?.data?.error_code, finalErrMsg);
 
           setTurns((prev) =>
             prev.map((t) =>
