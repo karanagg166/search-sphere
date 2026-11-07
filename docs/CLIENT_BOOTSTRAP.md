@@ -32,8 +32,8 @@ once; store it without placing the response in logs or CI artifacts.
 Quick-Clinic continues to authorize doctor-to-patient access; ExamArena continues
 to authorize school enrollment and class access. They delegate the resulting tenant,
 collection and subject in each server request, which Search Sphere validates.
-The full future-client upload/poll/search/delete guide is tracked separately in the
-rollout ledger while durable ingestion and release journeys are completed.
+The [versioned client guide](VERSIONED_CLIENT_GUIDE.md) covers the complete
+upload/poll/search/answer/delete contract without importing service internals.
 
 ## Delegated conversation ownership
 
@@ -61,8 +61,9 @@ query processing starts, including SSE. Versioned answers select history from th
 conversation and persist completed turns. Source references retain chunk/row IDs and
 content hashes instead of copying passages; later use re-fetches current evidence.
 Caller `conversation_history` and `system_prompt` fields are accepted for compatibility
-and ignored. Clinical compatibility wiring, full intent routing, memory, and complete
-claim/citation validation remain open rollout phases.
+and ignored. Context selection, validated intent routing, grounding checks and compact
+memory run on the server. Production acceptance and remaining feature gaps are
+tracked in [ACCEPTANCE_MATRIX.md](ACCEPTANCE_MATRIX.md).
 
 ## Server-owned query routes
 

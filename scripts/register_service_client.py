@@ -17,6 +17,7 @@ import asyncpg
 SCOPES = (
     "documents:read", "documents:write", "documents:delete", "collections:manage",
     "search:execute", "answers:generate", "clients:manage",
+    "conversations:read", "conversations:write",
 )
 
 

@@ -1,5 +1,6 @@
 import hashlib
 import importlib.util
+import json
 import os
 import uuid
 from pathlib import Path
@@ -31,12 +32,13 @@ async def database():
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_is_dry_run_first_scoped_and_never_changes_migration_history(database):
+@pytest.mark.parametrize("scopes", [["documents:read"], ["documents:read", "conversations:read", "conversations:write"]])
+async def test_bootstrap_is_dry_run_first_scoped_and_never_changes_migration_history(database, scopes):
     connection, client_id = database
     revision = await connection.fetchval("SELECT version_num FROM alembic_version")
     args = bootstrap.arguments([
         "--client-id", client_id, "--name", "Synthetic bootstrap fixture",
-        "--tenant", "synthetic-school", "--scope", "documents:read",
+        "--tenant", "synthetic-school", *[part for scope in scopes for part in ["--scope", scope]],
     ])
     key = "synthetic-bootstrap-test-key-" + uuid.uuid4().hex
     result = await bootstrap.register(connection, args, key)
@@ -47,7 +49,7 @@ async def test_bootstrap_is_dry_run_first_scoped_and_never_changes_migration_his
     row = await connection.fetchrow("SELECT api_key_hash, authorized_tenants, allowed_scopes FROM service_clients WHERE client_id=$1", client_id)
     assert row["api_key_hash"] == hashlib.sha256(key.encode()).hexdigest()
     assert row["authorized_tenants"] == '["synthetic-school"]'
-    assert row["allowed_scopes"] == '["documents:read"]'
+    assert json.loads(row["allowed_scopes"]) == sorted(scopes)
     with pytest.raises(ValueError, match="replace-existing"):
         await bootstrap.register(connection, args, key)
     args.replace_existing = True
