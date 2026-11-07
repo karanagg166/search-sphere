@@ -977,3 +977,31 @@ Storage/diagnostic repair #59 merged at `46f2283a52dd53fd6881233daee6d9bfb073e56
 required CI [42358322960](https://github.com/karanagg166/search-sphere/actions/runs/42358322960)
 passed. Production is still serving `b3138a042c6e30c7b954d9ade9611b6da9ad2355`
 until the subsequent pinned recovery release passes admission.
+
+## Verified standalone recovery release
+
+Search Sphere #60 merged at `e6e26d0f9f0032fcb6c9019408806c47e6a7951d` after
+required CI [42358577605](https://github.com/karanagg166/search-sphere/actions/runs/42358577605);
+exact-main CI [42358859782](https://github.com/karanagg166/search-sphere/actions/runs/42358859782)
+also passed. Recovery release [42359101987](https://github.com/karanagg166/search-sphere/actions/runs/42359101987)
+passed admission/migration/security checks, pinned Render deployment
+`dep-dbneplvf3r2c738f4rng`, and every required standalone smoke assertion: authenticated
+upload, indexed status (two chunks), unique marker retrieval, hosted reranking,
+grounded answer with page citations, SSE completion, deletion, owner-scoped zero
+physical vectors and verified private-object absence. Initial memory was 134.8 MiB;
+final memory 179.9 MiB. These are observed journey measurements, not capacity/P95.
+
+The two signed interrupted fixture receipts were ownership-verified in a scoped dry
+run. Only their QUEUED, unleased retries were advanced, excluding live parent documents;
+both subsequently reached COMPLETE with object deletion verified and no error.
+
+Main CI for #59 previously exposed a test false positive: the string `999` occurred
+in a valid random observation UUID. #61 replaces the whole-response substring check
+with assertions on the forbidden clinical value and excluded observation IDs; all
+seven medical PostgreSQL cases passed. It merged at
+`642385959f6b192812028abec156608b75a99072`, a test-only change after the pinned runtime.
+
+`docs/ACCEPTANCE_MATRIX.md` is the current interim requirement-to-code/proof map.
+Overall rollout remains open: both authenticated consumer journeys, remaining
+replacement/recovery/evaluation/integration work, required production failure/restart
+cases, and Vercel/free-tier account verification have not been completed.
