@@ -1,3 +1,4 @@
+import json
 from abc import ABC, abstractmethod
 from pathlib import Path
 
@@ -182,7 +183,7 @@ class SupabaseStorage(ObjectStorage):
             if resp.status_code == 404:
                 return False
             # An outage or auth failure must never be mistaken for absence.
-            if resp.status_code not in (405, 501):
+            if resp.status_code not in (400, 405, 501):
                 raise RuntimeError("Storage existence check unavailable")
             headers["Range"] = "bytes=0-0"
             async with client.stream("GET", url, headers=headers) as response:
@@ -190,6 +191,20 @@ class SupabaseStorage(ObjectStorage):
                     return True
                 if response.status_code == 404:
                     return False
+                if response.status_code == 400:
+                    # Supabase's legacy object endpoint reports missing keys using
+                    # HTTP 400 with an explicit JSON 404/not_found envelope.
+                    body = bytearray()
+                    async for part in response.aiter_bytes(chunk_size=512):
+                        body.extend(part)
+                        if len(body) > 2048:
+                            raise RuntimeError("Storage existence check unavailable")
+                    try:
+                        error = json.loads(body)
+                    except (ValueError, UnicodeDecodeError):
+                        error = None
+                    if isinstance(error, dict) and error.get("error") == "not_found" and str(error.get("statusCode")) == "404":
+                        return False
                 raise RuntimeError("Storage existence check unavailable")
 
 

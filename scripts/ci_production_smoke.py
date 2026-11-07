@@ -700,7 +700,11 @@ def run_rag_suite() -> None:
         if was_created:
             created_id = doc_id
         run_real_rag_pipeline(token, doc_id, marker, do_answer=True)
+    except (AssertionError, OSError, TimeoutError) as error:
+        print(f"::error::Journey failed before cleanup: {error}", flush=True)
+        raise
     finally:
+        primary_failure = sys.exc_info()[0] is not None
         cleanup_failed = False
         for pending_id in list(SYNTHETIC_DOCUMENT_IDS):
             try:
@@ -708,7 +712,10 @@ def run_rag_suite() -> None:
             except (AssertionError, OSError, TimeoutError):
                 cleanup_failed = True
         if cleanup_failed:
-            fail("Synthetic document cleanup", "one or more physical cleanup assertions failed")
+            if primary_failure:
+                print("::warning::Synthetic physical cleanup remains unverified; preserving the original journey failure.", flush=True)
+            else:
+                fail("Synthetic document cleanup", "one or more physical cleanup assertions failed")
 
 
 def save_summary() -> None:
