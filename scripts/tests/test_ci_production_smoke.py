@@ -419,6 +419,19 @@ def test_missing_credentials_fail_required_journey(monkeypatch):
         smoke.run_rag_suite()
 
 
+def test_cleanup_cannot_mask_original_answer_failure(monkeypatch):
+    monkeypatch.setattr(smoke,"acquire_ci_auth",lambda:("synthetic-token",{}))
+    monkeypatch.setattr(smoke,"http",lambda *a,**kw:(200,{}, {"id":"synthetic-user"}))
+    monkeypatch.setattr(smoke,"sweep_dangling_synthetic_documents",lambda *a,**kw:None)
+    monkeypatch.setattr(smoke,"check_auth_boundary",lambda *a,**kw:None)
+    monkeypatch.setattr(smoke,"ensure_synthetic_document",lambda *a,**kw:("synthetic-document",True))
+    monkeypatch.setattr(smoke,"run_real_rag_pipeline",lambda *a,**kw:(_ for _ in ()).throw(AssertionError("original answer failure")))
+    monkeypatch.setattr(smoke,"cleanup_synthetic_document",lambda *a,**kw:(_ for _ in ()).throw(AssertionError("secondary cleanup failure")))
+    smoke.SYNTHETIC_DOCUMENT_IDS.add("synthetic-document")
+    with pytest.raises(AssertionError,match="original answer failure"):
+        smoke.run_rag_suite()
+
+
 @pytest.mark.parametrize("answer,sources", [
     ("Unrelated answer [1]", [{"document_id": "doc", "source_id": 1, "start_page": 1, "end_page": 1, "content": "MARKER"}]),
     ("MARKER [99]", [{"document_id": "doc", "source_id": 1, "start_page": 1, "end_page": 1, "content": "MARKER"}]),

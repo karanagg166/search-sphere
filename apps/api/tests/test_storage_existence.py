@@ -41,3 +41,19 @@ async def test_storage_range_error_is_not_absence(monkeypatch):
     monkeypatch.setattr("src.storage.object_storage.httpx.AsyncClient", lambda **kwargs: client)
     with pytest.raises(RuntimeError, match="existence check unavailable"):
         await SupabaseStorage(base_url="https://synthetic.invalid", api_key="synthetic-test-only").exists("fixture.pdf")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payload,missing", [({"statusCode":"404","error":"not_found","message":"Object not found"},True),
+    ({"statusCode":"403","error":"not_found"},False),({"statusCode":"404","error":"AccessDenied"},False),({},False)])
+async def test_legacy_supabase_missing_envelope_is_verified_with_bounded_range_get(monkeypatch,payload,missing):
+    def handler(request):
+        return httpx.Response(400) if request.method=="HEAD" else httpx.Response(400,json=payload)
+    client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr("src.storage.object_storage.httpx.AsyncClient",lambda **kwargs:client)
+    storage=SupabaseStorage(base_url="https://synthetic.invalid",api_key="synthetic-test-only")
+    if missing:
+        assert await storage.exists("fixture.pdf") is False
+    else:
+        with pytest.raises(RuntimeError,match="existence check unavailable"):
+            await storage.exists("fixture.pdf")

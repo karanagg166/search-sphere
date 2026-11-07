@@ -927,3 +927,38 @@ synthetic policy; changed or revoked ownership/policy is refused, and approval e
 after 30 days. Existing hashes and unrelated user/record contents are never selected.
 Two real PostgreSQL identity cases plus the 21 release-admission cases passed (23
 together). No new production migration or Search Sphere deployment has occurred yet.
+
+## First hosted-runtime production release and open recovery
+
+Search Sphere #58 merged at `b3138a042c6e30c7b954d9ade9611b6da9ad2355`.
+Exact main CI [42303923953](https://github.com/karanagg166/search-sphere/actions/runs/42303923953)
+passed. Release [42317818894](https://github.com/karanagg166/search-sphere/actions/runs/42317818894)
+passed production migrations through 021, effective-grant/RLS/private-bucket checks,
+signed synthetic account setup, and pinned deployment `dep-dbn6v2ec6qcc73crbe7g`.
+The serving health revision was independently verified as the full SHA above.
+
+The authenticated live journey measured 135.3 MiB initial memory, uploaded the public
+synthetic PDF, observed indexed status with two chunks, retrieved its unique marker
+and verified hosted reranking. This repairs the originally observed uploaded stall.
+The journey failed before grounded-answer/SSE proof; cleanup failure masked its
+original exception. Required jobs correctly reported failure. No rollout completion
+is claimed. The signed fixture receipt was retained in the workflow artifact.
+
+Scoped checks of that owned synthetic fixture found a cleanup receipt with
+`object_cleanup_unverified`. Supabase's deleted-object endpoint returned HEAD HTTP
+400, and a bounded range GET returned HTTP 400 with JSON `error=not_found` and
+`statusCode=404`. The storage verifier only recognized HTTP 404, so it could not
+confirm absence. A repair accepts this specific structured legacy missing-object
+response after the authenticated bounded range GET; auth errors, 503s and unrelated
+400s remain errors. Smoke cleanup now preserves and immediately reports a prior
+journey failure instead of replacing it. Storage and smoke regressions passed (65
+cases together). Grounded answers, SSE and verified cleanup remain open pending the
+repair and rerun, alongside the two consumer journeys and remaining feature phases.
+
+ExamArena's exact live revision is `d96fe305a871d8560e89a0bd320cfcf742f51cd0`;
+deployment-contract run [42303541326](https://github.com/karanagg166/ExamArena/actions/runs/42303541326)
+passed. Quick-Clinic remains at `4ba7f6f61dfa6ded1b3738dff12b762bff6298cc`.
+Neither result is an authenticated consumer journey. Vercel management still returns
+403 / `forbidden` / `Not authorized`; free-plan verification and management setup
+through that credential remain open. Anonymous HEAD-only probes of users, service
+clients and medical observations continue to return 404 without record contents.
