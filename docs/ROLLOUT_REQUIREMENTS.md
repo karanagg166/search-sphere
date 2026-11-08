@@ -1542,3 +1542,48 @@ R7B, it was not selected. The deployed model remains `command-a-03-2025`; no pai
 feature, new provider or sensitive-data exception was enabled. Existing production
 Trial restrictions, complete document replacement, broader labeled quality/P95
 evaluation and forced restart/provider-failure release gates remain open.
+
+### First medical live result and native receipt follow-up
+
+Quick-Clinic exact main CI
+[42467599857](https://github.com/karanagg166/Quick-Clinic/actions/runs/42467599857)
+passed, and redeploy `dpl_FmfyHn2ehjDq8PSZdqc5i9NYdNxW` serves
+`9e24d3e5813df63d644ec50805e4256b6649a6ed` with the production-only scoped key.
+The protected medical journey
+[42468180296](https://github.com/karanagg166/Quick-Clinic/actions/runs/42468180296)
+passed trusted CI/revision admission, both fresh PDF uploads/indexes, unique-marker
+retrieval, patient isolation and the legacy grounded/page-cited answer. It failed
+during conversation JSON/SSE; safe provider telemetry recorded a bounded chat
+timeout at 26,241 ms. The controller then rejected valid HTTP-200 cleanup receipts
+because it expected upstream snake_case fields instead of Quick-Clinic's camelCase
+contract. The run remains failed.
+
+[#177](https://github.com/karanagg166/Quick-Clinic/pull/177) corrects only the release
+checker/test peer contract. The corrected peer reproduced nineteen failing cases
+before the checker fix. Fifty focused controller/route/client cases now pass with
+TypeScript/lint, including strict vector/object/derived-object/identity/503 checks.
+An independent authenticated check verified the failed run's signed three-entry
+journal against deployed endpoints: both document receipts have zero vectors,
+zero derived objects and deleted originals, and the conversation is inaccessible.
+No source/message contents or credentials were reported. Original failed-run
+receipts remain intact for trusted restoration and another full journey.
+
+Search Sphere [#78](https://github.com/karanagg166/search-sphere/pull/78) merged as
+`e86f3e90bfc197187d5573b224511e1a651493b1` after
+[42468399435](https://github.com/karanagg166/search-sphere/actions/runs/42468399435)
+passed. It signs the entire native receipt manifest, including IDs and cleanup
+states, and enforces private regular bounded files and atomic writes. Ninety-six
+receipt/smoke/release checks passed locally. The next small replay repair
+[#79](https://github.com/karanagg166/search-sphere/pull/79) has 103 focused cases
+passing: signed pending IDs survive catalog disappearance, catalog discovery saves
+before DELETE, and metadata/receipt 503 cannot become cleanup success. Trusted
+artifact restoration onto fresh native runners and legacy reconciliation are still
+open. These tooling changes do not require changing the serving API revision.
+
+At 09:51 UTC the current app monthly reservation count was 351/900, leaving 549
+under the application cap, excluding any external key use. No provider deadline,
+model, paid feature or sensitive-data approval was changed. The owner-requested
+OrbStack cleanup removed nine stopped test containers and build/image/package
+caches; host free space rose from about 20 GiB to 33 GiB. Four active containers
+and all database volumes were preserved; PostgreSQL and focused tests remained
+operational afterward.
