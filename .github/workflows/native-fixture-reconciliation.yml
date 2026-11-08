@@ -36,10 +36,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          enable-cache: false
       - name: Select private baseline output
         run: printf 'NATIVE_BASELINE_PATH=%s/native-reconciliation/baseline.json\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Install the pinned audit runtime
-        run: pip install -r apps/api/requirements-production.txt
+        run: uv pip install --system -r apps/api/requirements-production.txt
       - name: Verify exact CI and read-only synthetic scope before signing reconciliation
         run: python scripts/reconcile_native_fixtures.py
       - name: Preserve the signed content-free operator proof
