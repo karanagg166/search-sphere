@@ -245,7 +245,7 @@ async def test_timeout_and_network_failures_remain_distinct_from_evidence_absenc
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("purpose,http_deadline,total_deadline", [("chat", 25, 30), ("embed", 15, 20)])
+@pytest.mark.parametrize("purpose,http_deadline,total_deadline", [("chat", 30, 35), ("embed", 15, 20)])
 async def test_generation_has_a_separate_bounded_deadline_and_keeps_both_authorization_checks(
     monkeypatch, purpose, http_deadline, total_deadline,
 ):
