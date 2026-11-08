@@ -11,6 +11,8 @@ import hmac
 import json
 import os
 import re
+import stat
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -48,34 +50,80 @@ def verified_conversation_title(title: str, user_id: str) -> bool:
 
 
 class FixtureManager:
-    """Atomic local receipts. Corruption or write failure must fail the gate."""
+    """Private atomic receipts; the signature binds IDs as well as fixture names."""
+
+    MAX_BYTES = 262144
+    MAX_ENTRIES = 128
 
     def __init__(self, manifest_path: Path, run_id: str) -> None:
         self.manifest_path = manifest_path
         self.run_id = run_id
 
     def load_manifest(self) -> dict[str, Any]:
-        if not self.manifest_path.exists():
-            return {"manifest_version": 1, "runs": {}}
         try:
-            data = json.loads(self.manifest_path.read_text(encoding="utf-8"))
-            if data.get("manifest_version") != 1 or not isinstance(data.get("runs"), dict):
-                raise ValueError("invalid manifest")
+            fd = os.open(self.manifest_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except FileNotFoundError:
+            return {"manifest_version": 2, "runs": {}}
+        except OSError:
+            raise AssertionError("Fixture provenance: manifest cannot be read or validated") from None
+        try:
+            with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                info = os.fstat(handle.fileno())
+                if (not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077
+                    or info.st_uid != os.geteuid() or info.st_size > self.MAX_BYTES):
+                    raise ValueError("unsafe manifest")
+                data = json.loads(handle.read(self.MAX_BYTES + 1))
+            self._validate(data)
+            signature = data.pop("signature", None)
+            if not isinstance(signature, str) or not hmac.compare_digest(signature, self._signature(data)):
+                raise ValueError("invalid manifest signature")
             return data
-        except (OSError, ValueError, AttributeError) as exc:
-            raise AssertionError("Fixture provenance: manifest cannot be read or validated") from exc
+        except (OSError, ValueError, TypeError, AttributeError):
+            raise AssertionError("Fixture provenance: manifest cannot be read or validated") from None
+
+    @staticmethod
+    def _signature(data: dict[str, Any]) -> str:
+        body = json.dumps(data, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+        return hmac.new(signing_key(), b"standalone-receipts-v2\n" + body, hashlib.sha256).hexdigest()
+
+    def _validate(self, data: dict[str, Any]) -> None:
+        if not isinstance(data, dict) or data.get("manifest_version") != 2 or not isinstance(data.get("runs"), dict):
+            raise ValueError("invalid manifest")
+        count = 0
+        for entry in data["runs"].values():
+            if not isinstance(entry, dict):
+                raise TypeError("invalid run")
+            for kind in ("documents", "conversations"):
+                rows = entry.get(kind, [])
+                if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+                    raise ValueError("invalid entries")
+                count += len(rows)
+        if len(data["runs"]) > self.MAX_ENTRIES or count > self.MAX_ENTRIES:
+            raise ValueError("manifest capacity requires reconciliation")
 
     def save_manifest(self, data: dict[str, Any]) -> None:
-        temporary = self.manifest_path.with_suffix(".tmp")
+        temporary = None
         try:
-            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            self._validate(data)
+            # Re-sign a copy so callers cannot reuse a stale signature after mutation.
+            body = {key: value for key, value in data.items() if key != "signature"}
+            payload = json.dumps({**body, "signature": self._signature(body)}, allow_nan=False).encode()
+            if len(payload) > self.MAX_BYTES:
+                raise ValueError("manifest too large")
+            if self.manifest_path.is_symlink():
+                raise ValueError("unsafe manifest target")
+            fd, name = tempfile.mkstemp(prefix=self.manifest_path.name + ".", dir=self.manifest_path.parent)
+            temporary = Path(name)
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(data, handle, indent=2)
+                handle.write(payload.decode())
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, self.manifest_path)
-        except OSError as exc:
-            raise AssertionError("Fixture provenance: manifest could not be persisted") from exc
+        except (OSError, ValueError, TypeError):
+            raise AssertionError("Fixture provenance: manifest could not be persisted") from None
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     def register_fixture(self, doc_id: str, filename: str, marker: str, user_id: str = "", email: str = "") -> None:
         del email  # Credentials and account email are never written to artifacts.
