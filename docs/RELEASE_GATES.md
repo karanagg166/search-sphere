@@ -72,3 +72,19 @@ require fresh verification even if an older receipt was complete. An initial
 private signed manifest is persisted before health checks. Trusted GitHub artifact
 restoration onto a fresh runner and legacy format reconciliation remain separate
 open requirements.
+
+Legacy recovery preparation uses `services/release_scope_audit.py`. It verifies
+the dedicated synthetic owner's identity using the protected ownership key and
+performs only aggregate SELECTs. It refuses outstanding native documents, threads,
+vectors, active jobs, pending object/crop cleanup, structured evidence or published
+versions. The private Storage catalog must contain no original under the exact
+owner prefix and no original/crop belonging to its retained tombstones; orphan
+uploads are included. Unrelated users and objects are neither read nor changed.
+Only the dedicated owner ID and zero counts can be returned. The caller must hold
+a bounded repeatable-read, read-only transaction and serialize fixture journeys.
+
+Twelve real PostgreSQL/pgvector cases verify scope isolation, SELECT-only execution,
+changed/revoked ownership, outstanding work, public buckets and orphan originals or
+crops. This is an audit primitive: a trusted operator CLI/workflow, signed legacy
+reconciliation baseline and fresh-runner restoration still need implementation and
+live execution. It does not itself authorize skipping any missing receipt.
