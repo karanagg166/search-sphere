@@ -128,6 +128,14 @@ class FixtureManager:
     def register_fixture(self, doc_id: str, filename: str, marker: str, user_id: str = "", email: str = "") -> None:
         del email  # Credentials and account email are never written to artifacts.
         data = self.load_manifest()
+        for prior in data["runs"].values():
+            for row in prior.get("documents", []):
+                if row.get("doc_id") == doc_id:
+                    if prior.get("user_id") != user_id or row.get("filename") != filename:
+                        raise AssertionError("Fixture provenance: conflicting document receipt")
+                    row["status"] = "pending_cleanup"
+                    self.save_manifest(data)
+                    return
         entry = data["runs"].setdefault(self.run_id, {
             "run_id": self.run_id, "user_id": user_id, "created_at": time.time(), "documents": [],
         })
@@ -139,6 +147,14 @@ class FixtureManager:
 
     def register_conversation(self, conversation_id: str, title: str, user_id: str) -> None:
         data = self.load_manifest()
+        for prior in data["runs"].values():
+            for row in prior.get("conversations", []):
+                if row.get("conversation_id") == conversation_id:
+                    if prior.get("user_id") != user_id or row.get("title") != title:
+                        raise AssertionError("Fixture provenance: conflicting conversation receipt")
+                    row["status"] = "pending_cleanup"
+                    self.save_manifest(data)
+                    return
         entry = data["runs"].setdefault(self.run_id, {
             "run_id": self.run_id, "user_id": user_id, "created_at": time.time(), "documents": [],
         })
@@ -169,4 +185,11 @@ class FixtureManager:
             {**doc, "user_id": entry.get("user_id")}
             for entry in self.load_manifest()["runs"].values()
             for doc in entry.get("documents", []) if doc.get("status") != "cleaned_up"
+        ]
+
+    def get_uncleaned_conversations(self) -> list[dict[str, Any]]:
+        return [
+            {**row, "user_id": entry.get("user_id")}
+            for entry in self.load_manifest()["runs"].values()
+            for row in entry.get("conversations", []) if row.get("status") != "cleaned_up"
         ]

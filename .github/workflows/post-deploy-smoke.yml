@@ -63,5 +63,5 @@ jobs:
           name: standalone-fixture-receipts-${{ github.run_id }}
           path: .ci_smoke_manifest.json
           include-hidden-files: true
-          if-no-files-found: ignore
-          retention-days: 7
+          if-no-files-found: error
+          retention-days: 30

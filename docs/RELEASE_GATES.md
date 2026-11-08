@@ -60,3 +60,15 @@ reverification of restored pending receipts remain follow-up work. This integrit
 primitive alone does not establish recovery across fresh GitHub runners. Existing
 signed filename/title catalog discovery still handles a lost upload response when
 the source remains listed.
+
+The smoke controller now replays signed pending document/conversation IDs after
+authenticating their recorded owner, before catalog discovery or fresh uploads.
+A missing catalog row leads to scoped physical cleanup verification, never an
+assumed success. A live row must still match the signed identity/name/owner.
+Unavailable metadata or receipts, including 503, fail the gate and preserve pending
+provenance. Catalog discovery itself persists receipts before deletion, closing the
+interruption window between revocation and physical cleanup. Rediscovered sources
+require fresh verification even if an older receipt was complete. An initial
+private signed manifest is persisted before health checks. Trusted GitHub artifact
+restoration onto a fresh runner and legacy format reconciliation remain separate
+open requirements.
