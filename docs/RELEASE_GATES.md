@@ -114,3 +114,41 @@ closed; future queued run IDs remain outside the cutoff and the shared smoke loc
 holds their mutations until the audit finishes. The serving revision is rechecked
 before persisting the proof. The supported status filters are documented in
 [GitHub's workflow-run API](https://docs.github.com/en/rest/actions/workflow-runs).
+# Native runner receipt restoration
+
+Both native post-deployment paths restore signed cleanup receipts before any new
+upload. They require a protected main dispatch, exact successful main CI for the
+workflow source and serving API, and a signed read-only operator baseline. The
+baseline's workflow identity, source revision, run ID, timestamp, fixed synthetic
+owner/project and zero SQL/Storage counts must agree. The successful operator run
+[42472824150](https://github.com/karanagg166/search-sphere/actions/runs/42472824150)
+provides the first historical reconciliation proof; it does not approve ordinary
+accounts or sensitive documents.
+
+Complete bounded main history is inspected for both native workflows. A run with
+an old ID that was rerun after the baseline still requires its receipts. Active
+predecessors block new mutation. Missing receipts are acceptable only when the
+exact upload step is confirmed skipped; expired, unsigned, conflicting or
+oversized receipts require a new read-only reconciliation. A rerun whose run ID
+predates the baseline must be replaced with a fresh dispatch.
+
+Artifacts are downloaded through authenticated GitHub CLI redirects, with a
+45-second download deadline, 512 KiB archive bound and 256 KiB JSON bound. A
+single regular expected entry is read in memory; traversal, links, extra entries,
+duplicate JSON fields and malformed signatures are rejected. The private atomic
+manifest retains every signed pending document/thread, up to 128 resources.
+Pending state wins over later copied completion rows. The authenticated smoke
+then independently rechecks physical cleanup, including IDs no longer listed.
+
+History must remain below 1,000 runs per workflow, and artifacts are retained for
+30 days. Bounds fail closed. To establish a fresh baseline after an expired or
+legacy receipt, wait for prior native attempts to finish, then dispatch
+`native-fixture-reconciliation.yml` on main with the exact serving SHA. Its
+read-only dedicated-scope audit must pass before a new native smoke dispatch.
+An audit that finds leftovers remains open for scoped ownership reconciliation;
+it must never be bypassed by deleting journal entries.
+
+Local validation covers 177 transport, provenance, admission, historical rerun,
+receipt replay and smoke cases. The new restoration path still requires its own
+successful trusted live workflow; local success does not mark the rollout complete.
+
