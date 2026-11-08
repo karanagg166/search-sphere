@@ -149,8 +149,13 @@ An audit that finds leftovers remains open for scoped ownership reconciliation;
 it must never be bypassed by deleting journal entries.
 
 Local validation covers 177 transport, provenance, admission, historical rerun,
-receipt replay and smoke cases. The new restoration path still requires its own
-successful trusted live workflow; local success does not mark the rollout complete.
+receipt replay and smoke cases. Trusted live run
+[42492212378](https://github.com/karanagg166/search-sphere/actions/runs/42492212378)
+verified signed baseline/artifact restoration and the complete fresh-PDF journey
+on API 9b3c137. Pinned release
+[42493846494](https://github.com/karanagg166/search-sphere/actions/runs/42493846494)
+then passed restoration and the complete journey on b205832. These checks do not
+replace the remaining feature and budget/production-eligibility requirements.
 
 ## Hosted chat deadline margin
 
@@ -165,3 +170,17 @@ quota/inference/revalidation budget. Connect remains bounded to three seconds;
 embedding/rerank deadlines, model versions, eligibility, quota caps and no-retry
 behavior remain unchanged. Slow or unavailable providers still fail explicitly;
 this adjustment requires exact CI, deployment and fresh live acceptance.
+
+## Current three-app live checkpoint
+
+All three positive authenticated journeys pass against Search Sphere
+`b205832aa49c983c2bf95c692a0e29b35df697f9`:
+
+- Native release [42493846494](https://github.com/karanagg166/search-sphere/actions/runs/42493846494): fresh PDF, index, unique marker, cited answer, conversation JSON/SSE, persisted turns and physical cleanup.
+- Quick-Clinic [42494564776](https://github.com/karanagg166/Quick-Clinic/actions/runs/42494564776) on `577d53368ffe7ddd6877db4eff8c605eecad4183`: two fresh PDFs, patient isolation, cited legacy/JSON/SSE answers, saved turns and cleanup.
+- ExamArena [42495385199](https://github.com/karanagg166/ExamArena/actions/runs/42495385199) on `c95aeb63420259da4462cd0f19b62164f2d13dd0`: three fresh PDFs, two schools/three collections, school/class isolation, cited answers and cleanup. Its answer API is JSON only.
+
+The earlier timeouts remain failed runs. The new 30-second chat read/35-second
+total budget changes no model, provider eligibility, quota cap or evidence check.
+Current successful positive journeys do not by themselves prove forced in-flight
+production restart recovery or all controlled provider-failure scenarios.
