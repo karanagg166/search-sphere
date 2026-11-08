@@ -201,12 +201,11 @@ class DocumentService:
         return queued
 
     async def delete_user_document(self, document_id: str, user_id: str) -> None:
-        from sqlalchemy.ext.asyncio import async_sessionmaker
-
-        from src.services.cleanup_worker import DocumentCleanupWorker
         from src.services.document_deletion import delete_registered_document
+        from src.services.ingestion_worker import ingestion_worker
 
-        deletion = await delete_registered_document(self.db, "standalone", document_id, "search_sphere", user_id)
+        await delete_registered_document(self.db, "standalone", document_id, "search_sphere", user_id)
         await self.db.commit()
-        worker = DocumentCleanupWorker(async_sessionmaker(self.db.bind, expire_on_commit=False), lambda: self.storage)
-        await worker.run_once(deletion.id)
+        # The durable worker owns object I/O; DELETE acknowledges committed access
+        # revocation. The scoped cleanup receipt separately proves physical absence.
+        ingestion_worker.notify_new_job()

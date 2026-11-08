@@ -313,23 +313,18 @@ class GenericDocumentService:
         vector_store: QdrantVectorStore | None = None,
     ) -> bool:
         """Commit immediate evidence revocation and retain durable cleanup state."""
-        from sqlalchemy.ext.asyncio import async_sessionmaker
-
         from src.repositories.document_deletion import find_deletion
-        from src.services.cleanup_worker import DocumentCleanupWorker
         from src.services.document_deletion import delete_registered_document
+        from src.services.ingestion_worker import ingestion_worker
 
         prior = await find_deletion(self.db, "external", context.client_id, context.tenant_id, doc_id_or_external_id, context=context)
-        if prior:
-            deletion = prior
-        else:
+        if prior is None:
             doc = await self.get_document(context, doc_id_or_external_id)
-            deletion = await delete_registered_document(
+            await delete_registered_document(
                 self.db, "external", doc.external_document_id, context.client_id, context.tenant_id, context=context,
             )
         await self.db.commit()
-        worker = DocumentCleanupWorker(async_sessionmaker(self.db.bind, expire_on_commit=False), lambda: self.storage)
-        await worker.run_once(deletion.id)
+        ingestion_worker.notify_new_job()
         return True
 
     async def get_signed_url(

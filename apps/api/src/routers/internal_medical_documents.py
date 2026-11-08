@@ -274,7 +274,7 @@ async def get_medical_document_signed_url(
     response_model=DeleteResponse,
     status_code=status.HTTP_200_OK,
     summary="Delete medical document object from private storage",
-    description="Removes private medical document bytes from Supabase storage.",
+    description="Revokes access and queues private medical document cleanup. Poll the cleanup receipt to verify physical deletion.",
 )
 async def delete_medical_document(
     storage_path: str | None = Query(None, alias="storagePath", description="Storage path as query param"),
@@ -304,12 +304,10 @@ async def delete_medical_document(
             detail="Path traversal is not permitted.",
         )
 
-    from sqlalchemy.ext.asyncio import async_sessionmaker
-
-    from src.services.cleanup_worker import DocumentCleanupWorker
     from src.services.document_deletion import delete_medical_object
+    from src.services.ingestion_worker import ingestion_worker
 
-    deletion = await delete_medical_object(db, _auth, target_path)
+    await delete_medical_object(db, _auth, target_path)
     await db.commit()
-    await DocumentCleanupWorker(async_sessionmaker(db.bind, expire_on_commit=False), lambda: storage).run_once(deletion.id)
+    ingestion_worker.notify_new_job()
     return DeleteResponse(success=True, message="Document access revoked; poll cleanup to verify physical deletion.")

@@ -114,7 +114,7 @@ async def get_document_access(
     "/{document_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete document",
-    description="Delete a document from both Object Storage and PostgreSQL.",
+    description="Revoke document access atomically and queue private object cleanup. Poll the cleanup receipt to verify physical deletion.",
 )
 async def delete_document(
     document_id: str,

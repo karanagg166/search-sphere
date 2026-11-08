@@ -12,7 +12,10 @@ metadata/content in one SQL transaction. Publication takes the same job lock fir
 so an old ingestion attempt cannot republish deleted evidence. A database failure
 rolls back revocation and vector deletion together.
 
-The API then attempts private object deletion with a bounded timeout. The worker
+The API returns after this durable SQL commit and wakes the existing worker; it
+does not wait for object storage or start a disposable request-local cleanup task.
+All native, versioned and medical delete paths use this behavior, including replay.
+The worker attempts private object deletion with a bounded timeout. It
 checks object absence explicitly after deletion. Storage errors, including 401,
 403, 429, and 503, never mean absence. Failures retain a pending tombstone and retry
 with exponential delay capped at one hour. Each attempt has a 90-second lease and
@@ -49,3 +52,7 @@ publication, vector/metadata rollback, duplicate client/document IDs across tena
 wrong-subject receipt access, delayed registration after deletion, concurrent cleanup
 claims, storage outage, and expired-process recovery. API regressions cover all three
 route families; HTTP storage tests cover HEAD/range absence and failure behavior.
+Four additional PostgreSQL regressions reproduce a blocked object store on native,
+generic, medical-object and medical-index deletes: SQL revocation returns promptly,
+the object remains private and pending, then a fresh worker verifies physical
+cleanup. A replay does not wait for storage.

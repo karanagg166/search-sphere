@@ -1434,3 +1434,41 @@ requires a provider-approved $0 arrangement and relevant data approval. No paid
 key/feature was activated, no uncertain record was transmitted and no new provider
 was added. Version replacement, broader evaluation, forced recovery/failure gates
 and all three current-revision complete journeys still remain open.
+
+## Deletion response repair and consumer release progress
+
+ExamArena #41/#42 merged and serving revision
+`810f959a0693c281f68a0ddd30d42d5a73ea8fef` passed exact main CI
+[42420120895](https://github.com/karanagg166/ExamArena/actions/runs/42420120895)
+and deployment contracts
+[42420950128](https://github.com/karanagg166/ExamArena/actions/runs/42420950128).
+The fresh authenticated journey
+[42420993239](https://github.com/karanagg166/ExamArena/actions/runs/42420993239)
+passed three new PDF uploads/indexes, marker retrieval, school/class isolation and
+grounded answers with supporting page citations. Its final cleanup failed: each
+DELETE exceeded the release driver's 15-second deadline. This failed run remains
+failed; its signed fixture receipts remain recoverable by the trusted workflow.
+
+Investigation reproduced the underlying request-path problem in all four Search
+Sphere deletion surfaces. Access revocation committed to PostgreSQL, but requests
+then awaited a private object cleanup attempt with a 45-second deadline. The repair
+returns after the durable revocation commit and wakes the existing worker. It
+preserves response schemas, scope checks, publication fences, physical receipts,
+leases and restart retries; no client timeout or success assertion was relaxed.
+Four regressions first failed on the old code, then passed with a blocked store.
+Thirteen PostgreSQL cleanup/derived-evidence checks and seventeen medical HTTP
+checks pass. Physical completion still requires a scoped zero-vector/absent-object
+receipt. This repair still requires deployment and another full live gate.
+
+Quick-Clinic [#168](https://github.com/karanagg166/Quick-Clinic/pull/168),
+[#169](https://github.com/karanagg166/Quick-Clinic/pull/169),
+[#170](https://github.com/karanagg166/Quick-Clinic/pull/170) and
+[#171](https://github.com/karanagg166/Quick-Clinic/pull/171) merged after CI.
+The additive private-doctor flag migration was applied before selecting code was
+deployed: Boolean/non-null/default-false and exact Prisma-history checksum were
+verified atomically. Existing doctors were not flagged. The signed bootstrap engine
+and private CLI use owned synthetic accounts only, read-only planning, atomic apply,
+patient-A-only authorization and non-overwriting credential output. Twenty-four
+engine/identity and eleven CLI/private-file checks passed against synthetic local
+fixtures. Complete deployed medical upload/answer/SSE/cleanup acceptance remains
+open; deployment-contract runs are not counted as that journey.

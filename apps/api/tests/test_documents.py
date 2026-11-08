@@ -3,7 +3,10 @@ import uuid
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from src.db import AsyncSessionLocal
 from src.main import app
+from src.repositories.document_deletion import find_deletion
+from src.services.cleanup_worker import DocumentCleanupWorker
 from src.storage.object_storage import LocalStorage, get_object_storage
 
 
@@ -117,11 +120,21 @@ async def test_pdf_upload_and_lifecycle(mock_storage):
             )
             assert del_resp.status_code == 204
 
-            # Verify removed from database and storage
+            # Revocation commits before the durable worker does object I/O.
             verify_del = await client.get(
                 f"/documents/{document_id}", headers=auth_headers
             )
             assert verify_del.status_code == 404
+            receipt = await client.get(f"/documents/{document_id}/cleanup", headers=auth_headers)
+            assert receipt.status_code == 200
+            assert receipt.json()["status"] == "pending" and receipt.json()["vectors_remaining"] == 0
+            assert await mock_storage.exists(doc_data["storage_key"]) is True
+            async with AsyncSessionLocal() as db:
+                row = await find_deletion(db, "standalone", "search_sphere", doc_data["storage_key"].split("/")[1], document_id)
+            assert await DocumentCleanupWorker(AsyncSessionLocal, lambda: mock_storage).run_once(row.id)
+            receipt = await client.get(f"/documents/{document_id}/cleanup", headers=auth_headers)
+            assert receipt.status_code == 200 and receipt.json()["status"] == "complete"
+            assert receipt.json()["object_deleted"] is True
             assert await mock_storage.exists(doc_data["storage_key"]) is False
     finally:
         app.dependency_overrides.clear()
