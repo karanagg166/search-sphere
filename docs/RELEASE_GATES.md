@@ -88,3 +88,21 @@ changed/revoked ownership, outstanding work, public buckets and orphan originals
 crops. This is an audit primitive: a trusted operator CLI/workflow, signed legacy
 reconciliation baseline and fresh-runner restoration still need implementation and
 live execution. It does not itself authorize skipping any missing receipt.
+
+The separate `native-fixture-reconciliation.yml` operator workflow runs only as a
+main dispatch in the existing protected release environment, sharing the native
+smoke concurrency group. It requires successful exact main CI for its tooling and
+the serving revision, verifies live health/readiness, and validates the approved
+Supabase SQL target. The database transaction is repeatable-read and read-only,
+with 15-second statement and 5-second lock deadlines. There are no model calls,
+API mutations, seed operations, migrations or cleanup writes.
+
+Only a successful empty-scope audit can produce `baseline.json` in a private
+exclusive runner path. Its signature binds the synthetic owner, project, database
+target fingerprint, tooling/API SHAs, run cutoff, timestamp and all eight zero
+counts. The required artifact is retained for thirty days. Unknown fields, altered
+identity, changed signatures, partial/nonzero/Boolean counts and wrong keys fail
+verification. Twenty-two offline admission/proof cases and the existing receipt
+group pass (125 focused cases total); real PostgreSQL audit coverage is separate.
+No baseline has been executed or installed by adding this workflow. Trusted
+artifact origin validation and fresh-runner restore remain the next integration.
