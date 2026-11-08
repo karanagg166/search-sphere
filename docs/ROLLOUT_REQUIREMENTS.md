@@ -1472,3 +1472,118 @@ patient-A-only authorization and non-overwriting credential output. Twenty-four
 engine/identity and eleven CLI/private-file checks passed against synthetic local
 fixtures. Complete deployed medical upload/answer/SSE/cleanup acceptance remains
 open; deployment-contract runs are not counted as that journey.
+
+## Current native/course acceptance and private medical release preparation
+
+Search Sphere [#76](https://github.com/karanagg166/search-sphere/pull/76) merged
+as `9b3c1378b4e5a2609c876b7e8d31285d8e2d3552` after required CI
+[42461843044](https://github.com/karanagg166/search-sphere/actions/runs/42461843044).
+Exact main CI [42462072961](https://github.com/karanagg166/search-sphere/actions/runs/42462072961)
+passed. Pinned release [42462273905](https://github.com/karanagg166/search-sphere/actions/runs/42462273905)
+passed admission, migrations, private-surface verification, Render deployment
+`dep-dbo30f7f3r2c73a1v3f0` and the complete fresh-PDF native journey. Upload,
+indexing, unique-marker retrieval, grounded/page-cited answers, persistent
+conversation JSON/SSE completion and saved turns all passed, followed by physical
+vector/private-object cleanup. Scope-only gate
+[42462882126](https://github.com/karanagg166/search-sphere/actions/runs/42462882126)
+also passed. Public health independently verified the exact serving revision.
+
+ExamArena #41/#42 serve `810f959a0693c281f68a0ddd30d42d5a73ea8fef` in Vercel
+`dpl_GfHW97zDMcvGGaT5rtg3y6DrL2hW`. The first current-backend run
+[42462879642](https://github.com/karanagg166/ExamArena/actions/runs/42462879642)
+failed its answer with 503; safe Render telemetry recorded chat/provider timeout
+at 26,318 ms. Cleanup, including earlier interrupted receipts, passed. The next
+fresh complete run [42465220926](https://github.com/karanagg166/ExamArena/actions/runs/42465220926)
+passed all three new PDFs, indexing, unique markers, school/class isolation,
+expected grounded answers/page citations and verified physical cleanup. This
+consumer API supports JSON answers only. No deadline, model, assertion or provider
+retry was changed between these two evaluations. The earlier failed run remains
+failed; intermittent provider availability is not a measured reliability claim.
+
+Quick-Clinic [#172](https://github.com/karanagg166/Quick-Clinic/pull/172) preserves
+safe upstream status/error codes and bounds the entire query response, including
+body reads. [#173](https://github.com/karanagg166/Quick-Clinic/pull/173) adds fixed
+origins, bounded HTTP and signed private fixture journals;
+[#174](https://github.com/karanagg166/Quick-Clinic/pull/174) requires exact owned
+credentials and grounded JSON/SSE evidence;
+[#175](https://github.com/karanagg166/Quick-Clinic/pull/175) adds the full medical
+journey and recovery controller; and
+[#176](https://github.com/karanagg166/Quick-Clinic/pull/176) adds the protected
+main-only workflow, exact successful main-CI admission and signed artifact restore.
+All merged after CI. Focused transport/legacy cases (78), chat/deletion cases (50),
+HTTP/journal cases (26), configuration/evidence cases (32), controller cases (22)
+and admission/recovery cases (17) passed with TypeScript/lint checks. These counts
+describe separate focused runs, not a disjoint total or full live acceptance.
+
+The production bootstrap created only the eight owned synthetic identity/grant
+records after reviewed target-bound planning. All three logins and exact roles
+passed; the private fixture doctor is absent from the public profile, and its
+patient-B search/answer requests return 403. A fresh reuse plan confirmed the
+owned records, and a metadata-only query confirmed zero documents in the two
+fixture patients before provider eligibility was configured. The registered
+`quick_clinic` client now has only documents read/write/delete, search and answer
+scopes in `quick_clinic_default`. A new production-only Vercel Secret uses that
+key; the earlier preview/development configuration is preserved. No key or hash
+was included in reports or artifacts.
+
+A signed, 15-minute target-bound operator plan applied exactly two synthetic-only
+provider policies, each bound to an owned fixture patient and its deterministic
+collection. They expire on 2026-12-08 at 09:32:40 UTC. Existing conflicting,
+disabled or revoked policies cannot be overwritten by this procedure. This grants
+no real medical-data approval. The ordinary account whose content was classified
+as uncertain remains provider-blocked. Quick-Clinic's exact main CI, redeployment
+with the new key and full authenticated medical journey remain pending.
+
+The app budget snapshot at 08:58 UTC was 297 reserved calls under the hard 900
+monthly cap; a later snapshot is required after further evaluation. A separate
+`command-r-08-2024` synthetic candidate suite had a provider timeout in its first
+run and failed the required interns evidence-selection assertion on repeat. Like
+R7B, it was not selected. The deployed model remains `command-a-03-2025`; no paid
+feature, new provider or sensitive-data exception was enabled. Existing production
+Trial restrictions, complete document replacement, broader labeled quality/P95
+evaluation and forced restart/provider-failure release gates remain open.
+
+### First medical live result and native receipt follow-up
+
+Quick-Clinic exact main CI
+[42467599857](https://github.com/karanagg166/Quick-Clinic/actions/runs/42467599857)
+passed, and redeploy `dpl_FmfyHn2ehjDq8PSZdqc5i9NYdNxW` serves
+`9e24d3e5813df63d644ec50805e4256b6649a6ed` with the production-only scoped key.
+The protected medical journey
+[42468180296](https://github.com/karanagg166/Quick-Clinic/actions/runs/42468180296)
+passed trusted CI/revision admission, both fresh PDF uploads/indexes, unique-marker
+retrieval, patient isolation and the legacy grounded/page-cited answer. It failed
+during conversation JSON/SSE; safe provider telemetry recorded a bounded chat
+timeout at 26,241 ms. The controller then rejected valid HTTP-200 cleanup receipts
+because it expected upstream snake_case fields instead of Quick-Clinic's camelCase
+contract. The run remains failed.
+
+[#177](https://github.com/karanagg166/Quick-Clinic/pull/177) corrects only the release
+checker/test peer contract. The corrected peer reproduced nineteen failing cases
+before the checker fix. Fifty focused controller/route/client cases now pass with
+TypeScript/lint, including strict vector/object/derived-object/identity/503 checks.
+An independent authenticated check verified the failed run's signed three-entry
+journal against deployed endpoints: both document receipts have zero vectors,
+zero derived objects and deleted originals, and the conversation is inaccessible.
+No source/message contents or credentials were reported. Original failed-run
+receipts remain intact for trusted restoration and another full journey.
+
+Search Sphere [#78](https://github.com/karanagg166/search-sphere/pull/78) merged as
+`e86f3e90bfc197187d5573b224511e1a651493b1` after
+[42468399435](https://github.com/karanagg166/search-sphere/actions/runs/42468399435)
+passed. It signs the entire native receipt manifest, including IDs and cleanup
+states, and enforces private regular bounded files and atomic writes. Ninety-six
+receipt/smoke/release checks passed locally. The next small replay repair
+[#79](https://github.com/karanagg166/search-sphere/pull/79) has 103 focused cases
+passing: signed pending IDs survive catalog disappearance, catalog discovery saves
+before DELETE, and metadata/receipt 503 cannot become cleanup success. Trusted
+artifact restoration onto fresh native runners and legacy reconciliation are still
+open. These tooling changes do not require changing the serving API revision.
+
+At 09:51 UTC the current app monthly reservation count was 351/900, leaving 549
+under the application cap, excluding any external key use. No provider deadline,
+model, paid feature or sensitive-data approval was changed. The owner-requested
+OrbStack cleanup removed nine stopped test containers and build/image/package
+caches; host free space rose from about 20 GiB to 33 GiB. Four active containers
+and all database volumes were preserved; PostgreSQL and focused tests remained
+operational afterward.
