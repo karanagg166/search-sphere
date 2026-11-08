@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: search-sphere-production-smoke
@@ -47,6 +48,13 @@ jobs:
               assert os.environ.get(name), f'Required protected credential is missing: {name}'
           assert len(os.environ['PROD_SMOKE_FIXTURE_KEY'].encode()) >= 32, 'Fixture key is too short'
           PY
+
+      - name: Restore signed cleanup provenance from prior native runners
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          PROD_SMOKE_FIXTURE_KEY: ${{ secrets.RELEASE_SMOKE_KEY }}
+        run: python3 scripts/restore_native_fixtures.py
 
       - name: Verify upload, indexing, standalone/conversation answers, SSE, and cleanup
         env:

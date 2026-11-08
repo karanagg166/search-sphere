@@ -103,6 +103,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Require protected synthetic credentials
         env:
           PROD_SMOKE_USER_EMAIL: ${{ secrets.RELEASE_SMOKE_EMAIL }}
@@ -115,6 +116,12 @@ jobs:
               assert os.environ.get(name), 'Required protected credential missing: ' + name
           assert len(os.environ['PROD_SMOKE_FIXTURE_KEY'].encode()) >= 32
           PY
+      - name: Restore signed cleanup provenance from prior native runners
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          PROD_SMOKE_FIXTURE_KEY: ${{ secrets.RELEASE_SMOKE_KEY }}
+        run: python scripts/restore_native_fixtures.py
       - name: Upload, index, retrieve, verify standalone/conversation answers and SSE, and clean up
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
