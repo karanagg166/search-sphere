@@ -52,6 +52,7 @@ jobs:
           ruff check scripts/smoke_fixtures.py scripts/tests/test_smoke_receipts.py scripts/tests/test_smoke_receipt_replay.py
           ruff check scripts/tests/test_release_scope_audit_postgres.py
           ruff check scripts/smoke_recovery_baseline.py scripts/reconcile_native_fixtures.py scripts/tests/test_native_reconciliation.py
+          ruff check scripts/release_artifacts.py scripts/tests/test_release_artifacts.py
 
       - name: Apply Database Migrations (Alembic)
         working-directory: apps/api
@@ -125,7 +126,7 @@ jobs:
         env:
           PYTHONPATH: "."
         run: |
-          pytest scripts/tests/test_monitor.py scripts/tests/test_ci_production_smoke.py scripts/tests/test_smoke_receipts.py scripts/tests/test_smoke_receipt_replay.py scripts/tests/test_native_reconciliation.py scripts/tests/test_release_gate.py scripts/tests/test_collection_scope_smoke.py -v
+          pytest scripts/tests/test_monitor.py scripts/tests/test_ci_production_smoke.py scripts/tests/test_smoke_receipts.py scripts/tests/test_smoke_receipt_replay.py scripts/tests/test_native_reconciliation.py scripts/tests/test_release_artifacts.py scripts/tests/test_release_gate.py scripts/tests/test_collection_scope_smoke.py -v
 
   hosted-runtime-image:
     name: Hosted Runtime Image
