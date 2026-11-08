@@ -48,6 +48,7 @@ jobs:
           ruff check apps/api/src apps/api/tests apps/worker/src apps/worker/tests
           ruff check scripts/collection_scope_smoke.py scripts/tests/test_collection_scope_smoke.py
           ruff check scripts/smoke_fixtures.py scripts/tests/test_smoke_receipts.py scripts/tests/test_smoke_receipt_replay.py
+          ruff check scripts/tests/test_release_scope_audit_postgres.py
 
       - name: Apply Database Migrations (Alembic)
         working-directory: apps/api
@@ -109,7 +110,8 @@ jobs:
           scripts/tests/test_ingestion_timeouts_postgres.py
           scripts/tests/test_index_recovery_postgres.py
           scripts/tests/test_index_recovery_cli.py
-          scripts/tests/test_release_identity_postgres.py -v
+          scripts/tests/test_release_identity_postgres.py
+          scripts/tests/test_release_scope_audit_postgres.py -v
 
       - name: Verify hosted inference eligibility and bounded failures
         env:
