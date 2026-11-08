@@ -62,14 +62,16 @@ def environment(tmp_path, monkeypatch):
         "GITHUB_REF": "refs/heads/main", "GITHUB_EVENT_NAME": "workflow_dispatch",
         "GITHUB_WORKFLOW_REF": "karanagg166/search-sphere/.github/workflows/native-fixture-reconciliation.yml@refs/heads/main",
         "GITHUB_SHA": "a" * 40, "EXPECTED_SHA": "b" * 40, "GITHUB_RUN_ID": "123456",
+        "GH_TOKEN": "synthetic-read-token",
         "RUNNER_TEMP": str(tmp_path), "NATIVE_BASELINE_PATH": str(tmp_path / "native-reconciliation" / "baseline.json"),
         "DATABASE_URL": "postgresql+asyncpg://postgres:synthetic-only@db.jyzjgoniuwexvipbbpwa.supabase.co/postgres"}
     for key, value in values.items():
         monkeypatch.setenv(key, value)
     checked = []
     monkeypatch.setattr(operator, "trusted_ci", lambda sha: checked.append(sha))
-    monkeypatch.setattr(operator, "request", lambda base, path: {"git_commit": "b" * 40,
-        "status": "ready" if path == "/ready" else "ok", "database": "connected"})
+    monkeypatch.setattr(operator, "request", lambda base, path, *args:
+        {"workflow_runs": [], "total_count": 0} if "/actions/workflows/" in path else
+        {"git_commit": "b" * 40, "status": "ready" if path == "/ready" else "ok", "database": "connected"})
     return values, checked
 
 
@@ -102,6 +104,40 @@ def test_source_ci_or_serving_revision_failure_prevents_reconciliation(environme
     with pytest.raises(operator.ReleaseError, match="CI denial"):
         operator.admission()
     monkeypatch.setattr(operator, "trusted_ci", lambda _: None)
-    monkeypatch.setattr(operator, "request", lambda *_: {"git_commit": "c" * 40, "status": "ok"})
+    monkeypatch.setattr(operator, "request", lambda base, path, *args:
+        {"workflow_runs": [], "total_count": 0} if "/actions/workflows/" in path else
+        {"git_commit": "c" * 40, "status": "ok"})
     with pytest.raises(operator.ReleaseError, match="revision/readiness"):
+        operator.admission()
+
+
+@pytest.mark.parametrize("status", ["queued", "in_progress", "waiting", "pending", "requested"])
+def test_active_predecessor_cannot_mutate_after_a_signed_historical_cutoff(environment, monkeypatch, status):
+    original = operator.request
+    def request(base, path, *args):
+        if "status=" + status + "&" in path:
+            return {"total_count": 1, "workflow_runs": [{"id": 123455, "event": "workflow_dispatch",
+                "head_branch": "main", "status": status}]}
+        return original(base, path, *args)
+    monkeypatch.setattr(operator, "request", request)
+    with pytest.raises(operator.ReleaseError, match="still active"):
+        operator.admission()
+
+
+def test_future_queued_release_is_outside_the_historical_cutoff(environment, monkeypatch):
+    original = operator.request
+    def request(base, path, *args):
+        if "status=queued&" in path:
+            return {"total_count": 1, "workflow_runs": [{"id": 123457, "event": "workflow_dispatch",
+                "head_branch": "main", "status": "queued"}]}
+        return original(base, path, *args)
+    monkeypatch.setattr(operator, "request", request)
+    operator.admission()
+
+
+@pytest.mark.parametrize("metadata", [{"total_count": 100, "workflow_runs": []},
+    {"total_count": 1, "workflow_runs": []}])
+def test_truncated_or_oversized_active_history_cannot_approve_the_cutoff(environment, monkeypatch, metadata):
+    monkeypatch.setattr(operator, "request", lambda *_: metadata)
+    with pytest.raises(operator.ReleaseError, match="unavailable or exceeds"):
         operator.admission()

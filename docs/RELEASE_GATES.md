@@ -102,7 +102,15 @@ exclusive runner path. Its signature binds the synthetic owner, project, databas
 target fingerprint, tooling/API SHAs, run cutoff, timestamp and all eight zero
 counts. The required artifact is retained for thirty days. Unknown fields, altered
 identity, changed signatures, partial/nonzero/Boolean counts and wrong keys fail
-verification. Twenty-two offline admission/proof cases and the existing receipt
-group pass (125 focused cases total); real PostgreSQL audit coverage is separate.
+verification. Thirty offline admission/proof cases and the existing receipt
+group pass (133 focused cases total); real PostgreSQL audit coverage is separate.
 No baseline has been executed or installed by adding this workflow. Trusted
 artifact origin validation and fresh-runner restore remain the next integration.
+
+Before choosing a historical cutoff the operator checks every active predecessor
+state for both native release workflows. A queued/active older run could otherwise
+upload after the empty-scope snapshot. Incomplete or oversized metadata fails
+closed; future queued run IDs remain outside the cutoff and the shared smoke lock
+holds their mutations until the audit finishes. The serving revision is rechecked
+before persisting the proof. The supported status filters are documented in
+[GitHub's workflow-run API](https://docs.github.com/en/rest/actions/workflow-runs).
