@@ -1,0 +1,51 @@
+name: Native Synthetic Fixture Reconciliation
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Full main revision currently serving Search Sphere
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: search-sphere-production-smoke
+  cancel-in-progress: false
+
+jobs:
+  read-only-reconciliation:
+    if: github.ref == 'refs/heads/main' && github.repository == 'karanagg166/search-sphere'
+    environment: search-sphere-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      DATABASE_URL: ${{ secrets.RELEASE_DATABASE_URL }}
+      RELEASE_SMOKE_KEY: ${{ secrets.RELEASE_SMOKE_KEY }}
+      PYTHONPATH: apps/api
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Select private baseline output
+        run: printf 'NATIVE_BASELINE_PATH=%s/native-reconciliation/baseline.json\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Install the pinned audit runtime
+        run: pip install -r apps/api/requirements-production.txt
+      - name: Verify exact CI and read-only synthetic scope before signing reconciliation
+        run: python scripts/reconcile_native_fixtures.py
+      - name: Preserve the signed content-free operator proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-fixture-reconciliation-${{ github.run_id }}
+          path: ${{ runner.temp }}/native-reconciliation/baseline.json
+          if-no-files-found: error
+          retention-days: 30
