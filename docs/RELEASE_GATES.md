@@ -151,4 +151,3 @@ it must never be bypassed by deleting journal entries.
 Local validation covers 177 transport, provenance, admission, historical rerun,
 receipt replay and smoke cases. The new restoration path still requires its own
 successful trusted live workflow; local success does not mark the rollout complete.
-
