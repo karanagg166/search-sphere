@@ -1,11 +1,15 @@
 # Search-Sphere Python Client SDK
 
+Use [uv](https://docs.astral.sh/uv/getting-started/installation/) for Python environments and dependencies. Activate a project virtual environment before `uv pip install`; the committed requirements and constraints remain authoritative. Use `--system` only inside disposable containers or CI runners. JavaScript tooling uses pnpm.
+
 A lightweight Python client for the Search-Sphere multi-tenant RAG and semantic search microservice.
 
 ## Installation
 
 ```bash
-pip install search-sphere-client
+uv venv --python 3.12 .venv
+source .venv/bin/activate
+uv pip install search-sphere-client
 ```
 
 ## Quick Start

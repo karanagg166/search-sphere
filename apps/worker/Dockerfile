@@ -1,10 +1,12 @@
 # Build from the canonical API context: docker build -f apps/worker/Dockerfile apps/api
 FROM python:3.12-slim-bookworm
 
+COPY --from=ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 /uv /uvx /usr/local/bin/
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    UV_NO_CACHE=1 \
+    UV_PYTHON_DOWNLOADS=never \
     STORAGE_BACKEND=supabase \
     SUPABASE_STORAGE_BUCKET=documents \
     UVICORN_WORKERS=1 \
@@ -14,7 +16,7 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 COPY requirements-production.txt .
-RUN pip install --no-cache-dir -r requirements-production.txt
+RUN uv pip install --system --no-cache -r requirements-production.txt
 # Deterministic coarse tokenizer vocabulary, not inference weights. No runtime download.
 RUN python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 

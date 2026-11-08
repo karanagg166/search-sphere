@@ -57,7 +57,7 @@ test: ## Run test suite in the API container
 	docker compose exec api pytest
 
 test-worker: ## Run canonical hosted worker regressions in an ephemeral container
-	docker compose run --no-deps --rm -v "$(CURDIR):/workspace:ro" -w /workspace -e DATABASE_URL=sqlite+aiosqlite:////tmp/ss_worker_test.db -e ENVIRONMENT=test -e STORAGE_BACKEND=local -e COHERE_API_KEY=synthetic-unit-test-key -e SUPABASE_SECRET_KEY= worker sh -c 'pip install pytest pytest-asyncio aiosqlite && python scripts/run_worker_checks.py'
+	docker compose run --no-deps --rm -v "$(CURDIR):/workspace:ro" -w /workspace -e DATABASE_URL=sqlite+aiosqlite:////tmp/ss_worker_test.db -e ENVIRONMENT=test -e STORAGE_BACKEND=local -e COHERE_API_KEY=synthetic-unit-test-key -e SUPABASE_SECRET_KEY= worker sh -c 'uv pip install --system pytest pytest-asyncio aiosqlite && python scripts/run_worker_checks.py'
 
 test-all: test test-worker ## Run both API and Worker test suites
 
