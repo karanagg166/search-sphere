@@ -65,7 +65,7 @@ class CohereGateway:
             slots = _request_slots.setdefault(loop, asyncio.Semaphore(2))
             # Hosted generation can take longer than embeddings/reranking. Keep
             # admission, SQL checks and inference under one bounded deadline.
-            async with asyncio.timeout(30 if purpose == "chat" else 20), slots:
+            async with asyncio.timeout(35 if purpose == "chat" else 20), slots:
                 stage = "authorization"
                 if scope.validator is not None:
                     await scope.validator()
@@ -99,7 +99,7 @@ class CohereGateway:
         async with httpx.AsyncClient(
                 base_url="https://api.cohere.com",
                 transport=self.transport,
-                timeout=httpx.Timeout(25.0 if endpoint == "/v2/chat" else 15.0, connect=3.0),
+                timeout=httpx.Timeout(30.0 if endpoint == "/v2/chat" else 15.0, connect=3.0),
                 limits=httpx.Limits(max_connections=2),
                 follow_redirects=False,
         ) as client:

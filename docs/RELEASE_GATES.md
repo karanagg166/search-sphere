@@ -151,3 +151,17 @@ it must never be bypassed by deleting journal entries.
 Local validation covers 177 transport, provenance, admission, historical rerun,
 receipt replay and smoke cases. The new restoration path still requires its own
 successful trusted live workflow; local success does not mark the rollout complete.
+
+## Hosted chat deadline margin
+
+Quick-Clinic's protected journey
+[42491986374](https://github.com/karanagg166/Quick-Clinic/actions/runs/42491986374)
+reached the contextual stream and received explicit `503 provider_timeout`;
+its signed physical cleanup passed. Redacted hosted telemetry recorded a chat
+read timeout at 26,392 ms under the 25-second HTTP read deadline. Other completed
+chat requests in that evaluation window took up to 23,500 ms. The provider read
+deadline now allows 30 seconds within a 35-second total admission/authorization/
+quota/inference/revalidation budget. Connect remains bounded to three seconds;
+embedding/rerank deadlines, model versions, eligibility, quota caps and no-retry
+behavior remain unchanged. Slow or unavailable providers still fail explicitly;
+this adjustment requires exact CI, deployment and fresh live acceptance.
