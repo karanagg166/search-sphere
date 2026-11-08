@@ -1587,3 +1587,92 @@ OrbStack cleanup removed nine stopped test containers and build/image/package
 caches; host free space rose from about 20 GiB to 33 GiB. Four active containers
 and all database volumes were preserved; PostgreSQL and focused tests remained
 operational afterward.
+
+### 2026-11-08: uv migration, native recovery and all three positive journeys
+
+The owner expanded Python tooling to every workspace repository and explicitly
+skipped ApertureGEO publication. Six uv PRs were pushed; Search Sphere #82 and
+ExamArena #43 merged after CI. The global rule covers Codex, home/workspace
+AGENTS and Antigravity/Gemini; requirements/constraints and unrelated changes
+remain intact. [UV_MIGRATION.md](UV_MIGRATION.md) records all 16 unique repos,
+the semantic-search alias, exact checks, four review-open PRs and the intentionally
+local ApertureGEO commit. Docstribe's unchanged conflicting Vercel configuration
+remains an independent preview blocker. Automated Apply #49 is stacked on its
+existing feature branch, with no hosted workflow or installed upgrade performed.
+
+Native recovery landed through #80/#81 (read-only empty-scope audit and signed
+baseline), #83 (bounded authenticated archive reads) and #84 (fresh-runner restore).
+The operator baseline [42472824150](https://github.com/karanagg166/search-sphere/actions/runs/42472824150)
+passed all eight fixed SQL/Storage counts. The restorer validates full signed
+receipts, fixed owner/project/run/source, timestamps, complete bounded history and
+old run IDs rerun after the snapshot. Missing provenance, active predecessors,
+expired artifacts, conflicting IDs and capacity bounds fail before new uploads.
+The 177 focused cases and exact required CI pass. Trusted native run
+[42492212378](https://github.com/karanagg166/search-sphere/actions/runs/42492212378)
+then passed restoration plus a complete fresh-PDF journey against API 9b3c137.
+
+Quick-Clinic #178 isolated the failures without logging response contents.
+[42489722050](https://github.com/karanagg166/Quick-Clinic/actions/runs/42489722050)
+reached SSE and failed completion at exactly 60 seconds; Vercel independently
+reported the 60-second invocation timeout. #179 reserves 90 seconds for the two
+conversation routes around the existing 55-second upstream bound, including
+persistence and final access checks; release calls allow 95 seconds only on those
+two paths. Seventy-four focused checks, exact main CI and deployment pass.
+[42491986374](https://github.com/karanagg166/Quick-Clinic/actions/runs/42491986374)
+then reported explicit upstream `503 provider_timeout`, with all cleanup passed.
+The first uv API deployment 2b95740 also failed its native SSE gate on a provider
+timeout in [42492684058](https://github.com/karanagg166/search-sphere/actions/runs/42492684058);
+its physical zero-vector/private-object checks passed. These remain failures.
+
+Hosted telemetry recorded a chat read timeout at 26,392 ms under the 25-second
+HTTP deadline; other completed requests reached 23,500 ms. #85 allows a 30-second
+chat read within a 35-second total authorization/quota/provider/revalidation
+budget, retaining the three-second connect bound, models, approval boundary,
+quota caps and no-retry behavior. Thirty-three gateway/runtime checks and exact
+main CI [42493579449](https://github.com/karanagg166/search-sphere/actions/runs/42493579449) pass.
+
+Current serving revisions and all three positive live workflows are now:
+
+| App | Serving SHA | Full live result |
+| --- | --- | --- |
+| Search Sphere | `b205832aa49c983c2bf95c692a0e29b35df697f9` | [42493846494](https://github.com/karanagg166/search-sphere/actions/runs/42493846494) PASS; Render `dep-dbo948m417fc73fjh6a0` |
+| Quick-Clinic | `577d53368ffe7ddd6877db4eff8c605eecad4183` | [42494564776](https://github.com/karanagg166/Quick-Clinic/actions/runs/42494564776) PASS; exact main CI 42491487001; Vercel `dpl_AV937vwUbtJ9BFJfj9XCFx3kTj1u` |
+| ExamArena | `c95aeb63420259da4462cd0f19b62164f2d13dd0` | [42495385199](https://github.com/karanagg166/ExamArena/actions/runs/42495385199) PASS; exact main CI 42491826128; Vercel `dpl_36obuHsFajes8b3p7ApnJ6CKB2FZ` |
+
+Each uploaded new PDFs, observed indexing, retrieved a unique marker, verified
+expected grounded/page-cited answers and independently proved physical cleanup.
+Native and medical SSE/saved turns passed. Medical patient and course school/class
+isolation passed. Course answers remain JSON only. Native memory began at
+215.1 MiB and ended at 257.3 MiB, normal pressure, below 512 MiB; local network-
+disabled API/worker image checks peaked near 191 MiB. These are observations,
+not measured production throughput or P95 capacity.
+
+At 15:56 UTC the shared application budget reserved 584/900 Cohere calls, leaving
+316; external use of the same key is not observable here. Read-only aggregates
+show 16.94 MB PostgreSQL and 0.74 MB object storage, with known object sizes and
+a private document bucket. Supabase's [Free plan](https://supabase.com/pricing)
+includes 500 MB database and 1 GB storage. [Render Free](https://render.com/docs/free)
+shares 750 running-instance hours across the workspace and can charge build or
+bandwidth overages when payment settings allow. The connector does not expose
+billing controls, and the background Billing page requires login; zero-overage
+verification remains open pending owner login/confirmation. Vercel Hobby is
+owner-confirmed and [restricted to personal noncommercial use](https://vercel.com/docs/plans/hobby).
+Cohere Trial production/commercial and sensitive-data approval remain unresolved;
+only owned synthetic/public evaluation has been allowed. No paid service or model
+was introduced and no private material was reclassified or reindexed.
+
+Temporary verification images and another 6.256 GB of build cache were removed;
+Docker now has four active images/containers, zero build cache and no unused
+custom networks. All 83 persistent volumes and other projects' installed releases
+remain intact.
+
+The overall rollout remains open. Changed-byte upload staging, retained historical
+evidence/originals and verified index cutover remain partial: current publication
+records hash/version/pointer atomically, but `_replace_chunks` removes older
+chunks and publication replaces structured evidence/queues older crops. Current
+SQL already filters chunks to the active published version. The next versioning
+repair must retain that isolation while adding staging and historical cleanup.
+Broad labeled retrieval/answer/refusal/P95/capacity comparisons, forced in-flight
+production restart/provider-failure cases, final attribute-policy applicability
+and strict consumer pre-deploy admission remain open. Successful positive
+journeys do not close these requirements or the budget/production-term blockers.
