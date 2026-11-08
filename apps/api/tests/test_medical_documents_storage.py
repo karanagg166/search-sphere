@@ -298,7 +298,21 @@ async def test_delete_endpoint(mock_storage):
             assert del_resp.status_code == 200
             assert del_resp.json()["success"] is True
 
-            # Verify file is deleted in storage
+            # DELETE acknowledges SQL revocation. A fresh durable worker proves
+            # physical deletion separately; no Storage I/O blocks the response.
+            from src.db import AsyncSessionLocal
+            from src.repositories.document_deletion import (
+                cleanup_receipt,
+                find_deletion,
+            )
+            from src.services.cleanup_worker import DocumentCleanupWorker
+
+            assert await mock_storage.exists(storage_path) is True
+            async with AsyncSessionLocal() as db:
+                row = await find_deletion(db, "external", "quick_clinic", "quick_clinic_default", storage_path.split("/")[2])
+                receipt = await cleanup_receipt(db, row)
+                assert receipt["status"] == "pending" and receipt["vectors_remaining"] == 0
+            assert await DocumentCleanupWorker(AsyncSessionLocal, lambda: mock_storage).run_once(row.id)
             assert await mock_storage.exists(storage_path) is False
     finally:
         app.dependency_overrides.pop(get_object_storage, None)

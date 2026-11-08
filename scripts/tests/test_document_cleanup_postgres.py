@@ -18,9 +18,14 @@ from src.models.external_document import ExternalDocument
 from src.repositories.document_deletion import cleanup_receipt, find_deletion
 from src.repositories.external_registration import register_external_document
 from src.repositories.ingestion_queue import IngestionQueue
+from src.routers.internal_medical_documents import delete_medical_document
+from src.routers.internal_medical_ingestion import delete_medical_document_index
+from src.security.medical_context import patient_collection_id
 from src.security.service_context import ServiceContext
 from src.services.cleanup_worker import DocumentCleanupWorker
 from src.services.document_deletion import delete_registered_document
+from src.services.document_service import DocumentService
+from src.services.generic_document_service import GenericDocumentService
 from src.services.ingestion_publication import publish_ingestion
 from src.services.ingestion_source import load_ingestion_source
 
@@ -158,3 +163,70 @@ async def test_storage_outage_cannot_be_recorded_as_object_absence(fixture):
     async with fixture.sessions() as db:
         receipt = await cleanup_receipt(db, await db.get(DocumentDeletion, deletion.id))
         assert receipt["status"] == "pending" and receipt["object_deleted"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["standalone", "generic", "medical-object", "medical-index"])
+async def test_delete_acknowledges_durable_revocation_without_waiting_for_storage(fixture, monkeypatch, surface):
+    """A slow private object store cannot delay DELETE after its SQL commit."""
+    async def blocked_delete(key):
+        await asyncio.Event().wait()
+
+    unavailable = SimpleNamespace(delete=AsyncMock(side_effect=blocked_delete), exists=fixture.storage.exists)
+    monkeypatch.setattr("src.storage.object_storage.get_object_storage", lambda: unavailable)
+    if surface == "standalone":
+        document = await native_with_vector(fixture)
+        document_id, client_id, tenant_id = document.id, "search_sphere", fixture.owner_id
+        storage_key, kind = document.storage_key, "standalone"
+    else:
+        document_id, kind = str(uuid.uuid4()), "external"
+        client_id = fixture.owner_id if surface == "generic" else "quick_clinic"
+        tenant_id = fixture.owner_id
+        collection = patient_collection_id(fixture.owner_id)
+        storage_key = f"medical-documents/{fixture.owner_id}/{document_id}/public.pdf"
+        await fixture.storage.upload(storage_key, b"%PDF-public-synthetic-cleanup")
+        context = ServiceContext(client_id, tenant_id, subject_id=fixture.owner_id, collection_id=collection)
+        async with fixture.sessions() as db, db.begin():
+            document = ExternalDocument(
+                source_system=client_id, tenant_id=tenant_id, external_document_id=document_id,
+                external_patient_id=fixture.owner_id, owner_subject_id=fixture.owner_id,
+                collection_id=collection, storage_path=storage_key, file_name="public.pdf",
+                mime_type="application/pdf", file_size=29, status="READY", document_type="PUBLIC",
+            )
+            db.add(document)
+            await db.flush()
+            fixture.external_ids.append(document.id)
+            db.add(chunk(document_id, client_id=client_id, tenant_id=tenant_id,
+                collection_id=collection, owner_subject_id=fixture.owner_id,
+                metadata_json={"source_record_id": document.id}))
+
+    async def request_delete():
+        async with fixture.sessions() as db:
+            if surface == "standalone":
+                await DocumentService(db, unavailable).delete_user_document(document_id, fixture.owner_id)
+            elif surface == "generic":
+                assert await GenericDocumentService(db, unavailable).delete_document(context, document_id)
+            elif surface == "medical-object":
+                result = await delete_medical_document(storage_path=storage_key, body=None, _auth=context, storage=unavailable, db=db)
+                assert result.success
+            else:
+                result = await delete_medical_document_index(document_id, _auth=context, session=db)
+                assert result.success
+
+    await asyncio.wait_for(request_delete(), timeout=2)
+    unavailable.delete.assert_not_awaited()
+    async with fixture.sessions() as db:
+        deletion = await find_deletion(db, kind, client_id, tenant_id, document_id)
+        receipt = await cleanup_receipt(db, deletion)
+        assert receipt["status"] == "pending" and receipt["vectors_remaining"] == 0
+        assert receipt["attempts"] == 0 and receipt["object_deleted"] is False
+        assert await db.get(Document if kind == "standalone" else ExternalDocument, document.id) is None
+    assert await fixture.storage.exists(storage_key)
+    # A fresh worker recovers the persisted intent without the original request.
+    assert await DocumentCleanupWorker(fixture.sessions, lambda: fixture.storage).run_once(deletion.id)
+    async with fixture.sessions() as db:
+        row = await find_deletion(db, kind, client_id, tenant_id, document_id)
+        assert (await cleanup_receipt(db, row))["status"] == "complete"
+    await asyncio.wait_for(request_delete(), timeout=2)
+    unavailable.delete.assert_not_awaited()
+    assert fixture.calls == []

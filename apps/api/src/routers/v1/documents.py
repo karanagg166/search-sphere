@@ -159,7 +159,7 @@ async def get_document_signed_url(
     "/{document_id}",
     response_model=DocumentDeleteResponse,
     status_code=status.HTTP_200_OK,
-    summary="Delete document from database, object storage, and vector store",
+    summary="Revoke document access and queue private object cleanup",
 )
 async def delete_document(
     document_id: str,

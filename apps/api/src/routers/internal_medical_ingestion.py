@@ -281,17 +281,14 @@ async def delete_medical_document_index(
             return MedicalDocumentDeleteIndexResponse(success=True, message="Document deletion already accepted.")
         raise HTTPException(status_code=404, detail="Medical document not found.")
     scope = bind_patient(_auth, record.external_patient_id)
-    from sqlalchemy.ext.asyncio import async_sessionmaker
-
-    from src.services.cleanup_worker import DocumentCleanupWorker
     from src.services.document_deletion import delete_registered_document
-    from src.storage.object_storage import get_object_storage
+    from src.services.ingestion_worker import ingestion_worker
 
-    deletion = await delete_registered_document(
+    await delete_registered_document(
         session, "external", clean_document_id, scope.client_id, scope.tenant_id, context=scope,
     )
     await session.commit()
-    await DocumentCleanupWorker(async_sessionmaker(session.bind, expire_on_commit=False), get_object_storage).run_once(deletion.id)
+    ingestion_worker.notify_new_job()
 
     return MedicalDocumentDeleteIndexResponse(
         success=True,

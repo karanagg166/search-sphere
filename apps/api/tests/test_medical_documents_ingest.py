@@ -11,7 +11,10 @@ from src.config import settings
 from src.db import AsyncSessionLocal
 from src.main import app
 from src.models.external_document import ExternalDocument
+from src.repositories.document_deletion import find_deletion
 from src.security.medical_context import patient_collection_id
+from src.services.cleanup_worker import DocumentCleanupWorker
+from src.storage.object_storage import LocalStorage
 
 TEST_SERVICE_SECRET = "test-service-secret"
 VALID_AUTH_HEADER = {"Authorization": f"Bearer {TEST_SERVICE_SECRET}"}
@@ -285,9 +288,12 @@ async def test_get_status_lifecycle():
 
 
 @pytest.mark.asyncio
-async def test_delete_medical_document_index():
+async def test_delete_medical_document_index(tmp_path):
     doc_id = f"doc-del-{uuid.uuid4().hex[:8]}"
     patient_id = f"pat-{uuid.uuid4().hex[:8]}"
+    storage = LocalStorage(str(tmp_path), "synthetic-cleanup")
+    storage_path = f"medical-documents/{patient_id}/{doc_id}/report.pdf"
+    await storage.upload(storage_path, b"%PDF-public-synthetic-cleanup")
 
     # Seed record
     async with AsyncSessionLocal() as session:
@@ -298,7 +304,7 @@ async def test_delete_medical_document_index():
             owner_subject_id=patient_id,
             collection_id=patient_collection_id(patient_id),
             external_patient_id=patient_id,
-            storage_path=f"medical-documents/{patient_id}/{doc_id}/report.pdf",
+            storage_path=storage_path,
             file_name="report.pdf",
             mime_type="application/pdf",
             file_size=5000,
@@ -316,7 +322,15 @@ async def test_delete_medical_document_index():
         receipt = await client.get(f"/internal/medical-documents/{doc_id}/cleanup", headers=VALID_AUTH_HEADER)
         assert receipt.status_code == 200
         assert receipt.json()["vectors_remaining"] == 0
+        assert receipt.json()["status"] == "pending"
+        assert await storage.exists(storage_path)
+        async with AsyncSessionLocal() as db:
+            deletion = await find_deletion(db, "external", "quick_clinic", "quick_clinic_default", doc_id)
+        assert await DocumentCleanupWorker(AsyncSessionLocal, lambda: storage).run_once(deletion.id)
+        receipt = await client.get(f"/internal/medical-documents/{doc_id}/cleanup", headers=VALID_AUTH_HEADER)
+        assert receipt.status_code == 200 and receipt.json()["object_deleted"] is True
         assert receipt.json()["status"] == "complete"
+        assert not await storage.exists(storage_path)
         replay = await client.delete(f"/internal/medical-documents/{doc_id}/index", headers=VALID_AUTH_HEADER)
         assert replay.status_code == 200
 
