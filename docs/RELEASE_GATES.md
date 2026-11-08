@@ -44,3 +44,19 @@ or passing this workflow alone does not mark the overall rollout complete.
 
 API references: [Render pinned deployment](https://api-docs.render.com/reference/create-deploy),
 [service environment updates](https://api-docs.render.com/reference/update-env-var).
+# Native receipt integrity
+
+Fresh standalone smoke manifests use format 2. The protected fixture key signs
+the full manifest, binding document/conversation IDs, owner, signed names, cleanup
+states and timestamps. Reads reject changed signatures, nonprivate files, links,
+nonregular files and oversized manifests. Writes use a private exclusive temporary
+file, fsync and atomic replacement; a failed write preserves the prior pending
+receipt. The bounded manifest refuses overflow rather than discarding unresolved
+entries. Account emails and credentials are never persisted.
+
+Unsigned format-1 files cannot be silently trusted or reset. Trusted historical
+artifact admission, validated legacy reconciliation, cross-run restore and actual
+reverification of restored pending receipts remain follow-up work. This integrity
+primitive alone does not establish recovery across fresh GitHub runners. Existing
+signed filename/title catalog discovery still handles a lost upload response when
+the source remains listed.
