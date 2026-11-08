@@ -585,6 +585,8 @@ def sweep_dangling_synthetic_documents(
     for doc in get_all_documents(token):
         if doc.get("user_id") != user_id or not verified_filename(str(doc.get("filename", "")), user_id):
             continue
+        fixture_manager.register_fixture(str(doc["id"]), str(doc["filename"]), "", user_id=user_id)
+        SYNTHETIC_DOCUMENT_IDS.add(str(doc["id"]))
         cleanup_synthetic_document(token, str(doc["id"]))
 
 
@@ -702,6 +704,7 @@ def sweep_synthetic_conversations(token: str, user_id: str) -> None:
         seen.add(row["id"])
         title = row.get("title")
         if row.get("user_id") == user_id and isinstance(title, str) and verified_conversation_title(title, user_id):
+            fixture_manager.register_conversation(row["id"], title, user_id)
             SYNTHETIC_CONVERSATION_IDS.add(row["id"])
             cleanup_synthetic_conversation(token, row["id"])
 
@@ -748,6 +751,38 @@ def run_conversation_journey(token: str, user_id: str, document_id: str, marker:
     record("Conversation SSE", "validated citation lifecycle, done and exactly one additional persisted turn")
 
 
+def reconcile_recorded_fixtures(token: str, user_id: str) -> None:
+    """Replay signed pending IDs even after deletion removed their catalog rows."""
+    documents = fixture_manager.get_uncleaned_fixtures()
+    conversations = fixture_manager.get_uncleaned_conversations()
+    for kind, rows, identity, name, verify in (
+        ("documents", documents, "doc_id", "filename", verified_filename),
+        ("conversations", conversations, "conversation_id", "title", verified_conversation_title),
+    ):
+        for row in rows:
+            value = row.get(identity)
+            if (row.get("user_id") != user_id or not isinstance(value, str)
+                or not re.fullmatch(r"[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}", value)
+                or not isinstance(row.get(name), str) or not verify(row[name], user_id)):
+                fail("Fixture provenance", "pending receipt has invalid ownership or identity")
+    headers = {"Authorization": f"Bearer {token}"}
+    for kind, rows, identity, name, cleanup, active in (
+        ("documents", documents, "doc_id", "filename", cleanup_synthetic_document, SYNTHETIC_DOCUMENT_IDS),
+        ("conversations", conversations, "conversation_id", "title", cleanup_synthetic_conversation, SYNTHETIC_CONVERSATION_IDS),
+    ):
+        for row in rows:
+            value = row[identity]
+            status, _, current = http(f"{API}/{kind}/{value}", headers=headers, timeout=20)
+            if status == 200:
+                if (not isinstance(current, dict) or current.get("id") != value
+                    or current.get("user_id") != user_id or current.get(name) != row[name]):
+                    fail("Fixture provenance", "current source differs from its signed receipt")
+            elif status != 404:
+                fail("Fixture provenance", f"pending source access unverified (HTTP {status})")
+            active.add(value)
+            cleanup(token, value)
+
+
 def run_rag_suite() -> None:
     global ACTIVE_CI_TOKEN, ACTIVE_CI_USER_ID, ACTIVE_CI_EMAIL
     signing_key()
@@ -766,7 +801,9 @@ def run_rag_suite() -> None:
     ACTIVE_CI_USER_ID = user_id
     ACTIVE_CI_EMAIL = email
 
-    # Proactively sweep dangling synthetic fixtures from prior runs with verified provenance
+    # Tombstones are absent from live catalogs: replay their signed IDs first.
+    reconcile_recorded_fixtures(token, user_id)
+    # Recover an interruption before an upload response/manifest write.
     sweep_dangling_synthetic_documents(token, user_id=user_id, user_email=email)
     sweep_synthetic_conversations(token, user_id)
 
@@ -826,6 +863,7 @@ def main() -> int:
     try:
         if not EXPECTED_SHA:
             fail("Expected commit", "EXPECTED_SHA required from main/CI workflow")
+        fixture_manager.save_manifest(fixture_manager.load_manifest())
         health = wait_for_matching_backend()
         assert_memory(health, "Initial memory guard")
         ready_check(str(health["git_commit"]))
