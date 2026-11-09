@@ -23,6 +23,7 @@ export interface ChatTurn {
   sources?: AnswerSource[];
   status: "loading" | "success" | "error";
   errorMessage?: string;
+  errorCode?: string;
   timestamp: Date;
 }
 
@@ -195,13 +196,15 @@ export function AnswerCard({ turn, documentMap = {}, onRetry, onFeedback }: Answ
               <div className="flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span className="font-semibold">
-                  Unable to generate answer. Please try again.
+                  {turn.errorCode === "provider_not_approved"
+                    ? "AI processing approval required."
+                    : "Unable to generate answer. Please try again."}
                 </span>
               </div>
               {turn.errorMessage && (
                 <p className="text-[11px] opacity-90 pl-6">{turn.errorMessage}</p>
               )}
-              {onRetry && (
+              {onRetry && turn.errorCode !== "provider_not_approved" && (
                 <button
                   type="button"
                   onClick={() => onRetry(turn.query)}
