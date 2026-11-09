@@ -204,7 +204,7 @@ async def test_external_recovery_is_exactly_client_tenant_collection_and_subject
     forged["entries"][0]["id"] = documents[1]
     assert (await apply_recovery_plan(fixture.sessions, forged, digest(forged)))[0]["result"] == "source_unavailable"
     assert (await apply_recovery_plan(fixture.sessions, plan, digest(plan)))[0]["result"] == "enqueued"
-    assert await PostgresIngestionWorker(fixture.sessions, storage_factory=lambda: fixture.storage).run_once()
+    assert await PostgresIngestionWorker(fixture.sessions, storage_factory=lambda: fixture.storage, document_kinds=("external",)).run_once()
     assert not (await build_recovery_plan(fixture.sessions, scope))["entries"]
     for identity in documents[1:]:
         assert (await job_state(fixture, identity))[1] == 1
