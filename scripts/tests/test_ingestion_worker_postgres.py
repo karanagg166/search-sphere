@@ -147,7 +147,7 @@ async def test_expired_claim_is_recovered_by_a_new_worker_instance(fixture):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("medical", [False, True])
 async def test_external_http_upload_register_and_worker_publish(fixture, monkeypatch, medical):
-    from src.main import app
+    from legacy_test_app import app
     from src.security.medical_context import patient_collection_id
     from src.storage.object_storage import get_object_storage
 
@@ -201,7 +201,7 @@ async def test_external_http_upload_register_and_worker_publish(fixture, monkeyp
             async with fixture.sessions() as db:
                 row = (await db.execute(select(ExternalDocument).where(ExternalDocument.source_system == client_id, ExternalDocument.external_document_id == external_id))).scalar_one()
                 fixture.external_ids.append(row.id)
-            worker = PostgresIngestionWorker(fixture.sessions, storage_factory=lambda: fixture.storage)
+            worker = PostgresIngestionWorker(fixture.sessions, storage_factory=lambda: fixture.storage, document_kinds=("external",))
             assert await worker.run_once()
             status_path = f"/internal/medical-documents/{external_id}/status" if medical else f"/api/v1/documents/{external_id}"
             status = await client.get(status_path, headers=headers)

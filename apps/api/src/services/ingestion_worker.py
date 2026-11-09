@@ -1,4 +1,4 @@
-"""Single-concurrency PostgreSQL ingestion for every document source."""
+"""Single-concurrency PostgreSQL ingestion for standalone Search Sphere documents."""
 
 import asyncio
 import time
@@ -37,9 +37,9 @@ class LeaseLostError(RuntimeError):
 
 
 class PostgresIngestionWorker:
-    def __init__(self, session_factory=AsyncSessionLocal, processor=process_ingestion, storage_factory=get_object_storage):
+    def __init__(self, session_factory=AsyncSessionLocal, processor=process_ingestion, storage_factory=get_object_storage, *, document_kinds=("standalone",)):
         self.sessions = session_factory
-        self.queue = IngestionQueue(session_factory)
+        self.queue = IngestionQueue(session_factory, document_kinds=document_kinds)
         self.processor, self.storage_factory = processor, storage_factory
         self._task = None
         self._wake = asyncio.Event()
@@ -71,7 +71,7 @@ class PostgresIngestionWorker:
                 self.last_error_code = None
                 if time.monotonic() - self._last_adoption > 60:
                     self._last_adoption = time.monotonic()
-                    await adopt_legacy_pending(self.sessions, self.queue)
+                    await adopt_legacy_pending(self.sessions, self.queue, document_kinds=self.queue.document_kinds)
                 await DocumentCleanupWorker(self.sessions, self.storage_factory).run_once()
                 if await self.run_once():
                     continue

@@ -24,8 +24,11 @@ class JobLease:
 
 
 class IngestionQueue:
-    def __init__(self, session_factory=AsyncSessionLocal):
+    def __init__(self, session_factory=AsyncSessionLocal, *, document_kinds=("standalone", "external")):
+        if not document_kinds or not set(document_kinds) <= {"standalone", "external"}:
+            raise ValueError("Unsupported document kinds")
         self.sessions = session_factory
+        self.document_kinds = tuple(document_kinds)
 
     async def enqueue(
         self, db: AsyncSession, kind: str, document_id: str, *, reset: bool = False
@@ -76,6 +79,7 @@ class IngestionQueue:
                     select(IngestionJob)
                     .where(
                         IngestionJob.status == "RUNNING",
+                        IngestionJob.document_kind.in_(self.document_kinds),
                         IngestionJob.lease_expires_at <= func.now(),
                     )
                     .order_by(IngestionJob.lease_expires_at)
@@ -95,6 +99,7 @@ class IngestionQueue:
                     select(IngestionJob)
                     .where(
                         IngestionJob.status.in_(("QUEUED", "RETRY")),
+                        IngestionJob.document_kind.in_(self.document_kinds),
                         IngestionJob.available_at <= func.now(),
                         IngestionJob.attempts < MAX_ATTEMPTS,
                     )

@@ -1,5 +1,9 @@
 # Search Sphere repair and rollout ledger
 
+> November 10 scope: Search Sphere is standalone. Consumer chatbot integration
+> is retired from the deployed application; see [standalone scope](STANDALONE_SCOPE.md).
+> Earlier multi-application requirements and results below are historical.
+
 This is the active acceptance ledger for the backend repair requested on 2026-11-06.
 Statuses describe observed code and execution separately. A unit test or healthy
 endpoint is not proof of a completed live journey. No phase is complete until its

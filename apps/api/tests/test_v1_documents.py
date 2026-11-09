@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from src.main import app
+from legacy_test_app import app
 from src.storage.object_storage import LocalStorage, get_object_storage
 from tests.binary_fixtures import pdf_bytes
 

@@ -3,7 +3,7 @@ import uuid
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from src.main import app
+from legacy_test_app import app
 
 
 @pytest.mark.asyncio

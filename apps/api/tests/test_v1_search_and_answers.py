@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from src.main import app
+from legacy_test_app import app
 from src.models.external_document import ExternalDocument
 from src.processing.models.search import DenseSearchResult
 from src.retrieval.reranked_retriever import RerankedHybridRetriever

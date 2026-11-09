@@ -30,6 +30,9 @@ except ProviderNotApprovedError:
 else:
     raise AssertionError("Missing scope must deny inference")
 assert not any(name in sys.modules for name in FORBIDDEN_PACKAGES)
+assert not any(name.startswith(("src.routers.v1", "src.routers.internal_medical")) for name in sys.modules), "Retired client adapters loaded"
+assert not any(path.startswith(("/api/v1", "/internal/medical")) for path in app.openapi()["paths"])
+assert not Path("/app/legacy_test_app.py").exists(), "Test-only client app copied into image"
 assert TokenCounter().count("PUBLIC SYNTHETIC OFFLINE TOKENIZER") > 0
 
 

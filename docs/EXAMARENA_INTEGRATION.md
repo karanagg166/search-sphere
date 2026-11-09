@@ -1,5 +1,9 @@
 # ExamArena Integration Walkthrough
 
+> November 10 scope: Search Sphere is standalone. Consumer chatbot integration
+> is retired from the deployed application; see [standalone scope](STANDALONE_SCOPE.md).
+> Earlier multi-application requirements and results below are historical.
+
 Historical walkthrough: its Qdrant/local-model references and client prompt examples
 are superseded by the current [versioned API guide](VERSIONED_CLIENT_GUIDE.md).
 Production uses PostgreSQL/pgvector, private Storage and approved hosted Cohere calls;

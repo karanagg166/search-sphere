@@ -27,8 +27,6 @@ services:
         value: documents
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
-      - key: QUICK_CLINIC_SERVICE_SECRET
-        sync: false
       - key: GOOGLE_CLIENT_ID
         value: 819492193967-4j16egplrleocade2fqhiv0lcs0nl1mg.apps.googleusercontent.com
       - key: GOOGLE_REDIRECT_URI

@@ -47,7 +47,7 @@ jobs:
 
       - name: Lint with Ruff
         run: |
-          ruff check apps/api/src apps/api/tests apps/worker/src apps/worker/tests
+          ruff check apps/api/src apps/api/tests apps/api/legacy_test_app.py apps/worker/src apps/worker/tests
           ruff check scripts/collection_scope_smoke.py scripts/tests/test_collection_scope_smoke.py
           ruff check scripts/smoke_fixtures.py scripts/tests/test_smoke_receipts.py scripts/tests/test_smoke_receipt_replay.py
           ruff check scripts/tests/test_release_scope_audit_postgres.py
@@ -91,7 +91,8 @@ jobs:
           INGESTION_TEST_DATABASE_URL: "postgresql+asyncpg://test_user:test_password@localhost:5432/search_sphere_test"
           PYTHONPATH: "apps/api"
         run: >-
-          pytest scripts/tests/test_ingestion_queue_postgres.py
+          pytest scripts/tests/test_standalone_queue_postgres.py
+          scripts/tests/test_ingestion_queue_postgres.py
           scripts/tests/test_atomic_reindex_postgres.py
           scripts/tests/test_client_bootstrap_postgres.py
           scripts/tests/test_inference_data_policy_postgres.py

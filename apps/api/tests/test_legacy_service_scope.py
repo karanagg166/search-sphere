@@ -5,8 +5,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete
 
+from legacy_test_app import app
 from src.db import AsyncSessionLocal
-from src.main import app
 from src.models.service_client import ServiceClient
 from src.security.service_auth import LEGACY_MEDICAL_SCOPES
 from tests.conftest import VALID_AUTH_HEADER

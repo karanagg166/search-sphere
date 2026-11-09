@@ -22,10 +22,10 @@ def legacy_lease_active(row):
     return False
 
 
-async def adopt_legacy_pending(sessions, queue, limit=20, *, owner_user_id=None):
+async def adopt_legacy_pending(sessions, queue, limit=20, *, owner_user_id=None, document_kinds=("standalone", "external")):
     adopted = 0
     for kind, model in (("standalone", Document), ("external", ExternalDocument)):
-        if owner_user_id is not None and kind != "standalone":
+        if kind not in document_kinds or (owner_user_id is not None and kind != "standalone"):
             continue
         async with sessions() as db, db.begin():
             pending = or_(model.status == "uploaded", model.status.like("uploaded:retry:%"), model.status.like("proc:%"), model.status.like("processing%")) if kind == "standalone" else model.status.in_(("QUEUED", "PROCESSING"))
