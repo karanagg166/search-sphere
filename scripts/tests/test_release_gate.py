@@ -118,3 +118,11 @@ def test_reads_retry_503_but_deploy_post_is_not_repeated(monkeypatch):
     attempts.clear()
     with pytest.raises(gate.ReleaseError): gate.request("https://api.render.com", "/synthetic", payload={"commitId": "a" * 40})
     assert len(attempts) == 1
+
+
+@pytest.mark.parametrize("backend", ["qdrant", "unknown", "supabse", ""])
+def test_standalone_release_rejects_legacy_vector_backends_before_deploy(render, backend):
+    render[1]["VECTOR_STORE_BACKEND"] = backend
+    with pytest.raises(gate.ReleaseError, match="PostgreSQL/pgvector"):
+        gate.render_preflight()
+    assert all(payload is None for _, _, payload in render[2])

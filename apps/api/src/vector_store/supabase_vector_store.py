@@ -17,7 +17,7 @@ from src.processing.models.search import (
     SparseSearchResult,
 )
 from src.processing.models.sparse_vector import SparseVector
-from src.vector_store.qdrant_store import (
+from src.vector_store.contracts import (
     QdrantVectorStoreError,
     generate_point_id,
 )
