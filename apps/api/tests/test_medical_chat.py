@@ -7,10 +7,10 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
 
+from legacy_test_app import app
 from src.config import settings
 from src.db import AsyncSessionLocal
 from src.inference.policy import ProviderNotApprovedError, ProviderQuotaExceededError
-from src.main import app
 from src.models.conversation import Conversation
 from src.models.document_chunk import DocumentChunk
 from src.models.external_document import ExternalDocument

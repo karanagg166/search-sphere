@@ -365,6 +365,22 @@ def check_auth_boundary(auth_token: str | None = None) -> None:
         record("Tenant search isolation", "cross-tenant search leakage blocked")
 
 
+def check_standalone_surface() -> None:
+    status, _, schema = http(API + "/openapi.json", timeout=25)
+    require_json(status, schema, "Standalone API surface")
+    paths = schema.get("paths")
+    if not isinstance(paths, dict) or not {"/documents", "/search", "/answer", "/conversations"} <= paths.keys():
+        fail("Standalone API surface", "native feature routes are missing")
+    if any(path.startswith(("/api/v1", "/internal/medical")) for path in paths):
+        fail("Standalone API surface", "retired consumer routes are still advertised")
+    for method, path in (("GET", "/api/v1/clients/me"), ("POST", "/api/v1/answers"),
+                         ("POST", "/internal/medical-rag/chat")):
+        status, _, _ = http(API + path, method=method)
+        if status != 404:
+            fail("Standalone API surface", f"retired route returned HTTP {status}")
+    record("Standalone API surface", "native routes present; retired client and medical routes return 404")
+
+
 def check_diagnostics() -> None:
     try:
         status, _, payload = http(API + "/diag", timeout=25)
@@ -881,6 +897,7 @@ def main() -> int:
         check_cors()
         check_frontend()
         check_diagnostics()
+        check_standalone_surface()
         run_rag_suite()
 
         # Allow post-RAG memory settling and garbage collection across up to 4 attempts

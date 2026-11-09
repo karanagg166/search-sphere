@@ -11,10 +11,10 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from ingestion_test_support import approve
 from ingestion_test_support import fixture as fixture  # noqa: PLC0414
+from legacy_test_app import app
 from sqlalchemy import func, select, update
 from src.db import get_db
 from src.inference.policy import ProviderQuotaExceededError
-from src.main import app
 from src.models.conversation import Conversation
 from src.models.document_chunk import DocumentChunk
 from src.models.external_document import ExternalDocument

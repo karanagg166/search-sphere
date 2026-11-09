@@ -581,3 +581,23 @@ def test_standalone_sse_failure_reports_only_safe_error_enum(monkeypatch, code, 
         smoke.run_real_rag_pipeline("token", "doc", "MARKER", do_answer=True)
     assert expected in str(caught.value) and "PRIVATE" not in str(caught.value)
     assert not any("PASS SSE" in result for result in smoke.RESULTS)
+
+
+@pytest.mark.parametrize("code", [200, 401, 403, 503])
+def test_standalone_gate_rejects_any_live_or_unverified_consumer_route(monkeypatch, code):
+    paths = {path: {} for path in ("/documents", "/search", "/answer", "/conversations")}
+    monkeypatch.setattr(smoke, "http", lambda url, **kwargs: (200, {}, {"paths": paths}) if url.endswith("openapi.json") else (code, {}, {}))
+    with pytest.raises(AssertionError):
+        smoke.check_standalone_surface()
+
+
+def test_standalone_gate_requires_native_routes_and_rejects_advertised_integrations(monkeypatch):
+    paths = {path: {} for path in ("/documents", "/search", "/answer", "/conversations")}
+    monkeypatch.setattr(smoke, "http", lambda url, **kwargs: (200, {}, {"paths": paths}) if url.endswith("openapi.json") else (404, {}, {}))
+    smoke.check_standalone_surface()
+    paths["/api/v1/answers"] = {}
+    with pytest.raises(AssertionError):
+        smoke.check_standalone_surface()
+    paths.clear()
+    with pytest.raises(AssertionError):
+        smoke.check_standalone_surface()

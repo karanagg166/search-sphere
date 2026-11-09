@@ -11,10 +11,10 @@ from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from ingestion_test_support import fixture as fixture  # noqa: PLC0414
 from ingestion_test_support import upload_native
+from legacy_test_app import app
 from sqlalchemy import update
 from src.db import get_db
 from src.inference.policy import ProviderInvalidResponseError, ProviderNotApprovedError
-from src.main import app
 from src.models.query_policy import QueryPolicy
 from src.models.service_client import ServiceClient
 from src.retrieval.reranked_retriever import RerankedHybridRetriever

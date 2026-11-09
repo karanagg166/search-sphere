@@ -19,39 +19,7 @@ from src.routers.auth import router as auth_router
 from src.routers.conversations import router as conversations_router
 from src.routers.documents import router as documents_router
 from src.routers.feedback import router as feedback_router
-from src.routers.internal_medical_conversations import (
-    router as internal_medical_conversations_router,
-)
-from src.routers.internal_medical_documents import (
-    router as internal_medical_docs_router,
-)
-from src.routers.internal_medical_ingestion import (
-    router as internal_medical_ingest_router,
-)
-from src.routers.internal_medical_observations import (
-    router as internal_medical_obs_router,
-)
-from src.routers.internal_medical_rag import router as internal_medical_rag_router
-from src.routers.internal_medical_retrieval import (
-    router as internal_medical_retrieval_router,
-)
 from src.routers.search import router as search_router
-from src.routers.v1 import (
-    answers_router as v1_answers_router,
-)
-from src.routers.v1 import (
-    clients_router as v1_clients_router,
-)
-from src.routers.v1 import (
-    collections_router as v1_collections_router,
-)
-from src.routers.v1 import (
-    documents_router as v1_documents_router,
-)
-from src.routers.v1 import (
-    search_router as v1_search_router,
-)
-from src.routers.v1.conversations import router as v1_conversations_router
 
 logger = structlog.get_logger()
 
@@ -192,20 +160,6 @@ app.include_router(search_router)
 app.include_router(answer_router)
 app.include_router(conversations_router)
 app.include_router(feedback_router)
-app.include_router(internal_medical_docs_router)
-app.include_router(internal_medical_ingest_router)
-app.include_router(internal_medical_retrieval_router)
-app.include_router(internal_medical_obs_router)
-app.include_router(internal_medical_rag_router)
-app.include_router(internal_medical_conversations_router)
-
-# Include Generic Multi-Tenant V1 Microservice Routes
-app.include_router(v1_clients_router)
-app.include_router(v1_collections_router)
-app.include_router(v1_documents_router)
-app.include_router(v1_search_router)
-app.include_router(v1_answers_router)
-app.include_router(v1_conversations_router)
 
 
 @app.get("/health", tags=["Health"])

@@ -7,9 +7,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
+from legacy_test_app import app
 from src.config import settings
 from src.db import AsyncSessionLocal
-from src.main import app
 from src.models.external_document import ExternalDocument
 from src.repositories.document_deletion import find_deletion
 from src.security.medical_context import patient_collection_id

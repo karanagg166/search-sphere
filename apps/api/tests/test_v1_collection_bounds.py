@@ -8,8 +8,8 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete
 
+from legacy_test_app import app
 from src.db import AsyncSessionLocal
-from src.main import app
 from src.models.collection import DocumentCollection
 from src.models.service_client import ServiceClient
 

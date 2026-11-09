@@ -1,5 +1,9 @@
 # Integrating a server application through `/api/v1`
 
+> November 10 scope: Search Sphere is standalone. Consumer chatbot integration
+> is retired from the deployed application; see [standalone scope](STANDALONE_SCOPE.md).
+> Earlier multi-application requirements and results below are historical.
+
 Use HTTPS requests to `https://search-sphere-api.onrender.com/api/v1` from your
 application server. Consumers do not import Search Sphere's Python modules, read
 its tables, access its bucket directly or receive a Supabase secret. `/openapi.json`

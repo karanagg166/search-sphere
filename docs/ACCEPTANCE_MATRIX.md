@@ -1,5 +1,9 @@
 # Search Sphere acceptance matrix
 
+> November 10 scope: Search Sphere is standalone. Consumer chatbot integration
+> is retired from the deployed application; see [standalone scope](STANDALONE_SCOPE.md).
+> Earlier multi-application requirements and results below are historical.
+
 This is an interim acceptance record. The overall rollout is **open**. Code tests,
 deployment-contract checks and authenticated production journeys are distinct proof.
 The original pre-implementation inventory and detailed PR history remain in
