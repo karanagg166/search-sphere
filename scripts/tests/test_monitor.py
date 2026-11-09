@@ -234,13 +234,9 @@ class TestRunMonitorOrchestration:
         assert exit_code == 0
         mock_probe.assert_not_called()
 
-    def test_qdrant_target_configured_in_default_targets(self):
-        from monitor_backends import DEFAULT_TARGETS
-        qdrant_target = next((t for t in DEFAULT_TARGETS if "qdrant" in t.name.lower()), None)
-        assert qdrant_target is not None
-        assert qdrant_target.env_var == "QDRANT_URL"
-        assert qdrant_target.endpoints[0].auth_header_name == "api-key"
-        assert qdrant_target.endpoints[0].auth_header_env == "QDRANT_API_KEY"
+    def test_native_health_targets_require_no_external_service_key(self):
+        assert all(endpoint.auth_header_env is None
+                   for target in DEFAULT_TARGETS for endpoint in target.endpoints)
 
     @patch("urllib.request.urlopen")
     def test_auth_header_injected_when_configured(self, mock_urlopen, monkeypatch):
