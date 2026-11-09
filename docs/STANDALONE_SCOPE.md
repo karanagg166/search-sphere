@@ -59,3 +59,7 @@ passed. The network-disabled API image passed with a 136.2 MiB import/health pea
 under a 512 MiB limit. These are local observations, not production latency or
 capacity measurements. Exact hosted CI and the post-deployment PDF journey must
 pass separately.
+
+Scheduled monitoring is standalone as well: it checks only Search Sphere health
+and PostgreSQL readiness twice daily, allowing normal idle sleep. Consumer/Qdrant
+monitoring targets, switches and secret inputs have been removed.

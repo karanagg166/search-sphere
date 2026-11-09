@@ -9,6 +9,7 @@ scripts_dir = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(scripts_dir))
 
 from monitor_backends import (
+    DEFAULT_TARGETS,
     EndpointConfig,
     ProbeResult,
     ServiceTarget,
@@ -268,3 +269,14 @@ class TestRunMonitorOrchestration:
         res = probe_endpoint("Qdrant Cloud", "https://05eee.aws.cloud.qdrant.io/collections", cfg, max_retries=1)
         assert res.success is False
         assert "SUSPENDED" in res.message
+
+
+def test_default_monitor_has_no_consumer_or_legacy_service_dependencies(monkeypatch):
+    # Old repository/environment secrets cannot reintroduce another target.
+    for name in ("MONITOR_QUICK_CLINIC_SOCKET", "MONITOR_QUICK_CLINIC_WEB", "MONITOR_EXAM_ARENA", "MONITOR_QDRANT"):
+        monkeypatch.setenv(name, "true")
+    assert len(DEFAULT_TARGETS) == 1
+    target = DEFAULT_TARGETS[0]
+    assert target.env_var == "SEARCH_SPHERE_API_URL"
+    assert [endpoint.path for endpoint in target.endpoints] == ["/health", "/ready"]
+    assert all(endpoint.auth_header_env is None for endpoint in target.endpoints)

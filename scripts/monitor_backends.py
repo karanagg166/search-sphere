@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Unified Multi-Project Backend Health Monitor & Keep-Alive Script.
+"""Standalone Search Sphere health and database activity monitor.
 
-Monitors deployed HTTP backends across Search-Sphere, Quick-Clinic Socket Server,
-ExamArena API, and Quick-Clinic Web.
+Monitors only Search Sphere liveness and PostgreSQL readiness.
 
 Key Guarantees:
 - HTTPS GET requests only.
@@ -108,93 +107,7 @@ DEFAULT_TARGETS: list[ServiceTarget] = [
             ),
         ],
     ),
-    ServiceTarget(
-        name="Quick-Clinic Socket Server (Render)",
-        env_var="QUICK_CLINIC_SOCKET_URL",
-        default_url="https://quickclinic-socket-server.onrender.com",
-        enabled_env_var="MONITOR_QUICK_CLINIC_SOCKET",
-        endpoints=[
-            EndpointConfig(
-                path="/health",
-                expected_status=200,
-                status_field="status",
-                allowed_status_values=("ok",),
-                check_type="liveness",
-                sha_field="gitCommit",
-                expected_sha_env="QUICK_CLINIC_EXPECTED_SHA",
-            ),
-            EndpointConfig(
-                path="/ready",
-                expected_status=200,
-                status_field="status",
-                allowed_status_values=("ok", "ready"),
-                check_type="readiness",
-                failure_category="infrastructure",
-            ),
-        ],
-    ),
-    ServiceTarget(
-        name="ExamArena API (Vercel Serverless)",
-        env_var="EXAM_ARENA_API_URL",
-        default_url="https://exam-arena-mu.vercel.app",
-        enabled_env_var="MONITOR_EXAM_ARENA",
-        endpoints=[
-            EndpointConfig(
-                path="/health",
-                expected_status=200,
-                status_field="status",
-                allowed_status_values=("ok",),
-                check_type="liveness",
-                sha_field="git_commit",
-                expected_sha_env="EXAM_ARENA_EXPECTED_SHA",
-            ),
-            EndpointConfig(
-                path="/api/health/worker",
-                expected_status=200,
-                status_field="worker_available",
-                allowed_status_values=("true", "1"),
-                check_type="worker_heartbeat",
-                failure_category="infrastructure",
-                is_critical=False,
-            ),
-        ],
-    ),
-    ServiceTarget(
-        name="Quick-Clinic Web / API (Vercel)",
-        env_var="QUICK_CLINIC_WEB_URL",
-        default_url="https://quick-clinic-nine.vercel.app",
-        enabled_env_var="MONITOR_QUICK_CLINIC_WEB",
-        default_enabled=False,
-        endpoints=[
-            EndpointConfig(
-                path="/api/health",
-                expected_status=200,
-                status_field="status",
-                allowed_status_values=("ok",),
-                check_type="liveness",
-            ),
-        ],
-    ),
-    ServiceTarget(
-        name="Search-Sphere Qdrant Vector Store (Qdrant Cloud)",
-        env_var="QDRANT_URL",
-        default_url="https://05eee4ff-130e-4b32-985a-8edd76b5d445.us-east-1-1.aws.cloud.qdrant.io",
-        enabled_env_var="MONITOR_QDRANT",
-        default_enabled=True,
-        endpoints=[
-            EndpointConfig(
-                path="/collections",
-                expected_status=200,
-                status_field="status",
-                allowed_status_values=("ok",),
-                check_type="infrastructure",
-                failure_category="infrastructure",
-                auth_header_name="api-key",
-                auth_header_env="QDRANT_API_KEY",
-                is_critical=False,
-            ),
-        ],
-    ),
+
 ]
 
 
