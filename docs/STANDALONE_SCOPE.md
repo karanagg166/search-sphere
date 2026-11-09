@@ -52,3 +52,10 @@ The obsolete RabbitMQ/Qdrant integration Compose file and image overlay are
 removed. Default Compose starts only PostgreSQL/pgvector, API, worker and web.
 Existing Docker volumes are not deleted. The sample environment and README now
 show only the standalone configuration and hosted model versions.
+
+Local standalone verification: 349 backend cases passed with one historical
+opt-in live test skipped; 279 combined PostgreSQL/recovery/guardrail/smoke cases
+passed. The network-disabled API image passed with a 136.2 MiB import/health peak
+under a 512 MiB limit. These are local observations, not production latency or
+capacity measurements. Exact hosted CI and the post-deployment PDF journey must
+pass separately.
