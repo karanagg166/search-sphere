@@ -38,3 +38,17 @@ the successful synthetic test cannot approve an ordinary user's documents.
 [rollout ledger](ROLLOUT_REQUIREMENTS.md) preserve historical evidence. Their
 three-consumer and future-client requirements are superseded by this scope. Private
 student files and medical chatbot work are outside Search Sphere's current scope.
+
+## Dependency cleanup
+
+The default development requirements now reuse the production constraints; local
+model packages and unused provider SDKs are removed. Qdrant's SDK exists only as a
+development dependency for archived regression tests. Runtime vector contracts
+(errors and stable chunk UUIDs) no longer import it, and a non-PostgreSQL backend
+is rejected instead of falling back. Both image gates require the SDK, RabbitMQ,
+Redis and local inference packages to be absent.
+
+The obsolete RabbitMQ/Qdrant integration Compose file and image overlay are
+removed. Default Compose starts only PostgreSQL/pgvector, API, worker and web.
+Existing Docker volumes are not deleted. The sample environment and README now
+show only the standalone configuration and hosted model versions.

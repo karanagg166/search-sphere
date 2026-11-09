@@ -43,7 +43,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           uv pip install --system -r apps/api/requirements-production.txt
-          uv pip install --system pytest pytest-asyncio pytest-cov ruff aiosqlite
+          uv pip install --system pytest pytest-asyncio pytest-cov ruff aiosqlite "qdrant-client>=1.11.0,<2"
 
       - name: Lint with Ruff
         run: |

@@ -10,7 +10,7 @@ from pathlib import Path
 import httpx
 
 FORBIDDEN_PACKAGES = (
-    "torch", "transformers", "sentence_transformers", "fastembed", "pytesseract", "docling",
+    "torch", "transformers", "sentence_transformers", "fastembed", "pytesseract", "docling", "qdrant_client", "dramatiq", "pika", "redis",
 )
 assert all(importlib.util.find_spec(name) is None for name in FORBIDDEN_PACKAGES), "Local inference packages found"
 assert not any(Path("/app").rglob("*.onnx")), "ONNX model weights found"
@@ -30,9 +30,12 @@ except ProviderNotApprovedError:
 else:
     raise AssertionError("Missing scope must deny inference")
 assert not any(name in sys.modules for name in FORBIDDEN_PACKAGES)
-assert not any(name.startswith(("src.routers.v1", "src.routers.internal_medical")) for name in sys.modules), "Retired client adapters loaded"
+assert not any(name.startswith(("src.routers.v1", "src.routers.internal_medical", "src.vector_store.qdrant_store", "src.processing.extraction.medical_observation_extractor")) for name in sys.modules), "Retired client adapters loaded"
 assert not any(path.startswith(("/api/v1", "/internal/medical")) for path in app.openapi()["paths"])
 assert not Path("/app/legacy_test_app.py").exists(), "Test-only client app copied into image"
+assert not Path("/app/src/routers/v1").exists(), "Retired client routes copied into image"
+assert not list(Path("/app/src/routers").glob("internal_medical*.py")), "Medical routes copied into image"
+assert not Path("/app/src/vector_store/qdrant_store.py").exists(), "Legacy vector backend copied into image"
 assert TokenCounter().count("PUBLIC SYNTHETIC OFFLINE TOKENIZER") > 0
 
 

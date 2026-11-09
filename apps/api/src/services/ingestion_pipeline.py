@@ -1,8 +1,11 @@
-"""Hosted processing shared by standalone and delegated document ingestion."""
+"""Hosted processing for document ingestion; legacy adapters load only explicitly."""
+
+from __future__ import annotations
 
 import asyncio
 import hashlib
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from src.config import settings
 from src.processing.chunking import DocumentChunker
@@ -11,10 +14,6 @@ from src.processing.cleaning import TextCleaner
 from src.processing.embedding.dense_embedder import DenseEmbedder
 from src.processing.extraction.document_extractor import DocumentExtractor
 from src.processing.extraction.hosted_layout import HostedLayoutRecognizer
-from src.processing.extraction.medical_observation_extractor import (
-    ExtractedObservationData,
-    MedicalObservationExtractor,
-)
 from src.processing.models.document import (
     EmbeddedDocument,
     ExtractedBlock,
@@ -22,6 +21,11 @@ from src.processing.models.document import (
     ExtractedPage,
 )
 from src.services.ingestion_source import IngestionSourceError
+
+if TYPE_CHECKING:
+    from src.processing.extraction.medical_observation_extractor import (
+        ExtractedObservationData,
+    )
 
 
 @dataclass
@@ -71,6 +75,10 @@ async def process_ingestion(source, storage, stage):
     embedded = await asyncio.to_thread(DenseEmbedder().embed_document, chunked)
     observations = []
     if source.client_id == "quick_clinic":
+        from src.processing.extraction.medical_observation_extractor import (
+            MedicalObservationExtractor,
+        )
+
         observations = MedicalObservationExtractor().extract_from_extracted_document(
             extracted_doc=extracted, report_date=source.report_date,
             default_extraction_method="OCR" if source.mime_type.startswith("image/") else "REGEX",

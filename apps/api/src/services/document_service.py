@@ -154,8 +154,8 @@ class DocumentService:
             try:
                 v_store = self.vector_store
                 if v_store is None:
-                    from src.vector_store.qdrant_store import QdrantVectorStore
-                    v_store = QdrantVectorStore()
+                    from src.vector_store import get_vector_store
+                    v_store = get_vector_store()
                 pts = await v_store.count_document_points(document.id)
                 if pts > 0:
                     document.chunk_count = pts

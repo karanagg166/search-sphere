@@ -110,6 +110,8 @@ def render_preflight():
         raise ReleaseError("Render model configuration differs from the verified hosted model versions.")
     if not 0 < int(values.get("COHERE_MONTHLY_CALL_LIMIT", "900")) <= 900 or values.get("RUN_INGESTION_WORKER", "true").lower() != "true":
         raise ReleaseError("The free-tier quota cap and in-process durable worker are required.")
+    if values.get("VECTOR_STORE_BACKEND", "supabase").lower() not in {"supabase", "pgvector", "postgres"}:
+        raise ReleaseError("Standalone releases require PostgreSQL/pgvector without a legacy fallback.")
     if values.get("STORAGE_BACKEND") != "supabase" or (values.get("SUPABASE_URL") or values.get("NEXT_PUBLIC_SUPABASE_URL")) != f"https://{PROJECT}.supabase.co":
         raise ReleaseError("Render storage configuration does not match the authorized Supabase project.")
     print(json.dumps({"render_service": SERVICE, "workspace": WORKSPACE, "plan": "free", "provider_policy_verified": True}))

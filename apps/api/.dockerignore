@@ -23,3 +23,9 @@ htmlcov/
 .fastembed_cache/
 .cache/
 tests/
+
+# Retired consumer HTTP adapters and obsolete vector backend are not deployable.
+src/routers/internal_medical*.py
+src/routers/v1/
+src/vector_store/qdrant_store.py
+src/maintenance/backfill_vector_scope.py

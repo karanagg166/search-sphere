@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import uuid
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -16,18 +15,24 @@ from src.processing.models.search import (
     SparseSearchResult,
 )
 from src.processing.models.sparse_vector import SparseVector
+from src.vector_store.contracts import (
+    QDRANT_POINT_NAMESPACE as QDRANT_POINT_NAMESPACE,
+)
+from src.vector_store.contracts import (
+    QdrantVectorStoreError as QdrantVectorStoreError,
+)
+from src.vector_store.contracts import (
+    VectorStoreError as VectorStoreError,
+)
+from src.vector_store.contracts import (
+    generate_point_id as generate_point_id,
+)
 
 if TYPE_CHECKING:
     pass
 
 logger = structlog.get_logger()
 
-# Deterministic namespace UUID for generating reproducible Qdrant point IDs
-QDRANT_POINT_NAMESPACE = uuid.UUID("7b6f3f0e-54d9-4f71-a477-0d5885f8cfbb")
-
-
-class QdrantVectorStoreError(Exception):
-    """Raised when an operation against Qdrant fails."""
 
 
 class QdrantConnectionError(QdrantVectorStoreError):
@@ -67,8 +72,6 @@ def classify_qdrant_error(exc: Exception, operation: str, collection: str) -> Qd
     return QdrantVectorStoreError(msg)
 
 
-# Domain-consistent alias
-VectorStoreError = QdrantVectorStoreError
 
 _shared_fallback_client: AsyncQdrantClient | None = None
 _shared_client_lock = asyncio.Lock()
@@ -106,15 +109,6 @@ async def get_shared_fallback_client() -> AsyncQdrantClient:
     return _shared_fallback_client
 
 
-def generate_point_id(document_id: str, chunk_index: int) -> str:
-    """
-    Generate a deterministic UUID string for a document chunk.
-
-    Ensures that processing the same document_id and chunk_index always yields
-    the identical point ID across retries and processes, avoiding duplicates.
-    """
-    name = f"{document_id}:{chunk_index}"
-    return str(uuid.uuid5(QDRANT_POINT_NAMESPACE, name))
 
 
 class QdrantVectorStore:

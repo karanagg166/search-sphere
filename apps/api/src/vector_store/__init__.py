@@ -1,9 +1,10 @@
+"""PostgreSQL/pgvector runtime with no Qdrant client import or fallback."""
+
 from typing import Any
 
 from src.config import settings
-from src.vector_store.qdrant_store import (
+from src.vector_store.contracts import (
     QDRANT_POINT_NAMESPACE,
-    QdrantVectorStore,
     QdrantVectorStoreError,
     VectorStoreError,
     generate_point_id,
@@ -14,24 +15,23 @@ from src.vector_store.supabase_vector_store import (
 )
 
 
-def get_vector_store(**kwargs: Any) -> Any:
-    """
-    Factory returning the configured vector store backend.
-    Default: SupabaseVectorStore (pgvector) for zero-downtime durability on $0 budget.
-    """
-    backend = getattr(settings, "VECTOR_STORE_BACKEND", "supabase").lower()
-    if backend in ("supabase", "pgvector", "postgres"):
-        return SupabaseVectorStore(**kwargs)
-    return QdrantVectorStore(**kwargs)
+def get_vector_store(**kwargs: Any) -> SupabaseVectorStore:
+    backend = settings.VECTOR_STORE_BACKEND.lower()
+    if backend not in ("supabase", "pgvector", "postgres"):
+        raise ValueError("Search Sphere requires PostgreSQL/pgvector vector storage.")
+    return SupabaseVectorStore(**kwargs)
+
+
+def __getattr__(name):
+    # Explicit archived imports only; production never selects this backend.
+    if name == "QdrantVectorStore":
+        from src.vector_store.qdrant_store import QdrantVectorStore
+        return QdrantVectorStore
+    raise AttributeError(name)
 
 
 __all__ = [
-    "QDRANT_POINT_NAMESPACE",
-    "QdrantVectorStore",
-    "QdrantVectorStoreError",
-    "SupabaseVectorStore",
-    "SupabaseVectorStoreError",
-    "VectorStoreError",
-    "generate_point_id",
+    "QDRANT_POINT_NAMESPACE", "QdrantVectorStoreError", "VectorStoreError",
+    "generate_point_id", "SupabaseVectorStore", "SupabaseVectorStoreError",
     "get_vector_store",
 ]

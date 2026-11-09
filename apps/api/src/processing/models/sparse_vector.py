@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import math
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from qdrant_client import models
+if TYPE_CHECKING:
+    from qdrant_client import models
 
 
 @dataclass(frozen=True)
@@ -73,14 +76,16 @@ class SparseVector:
                 )
 
     def to_qdrant(self) -> models.SparseVector:
-        """Convert to Qdrant native SparseVector model."""
+        """Archived adapter conversion; never used by PostgreSQL retrieval."""
+        from qdrant_client import models
+
         return models.SparseVector(
             indices=list(self.indices),
             values=[float(v) for v in self.values],
         )
 
     @classmethod
-    def from_fastembed(cls, raw: Any) -> "SparseVector":
+    def from_fastembed(cls, raw: Any) -> SparseVector:
         """Convert a FastEmbed SparseEmbedding object into an internal SparseVector."""
         raw_indices = getattr(raw, "indices", None)
         raw_values = getattr(raw, "values", None)

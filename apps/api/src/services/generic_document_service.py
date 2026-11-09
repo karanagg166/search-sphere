@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import re
 
@@ -15,7 +17,7 @@ from src.schemas.v1.documents import (
 from src.security.service_context import ServiceContext
 from src.services.ingestion_progress import attach_job_progress
 from src.storage.object_storage import ObjectStorage
-from src.vector_store.qdrant_store import QdrantVectorStore
+from src.vector_store.supabase_vector_store import SupabaseVectorStore
 
 logger = structlog.get_logger()
 
@@ -310,7 +312,7 @@ class GenericDocumentService:
         self,
         context: ServiceContext,
         doc_id_or_external_id: str,
-        vector_store: QdrantVectorStore | None = None,
+        vector_store: SupabaseVectorStore | None = None,
     ) -> bool:
         """Commit immediate evidence revocation and retain durable cleanup state."""
         from src.repositories.document_deletion import find_deletion
