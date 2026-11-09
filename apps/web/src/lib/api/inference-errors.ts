@@ -1,6 +1,6 @@
 const providerMessages: Record<string, string> = {
   provider_not_approved:
-    "AI processing is blocked for this request. The workspace administrator must review data classification and access before these documents can be used.",
+    "An administrator must approve these documents for external AI processing before answers can be generated. This approval is separate from who can access your documents.",
   provider_quota: "The AI service's free usage limit has been reached. Try again after it resets.",
   provider_rate_limit: "The AI service is receiving too many requests. Wait a moment and try again.",
   provider_timeout: "The AI service timed out. Please try again shortly.",

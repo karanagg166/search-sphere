@@ -45,7 +45,9 @@ describe("Conversation provider failures", () => {
       : new Response('event: error\ndata: {"code":"provider_not_approved","error":"Model inference is unavailable for this request."}\n\n'));
     vi.stubGlobal("fetch", fetch);
     await ask();
-    expect(await screen.findByText(/administrator must review data classification and access/)).toBeDefined();
+    expect(await screen.findByText(/administrator must approve these documents for external AI processing/)).toBeDefined();
+    expect(screen.getByText("AI processing approval required.")).toBeDefined();
+    expect(screen.queryByRole("button", { name: /retry question/i })).toBeNull();
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(answerInConversation).not.toHaveBeenCalled();
   });
@@ -57,6 +59,17 @@ describe("Conversation provider failures", () => {
     expect(await screen.findByText("Network connection closed abruptly.")).toBeDefined();
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(answerInConversation).not.toHaveBeenCalled();
+  });
+
+  it("preserves approval-required behavior when the compatible JSON route rejects processing", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("Unsupported route", { status: 404 })));
+    vi.mocked(answerInConversation).mockRejectedValueOnce({
+      response: { status: 503, data: { error_code: "provider_not_approved" } },
+    });
+    await ask();
+    expect(await screen.findByText("AI processing approval required.")).toBeDefined();
+    expect(screen.queryByRole("button", { name: /retry question/i })).toBeNull();
+    expect(answerInConversation).toHaveBeenCalledTimes(1);
   });
 
   it.each([404, 405])("retains the JSON compatibility route for an unsupported stream endpoint (HTTP %i)", async (status) => {

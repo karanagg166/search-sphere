@@ -268,6 +268,7 @@ export default function SearchPage() {
     setIsAnswering(true);
 
     let targetConvId = activeConversationId;
+    let answerErrorCode: string | undefined;
 
     try {
       // If no active conversation, create one first
@@ -362,6 +363,7 @@ export default function SearchPage() {
             onError: (errMsg, failure) => {
               streamError = errMsg;
               streamFailure = failure || null;
+              answerErrorCode = failure?.code;
             },
           }
         );
@@ -450,7 +452,9 @@ export default function SearchPage() {
               directErr?.message ||
               "Unable to generate answer. Please try again.";
           }
-          finalErrMsg = inferenceErrorMessage(directErr?.response?.data?.error_code, finalErrMsg);
+          const errorCode = directErr?.response?.data?.error_code;
+          answerErrorCode = typeof errorCode === "string" ? errorCode : undefined;
+          finalErrMsg = inferenceErrorMessage(answerErrorCode, finalErrMsg);
 
           setTurns((prev) =>
             prev.map((t) =>
@@ -459,6 +463,7 @@ export default function SearchPage() {
                     ...t,
                     status: "error",
                     errorMessage: finalErrMsg,
+                    errorCode: answerErrorCode,
                   }
                 : t
             )
@@ -496,7 +501,8 @@ export default function SearchPage() {
             ? {
                 ...t,
                 status: "error",
-                errorMessage: backendMessage,
+                errorMessage: inferenceErrorMessage(answerErrorCode, backendMessage),
+                errorCode: answerErrorCode,
               }
             : t
         )
