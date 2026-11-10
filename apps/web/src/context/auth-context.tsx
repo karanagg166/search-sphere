@@ -1,6 +1,7 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { User, fetchMe, loginUser, signupUser, LoginPayload, SignupPayload } from "@/lib/api";
 import { useBackendAvailability } from "@/context/backend-availability-context";
 
@@ -23,26 +24,43 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const TOKEN_KEY = "search_sphere_token";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const { isReady, status } = useBackendAvailability();
+  const { isReady } = useBackendAvailability();
+  const queryClient = useQueryClient();
+  const epoch = useRef(0);
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
+  const clearPrivateState = useCallback(() => {
+    void queryClient.cancelQueries();
+    queryClient.clear();
+    // The legacy key was shared across accounts. New conversations use owner keys.
+    for (const key of Object.keys(localStorage)) {
+      if (key === "search_sphere_active_conv" || key.startsWith("search_sphere_active_conv:")) localStorage.removeItem(key);
+    }
+  }, [queryClient]);
+
+
   // Restore authenticated session from localStorage on mount
   useEffect(() => {
+    let active = true;
     async function initAuth() {
+      const generation = epoch.current;
+      const storedToken = localStorage.getItem(TOKEN_KEY);
       try {
-        const storedToken = localStorage.getItem(TOKEN_KEY);
+        if (!active || generation !== epoch.current) return;
         if (storedToken) {
           setToken(storedToken);
           const userData = await fetchMe();
-          setUser(userData);
+          if (active && generation === epoch.current && localStorage.getItem(TOKEN_KEY) === storedToken) setUser(userData);
         }
       } catch (err: any) {
+        if (!active || generation !== epoch.current || localStorage.getItem(TOKEN_KEY) !== storedToken) return;
         const isAuthError =
           err?.response?.status === 401 || err?.response?.status === 403;
         if (isAuthError) {
-          console.warn("Session restore failed or expired token:", err);
+          console.warn("Session restore failed or token expired.");
+          clearPrivateState();
           localStorage.removeItem(TOKEN_KEY);
           setToken(null);
           setUser(null);
@@ -51,52 +69,81 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           console.warn("Backend sleeping or unreachable during initAuth; preserving token for recovery.");
         }
       } finally {
-        setIsLoading(false);
+        if (active && generation === epoch.current) setIsLoading(false);
       }
     }
     initAuth();
-  }, []);
+    return () => { active = false; };
+  }, [clearPrivateState]);
 
   // When backend becomes ready, automatically fetch user profile if token is present but user profile is missing
   useEffect(() => {
-    if (isReady && token && !user) {
+    if (isReady && token && !user && !isLoading) {
+      const generation = epoch.current;
       fetchMe()
         .then((userData) => {
+          if (generation !== epoch.current || localStorage.getItem(TOKEN_KEY) !== token) return;
           setUser(userData);
         })
         .catch((err) => {
+          if (generation !== epoch.current || localStorage.getItem(TOKEN_KEY) !== token) return;
           if (err?.response?.status === 401 || err?.response?.status === 403) {
+            clearPrivateState();
             localStorage.removeItem(TOKEN_KEY);
             setToken(null);
             setUser(null);
           }
         });
     }
-  }, [isReady, token, user]);
+  }, [isReady, token, user, isLoading, clearPrivateState]);
 
-  const setSession = useCallback(async (newToken: string, directUser?: User) => {
+
+  // A sign-in/logout in another tab must also clear this tab's private UI.
+  useEffect(() => {
+    const synchronize = (event: StorageEvent) => {
+      if ((event.key !== TOKEN_KEY && event.key !== null)
+        || (event.storageArea && event.storageArea !== localStorage)) return;
+      const current = localStorage.getItem(TOKEN_KEY);
+      if (current === token) return;
+      ++epoch.current;
+      clearPrivateState();
+      setUser(null);
+      setToken(current);
+      setIsLoading(false);
+    };
+    window.addEventListener("storage", synchronize);
+    return () => window.removeEventListener("storage", synchronize);
+  }, [token, clearPrivateState]);
+
+  const setSession = useCallback(async (newToken: string, directUser?: User, expectedGeneration?: number) => {
+    const generation = expectedGeneration ?? ++epoch.current;
+    if (generation !== epoch.current) return;
+    clearPrivateState();
     localStorage.setItem(TOKEN_KEY, newToken);
     setToken(newToken);
-    if (directUser) {
-      setUser(directUser);
-    } else {
-      try {
+    setUser(directUser ?? null);
+    setIsLoading(true);
+    try {
+      if (!directUser) {
         const userData = await fetchMe();
-        setUser(userData);
-      } catch (err) {
-        console.error("Failed to load user profile after session set", err);
+        if (generation === epoch.current && localStorage.getItem(TOKEN_KEY) === newToken) setUser(userData);
       }
+    } catch {
+      if (generation === epoch.current) console.warn("User profile could not be restored yet.");
+    } finally {
+      if (generation === epoch.current) setIsLoading(false);
     }
-  }, []);
+  }, [clearPrivateState]);
 
   const login = useCallback(
     async (payload: LoginPayload) => {
+      const generation = ++epoch.current;
       setIsLoading(true);
       try {
         const res = await loginUser(payload);
-        await setSession(res.access_token, res.user);
+        await setSession(res.access_token, res.user, generation);
       } finally {
-        setIsLoading(false);
+        if (generation === epoch.current) setIsLoading(false);
       }
     },
     [setSession]
@@ -104,12 +151,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signup = useCallback(
     async (payload: SignupPayload) => {
+      const generation = ++epoch.current;
       setIsLoading(true);
       try {
         const res = await signupUser(payload);
-        await setSession(res.access_token, res.user);
+        await setSession(res.access_token, res.user, generation);
       } finally {
-        setIsLoading(false);
+        if (generation === epoch.current) setIsLoading(false);
       }
     },
     [setSession]
@@ -140,10 +188,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    ++epoch.current;
+    clearPrivateState();
     localStorage.removeItem(TOKEN_KEY);
     setToken(null);
     setUser(null);
-  }, []);
+    setIsLoading(false);
+  }, [clearPrivateState]);
 
   return (
     <AuthContext.Provider
@@ -151,7 +202,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         token,
         isLoading,
-        isAuthenticated: !!token && (!!user || status !== "offline"),
+        isAuthenticated: !!token && !!user,
         login,
         signup,
         loginWithGoogle,
@@ -161,7 +212,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         logout,
       }}
     >
-      {children}
+      <React.Fragment key={user?.id ?? "anonymous"}>{children}</React.Fragment>
     </AuthContext.Provider>
   );
 }

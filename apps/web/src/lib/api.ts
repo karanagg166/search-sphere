@@ -33,7 +33,7 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
-// Dual-redundancy: if same-origin /api/proxy returns 404, 502, 503, 504, or network error, fallback to direct URL
+// Only same-session GET/HEAD proxy failures may fall back once. Never replay generation or mutations.
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -52,7 +52,10 @@ apiClient.interceptors.response.use(
       directUrl &&
       !originalRequest?._retried &&
       originalRequest?.baseURL === "/api/proxy" &&
-      isProxyFailure
+      isProxyFailure &&
+      ["get", "head"].includes(String(originalRequest?.method || "get").toLowerCase()) &&
+      !error.response?.data?.error_code &&
+      originalRequest.headers?.Authorization === (localStorage.getItem("search_sphere_token") ? `Bearer ${localStorage.getItem("search_sphere_token")}` : undefined)
     ) {
       originalRequest._retried = true;
       originalRequest.baseURL = directUrl;

@@ -63,6 +63,16 @@ export default function SearchPage() {
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [selectedDocId, setSelectedDocId] = useState<string | undefined>(undefined);
   const hasAutoLoadedRef = React.useRef(false);
+  const mountedRef = React.useRef(false);
+  const requestController = React.useRef<AbortController | null>(null);
+  const historyVersion = React.useRef(0);
+  const conversationKey = user?.id ? `search_sphere_active_conv:${user.id}` : null;
+  const sessionCurrent = useCallback(() => mountedRef.current && !!token
+    && localStorage.getItem("search_sphere_token") === token, [token]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; requestController.current?.abort(); };
+  }, []);
 
   // Centralized Backend Availability State
   const { isReady, isWaking, isOffline, status } = useBackendAvailability();
@@ -89,17 +99,20 @@ export default function SearchPage() {
 
   const handleSelectConversation = useCallback(
     async (convId: string) => {
-      if (isAnswering) return;
-      if (convId === activeConversationId && turns.length > 0) return;
+      if (isAnswering || !sessionCurrent()) return;
+      if (convId === activeConversationId && turns.length > 0 && !isLoadingHistory) return;
+      const version = ++historyVersion.current;
 
       setActiveConversationId(convId);
+      setTurns([]);
       if (typeof window !== "undefined") {
-        localStorage.setItem("search_sphere_active_conv", convId);
+        if (conversationKey) localStorage.setItem(conversationKey, convId);
       }
       setIsLoadingHistory(true);
 
       try {
         const detail = await getConversation(convId);
+        if (!sessionCurrent() || historyVersion.current !== version) return;
         const loadedTurns: ChatTurn[] = [];
         let pendingUserTurn: ChatTurn | null = null;
 
@@ -144,12 +157,12 @@ export default function SearchPage() {
 
         setTurns(loadedTurns);
       } catch (err) {
-        console.error("Failed to load conversation messages", err);
+        console.warn("Conversation history could not be loaded.");
       } finally {
-        setIsLoadingHistory(false);
+        if (sessionCurrent() && historyVersion.current === version) setIsLoadingHistory(false);
       }
     },
-    [activeConversationId, isAnswering, turns.length]
+    [activeConversationId, isAnswering, turns.length, isLoadingHistory, sessionCurrent, conversationKey]
   );
 
   // Automatically restore active conversation or load latest conversation on mount
@@ -157,7 +170,7 @@ export default function SearchPage() {
     if (!isAuthenticated || conversations.length === 0 || hasAutoLoadedRef.current) return;
 
     hasAutoLoadedRef.current = true;
-    const savedConvId = typeof window !== "undefined" ? localStorage.getItem("search_sphere_active_conv") : null;
+    const savedConvId = typeof window !== "undefined" && conversationKey ? localStorage.getItem(conversationKey) : null;
     const targetConv = savedConvId && conversations.some((c) => c.id === savedConvId)
       ? savedConvId
       : conversations[0]?.id;
@@ -168,7 +181,7 @@ export default function SearchPage() {
       }, 0);
       return () => clearTimeout(timer);
     }
-  }, [isAuthenticated, conversations, handleSelectConversation]);
+  }, [isAuthenticated, conversations, handleSelectConversation, conversationKey]);
 
   // Create document ID to filename mapping
   const documentMap = useMemo<Record<string, string>>(() => {
@@ -196,10 +209,11 @@ export default function SearchPage() {
 
   const handleNewChat = () => {
     if (isAnswering) return;
+    ++historyVersion.current;
     setActiveConversationId(null);
     setTurns([]);
     if (typeof window !== "undefined") {
-      localStorage.removeItem("search_sphere_active_conv");
+      if (conversationKey) localStorage.removeItem(conversationKey);
     }
   };
 
@@ -207,12 +221,13 @@ export default function SearchPage() {
     e.stopPropagation();
     try {
       await deleteConversation(convId);
+      if (!sessionCurrent()) return;
       if (activeConversationId === convId) {
         handleNewChat();
       }
       refetchConversations();
     } catch (err) {
-      console.error("Failed to delete conversation", err);
+      console.warn("Conversation could not be deleted.");
     }
   };
 
@@ -255,6 +270,9 @@ export default function SearchPage() {
       return;
     }
 
+    if (!sessionCurrent()) return;
+    const controller = new AbortController();
+    requestController.current = controller;
     const turnId = generateTurnId();
     const newTurn: ChatTurn = {
       id: turnId,
@@ -274,10 +292,11 @@ export default function SearchPage() {
       // If no active conversation, create one first
       if (!targetConvId) {
         const created = await createConversation();
+        if (!sessionCurrent()) return;
         targetConvId = created.id;
         setActiveConversationId(created.id);
         if (typeof window !== "undefined") {
-          localStorage.setItem("search_sphere_active_conv", created.id);
+          if (conversationKey) localStorage.setItem(conversationKey, created.id);
         }
       }
 
@@ -305,6 +324,7 @@ export default function SearchPage() {
           token,
           {
             onMetadata: (meta) => {
+              if (!sessionCurrent()) return;
               setTurns((prev) =>
                 prev.map((t) =>
                   t.id === turnId
@@ -318,6 +338,7 @@ export default function SearchPage() {
               );
             },
             onSources: (sources) => {
+              if (!sessionCurrent()) return;
               setTurns((prev) =>
                 prev.map((t) =>
                   t.id === turnId
@@ -330,6 +351,7 @@ export default function SearchPage() {
               );
             },
             onToken: (chunk) => {
+              if (!sessionCurrent()) return;
               accumulatedText += chunk;
               setTurns((prev) =>
                 prev.map((t) =>
@@ -343,6 +365,7 @@ export default function SearchPage() {
               );
             },
             onDone: (donePayload) => {
+              if (!sessionCurrent()) return;
               receivedDone = true;
               const finalAnswer = donePayload.answer || accumulatedText;
               setTurns((prev) =>
@@ -361,15 +384,19 @@ export default function SearchPage() {
               refetchConversations();
             },
             onError: (errMsg, failure) => {
+              if (!sessionCurrent()) return;
               streamError = errMsg;
               streamFailure = failure || null;
               answerErrorCode = failure?.code;
             },
-          }
+          },
+          controller.signal
         );
       } catch (err: any) {
         streamError = err?.message || "Streaming connection failed";
       }
+
+      if (!sessionCurrent()) return;
 
       // If streaming began emitting tokens but disconnected prematurely, show interrupted state
       // DO NOT automatically re-execute to prevent duplicate assistant responses in database.
@@ -406,6 +433,7 @@ export default function SearchPage() {
             candidate_k: 20,
           });
 
+          if (!sessionCurrent()) return;
           const finalAnswer =
             directResp.answer?.trim() ||
             "I couldn't find relevant information in your documents to answer that question.";
