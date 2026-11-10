@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { FileText, ExternalLink, Trash2, Loader2, Database, AlertCircle } from "lucide-react";
@@ -15,7 +16,7 @@ function formatBytes(bytes: number): string {
 }
 
 export function DocumentList() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const { isWaking } = useBackendAvailability();
   const queryClient = useQueryClient();
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -38,10 +39,14 @@ export function DocumentList() {
   }
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["documents"],
+    queryKey: ["documents", user?.id],
     queryFn: fetchDocuments,
     enabled: isAuthenticated,
     refetchOnWindowFocus: false,
+    refetchInterval: (query) => query.state.data?.documents.some((document) =>
+      ["queued", "uploaded", "processing"].includes(document.status)
+      && Date.now() - new Date(document.created_at).getTime() < 600000,
+    ) ? 3000 : false,
   });
 
   const deleteMutation = useMutation({
@@ -115,7 +120,10 @@ export function DocumentList() {
                   <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground">
                     <span>{formatBytes(doc.file_size)}</span>
                     <span>•</span>
-                    <span className="capitalize">{doc.status}</span>
+                    <span className="capitalize">{doc.job?.error_code === "provider_not_approved" || doc.status === "failed:provider_not_approved" ? "AI approval required" : doc.status}</span>
+                    {doc.job && ["QUEUED", "RUNNING", "RETRY"].includes(doc.job.status) && (
+                      <span>{doc.job.stage} · {Math.floor(doc.job.queue_age_seconds)}s queued</span>
+                    )}
                     <span>•</span>
                     <span>{new Date(doc.created_at).toLocaleDateString()}</span>
                   </div>
@@ -123,6 +131,7 @@ export function DocumentList() {
               </div>
 
               <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                <Link href={`/private-search?document=${encodeURIComponent(doc.id)}`} className="text-xs underline text-primary">Search text</Link>
                 <button
                   type="button"
                   onClick={() => openDocument(doc.id)}

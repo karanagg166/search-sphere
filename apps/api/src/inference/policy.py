@@ -87,6 +87,12 @@ def authorize_cohere(api_key: str) -> InferenceScope:
         )
     if settings.ENVIRONMENT == "production" and scope.validator is None:
         raise ProviderNotApprovedError("PostgreSQL authorization is required for production inference.")
+    check_cohere_configuration(api_key, scope.classification)
+    return scope
+
+
+def check_cohere_configuration(api_key: str, classification: DataClassification) -> None:
+    """Pure eligibility check for UI metadata; never authorizes an inference call."""
     fingerprint = hashlib.sha256(api_key.encode()).hexdigest()
     approved_key = settings.COHERE_TRIAL_KEY_SHA256
     if (
@@ -98,19 +104,18 @@ def authorize_cohere(api_key: str) -> InferenceScope:
             "The configured Cohere key has no verified free-trial approval."
         )
     allowed = settings.COHERE_APPROVED_DATA_CLASSIFICATIONS
-    if scope.classification.value not in allowed:
+    if classification.value not in allowed:
         raise ProviderNotApprovedError(
             "No approved provider for this data classification."
         )
     if (
-        scope.classification
+        classification
         in {DataClassification.CONFIDENTIAL, DataClassification.MEDICAL}
         and not settings.COHERE_SENSITIVE_APPROVAL_REF
     ):
         raise ProviderNotApprovedError(
             "Sensitive-content provider approval is not recorded."
         )
-    return scope
 
 
 def current_inference_scope() -> InferenceScope:

@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import React from "react";
 import {
   MessageSquare,
@@ -203,6 +205,9 @@ export function AnswerCard({ turn, documentMap = {}, onRetry, onFeedback }: Answ
               </div>
               {turn.errorMessage && (
                 <p className="text-[11px] opacity-90 pl-6">{turn.errorMessage}</p>
+              )}
+              {turn.errorCode === "provider_not_approved" && (
+                <Link href="/private-search" className="pl-6 underline font-medium">Search PDF text privately</Link>
               )}
               {onRetry && turn.errorCode !== "provider_not_approved" && (
                 <button
