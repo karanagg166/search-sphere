@@ -6,7 +6,7 @@ import { answerInConversation } from "@/lib/api/conversations";
 import SearchPage from "./page";
 
 vi.mock("@/context/auth-context", () => ({
-  useAuth: () => ({ user: { name: "Synthetic", email: "synthetic@example.invalid" }, token: "synthetic-token", isAuthenticated: true, logout: vi.fn() }),
+  useAuth: () => ({ user: { id: "synthetic-user", name: "Synthetic", email: "synthetic@example.invalid" }, token: "synthetic-token", isAuthenticated: true, logout: vi.fn() }),
 }));
 vi.mock("@/context/backend-availability-context", () => ({
   useBackendAvailability: () => ({ isReady: true, isWaking: false, isOffline: false, status: "ready" }),
@@ -23,6 +23,7 @@ vi.mock("@/lib/api/conversations", () => ({
 
 beforeEach(() => {
   localStorage.clear();
+  localStorage.setItem("search_sphere_token", "synthetic-token");
   vi.clearAllMocks();
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -45,7 +46,7 @@ describe("Conversation provider failures", () => {
       : new Response('event: error\ndata: {"code":"provider_not_approved","error":"Model inference is unavailable for this request."}\n\n'));
     vi.stubGlobal("fetch", fetch);
     await ask();
-    expect(await screen.findByText(/administrator must approve these documents for external AI processing/)).toBeDefined();
+    expect(await screen.findByText(/need review before external AI processing/)).toBeDefined();
     expect(screen.getByText("AI processing approval required.")).toBeDefined();
     expect(screen.queryByRole("button", { name: /retry question/i })).toBeNull();
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -78,4 +79,14 @@ describe("Conversation provider failures", () => {
     await waitFor(() => expect(answerInConversation).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("Compatible JSON answer")).toBeDefined();
   });
+});
+
+it("does not send an old question under a new session after conversation creation resolves", async () => {
+  const { createConversation } = await import("@/lib/api/conversations");
+  let resolve!: (value: Awaited<ReturnType<typeof createConversation>>) => void;
+  vi.mocked(createConversation).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+  const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
+  await ask(); localStorage.setItem("search_sphere_token", "new-account-token");
+  await act(async () => { resolve({ id: "old-account-conversation", user_id: "synthetic-user", title: "Synthetic", created_at: "2026-11-10", updated_at: "2026-11-10", message_count: 0 }); await new Promise((done) => setTimeout(done, 0)); });
+  expect(fetch).not.toHaveBeenCalled(); expect(answerInConversation).not.toHaveBeenCalled();
 });

@@ -43,8 +43,16 @@ retrieval path without changing the free-only or sensitive-content boundary.
 | Approval error dead end | Only a retry-excluded administrator message | Explicit link to provider-free search from errors, documents and search header |
 | Private scope and deletion | Backend ownership exists | Real PostgreSQL and HTTP tests deny another owner before Storage reads and withhold passages after deletion/disable/source changes |
 | Offline resource use | No private native-search mode | Child wall/CPU/address-space/output limits, one concurrent parser, no inherited credentials; network-disabled image gate exercises real extraction under 512 MiB |
-| Account changes in the browser | Shared query keys and asynchronous session restoration require repair | Document/conversation query keys are now owner-specific; session cancellation/cache reset follow-up is tracked separately |
+| Account changes in the browser | Shared query keys and asynchronous session restoration require repair | Owner-specific queries plus session generation guards, cache cancellation/reset, private UI remounts and cross-tab synchronization keep account changes isolated |
 
 Verification uses public/synthetic PDF fixtures only. This change does not approve
 unknown content for Cohere, restore broken old vector indexes, add local model
 weights, generate private AI answers or claim scanned OCR support.
+
+
+Browser account changes cancel cached requests, clear private query/mutation caches
+and remount account-scoped UI state. Late login/profile/stream responses cannot
+restore an earlier identity or continue a question under a new credential. Active
+conversation references are stored under an owner key and cleared on account
+changes. Proxy recovery retries only a same-session GET/HEAD once; mutations,
+answer generation and provider errors are not automatically replayed.
