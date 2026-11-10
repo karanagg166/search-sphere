@@ -69,7 +69,7 @@ export default function SearchPage() {
 
   // Stored documents for filename resolution and scoping
   const { data: docData } = useQuery({
-    queryKey: ["documents"],
+    queryKey: ["documents", user?.id],
     queryFn: fetchDocuments,
     enabled: isAuthenticated,
     refetchOnWindowFocus: false,
@@ -81,7 +81,7 @@ export default function SearchPage() {
     isLoading: convsLoading,
     refetch: refetchConversations,
   } = useQuery({
-    queryKey: ["conversations"],
+    queryKey: ["conversations", user?.id],
     queryFn: listConversations,
     enabled: isAuthenticated,
     refetchOnWindowFocus: false,
@@ -537,6 +537,7 @@ export default function SearchPage() {
               <ArrowLeft className="w-3.5 h-3.5" />
               <span>Documents</span>
             </Link>
+            <Link href="/private-search" className="text-xs text-primary underline">Private text search</Link>
             <h1 className="text-2xl md:text-3xl font-bold tracking-tight flex items-center gap-2.5">
               <Sparkles className="w-6 h-6 text-primary" />
               Search Sphere Q&amp;A

@@ -46,7 +46,20 @@ async def verify_health():
         assert response.status_code == 200 and response.json()["status"] == "ok"
 
 
+async def verify_private_native_search():
+    import pymupdf
+    from src.services.private_text_search import parse_native_text
+
+    with pymupdf.open() as document:
+        document.new_page().insert_text((50, 70), "PUBLIC SYNTHETIC OFFLINE-TEXT-42")
+        content = document.tobytes()
+    result = await parse_native_text(content, "OFFLINE-TEXT-42", 5)
+    assert result["results"][0]["page_number"] == 1
+    assert "OFFLINE-TEXT-42" in result["results"][0]["text"]
+
+
 asyncio.run(verify_health())
+asyncio.run(verify_private_native_search())
 rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
 assert rss_mb < 300, f"Image import/health peak RSS exceeds the 300 MiB pre-deploy gate: {rss_mb:.1f}"
 print(json.dumps({"result": "PASS", "local_weights": False, "peak_rss_mb": round(rss_mb, 1)}))

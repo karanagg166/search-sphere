@@ -140,6 +140,7 @@ export interface DocumentItem {
   file_size: number;
   mime_type: string;
   status: string;
+  job?: { status: string; stage: string; attempts: number; queue_age_seconds: number; error_code?: string | null } | null;
   created_at: string;
   updated_at: string;
 }

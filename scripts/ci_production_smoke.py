@@ -365,6 +365,22 @@ def check_auth_boundary(auth_token: str | None = None) -> None:
         record("Tenant search isolation", "cross-tenant search leakage blocked")
 
 
+def verify_private_text_search(token: str, document_id: str, marker: str) -> None:
+    status, _, payload = http(API + "/private-search", method="POST",
+        headers={"Authorization": "Bearer " + token},
+        data={"document_id": document_id, "query": marker, "limit": 5}, timeout=35)
+    body = require_json(status, payload, "Private text search")
+    rows = body.get("results", [])
+    if (body.get("mode") != "private_text_search" or body.get("generated_answer") is not False
+        or body.get("external_provider_used") is not False or not rows
+        or not any(marker in row.get("text", "") for row in rows)
+        or any(row.get("document_id") != document_id or row.get("page_number", 0) < 1
+               or not isinstance(row.get("bbox"), list) or len(row["bbox"]) != 4
+               or not re.fullmatch(r"[a-f0-9]{64}", row.get("source_sha256", "")) for row in rows)):
+        fail("Private text search", "literal marker or owned page provenance missing")
+    record("Private text search", "new PDF marker found in literal page-cited passages; no generated answer or model provider")
+
+
 def check_standalone_surface() -> None:
     status, _, schema = http(API + "/openapi.json", timeout=25)
     require_json(status, schema, "Standalone API surface")
@@ -836,6 +852,7 @@ def run_rag_suite() -> None:
         )
         if was_created:
             created_id = doc_id
+        verify_private_text_search(token, doc_id, marker)
         run_real_rag_pipeline(token, doc_id, marker, do_answer=True)
         run_conversation_journey(token, user_id, doc_id, marker)
     except (AssertionError, OSError, TimeoutError) as error:

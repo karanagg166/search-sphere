@@ -1,22 +1,28 @@
 "use client";
 
+import Link from "next/link";
 import React, { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDropzone } from "react-dropzone";
 import { UploadCloud, FileText, AlertCircle, CheckCircle, Loader2, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/auth-context";
 import { useBackendAvailability } from "@/context/backend-availability-context";
 import { uploadDocument } from "@/lib/api";
+import { fetchProcessingOptions } from "@/lib/api/private-search";
 
 interface DocumentUploadProps {
   onRequireAuth?: () => void;
 }
 
 export function DocumentUpload({ onRequireAuth }: DocumentUploadProps) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const { isWaking, isOffline } = useBackendAvailability();
   const queryClient = useQueryClient();
+  const processing = useQuery({
+    queryKey: ["processing-options", user?.id], queryFn: fetchProcessingOptions,
+    enabled: !!user?.id, refetchOnWindowFocus: false,
+  });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -24,7 +30,7 @@ export function DocumentUpload({ onRequireAuth }: DocumentUploadProps) {
     mutationFn: (file: File) => uploadDocument(file),
     onSuccess: (data) => {
       setErrorMessage(null);
-      setSuccessMessage(`Successfully uploaded "${data.filename}" (${(data.file_size / 1024).toFixed(1)} KB)`);
+      setSuccessMessage(`Stored privately "${data.filename}" (${(data.file_size / 1024).toFixed(1)} KB)`);
       queryClient.invalidateQueries({ queryKey: ["documents"] });
       setTimeout(() => setSuccessMessage(null), 5000);
     },
@@ -81,7 +87,7 @@ export function DocumentUpload({ onRequireAuth }: DocumentUploadProps) {
             </span>
           ) : (
             <span className="text-[11px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">
-              Ready to Ingest
+              Ready to Upload
             </span>
           )
         )}
@@ -156,6 +162,15 @@ export function DocumentUpload({ onRequireAuth }: DocumentUploadProps) {
             )}
           </div>
         </div>
+      )}
+
+      {isAuthenticated && (
+        <p className="text-xs text-muted-foreground">
+          {processing.data?.ai_answers_available
+            ? "AI processing is available for your approved document scope."
+            : "Your PDF is stored privately. AI indexing and answers need processing approval."}
+          {" "}<Link href="/private-search" className="text-primary underline">Private text search</Link> works without an AI provider.
+        </p>
       )}
 
       {/* Notifications */}

@@ -422,6 +422,7 @@ def test_missing_credentials_fail_required_journey(monkeypatch):
 
 
 def test_cleanup_cannot_mask_original_answer_failure(monkeypatch):
+    monkeypatch.setattr(smoke, "verify_private_text_search", lambda *a, **kw: None)
     monkeypatch.setattr(smoke,"acquire_ci_auth",lambda:("synthetic-token",{}))
     monkeypatch.setattr(smoke,"http",lambda *a,**kw:(200,{}, {"id":"synthetic-user"}))
     monkeypatch.setattr(smoke,"sweep_dangling_synthetic_documents",lambda *a,**kw:None)
@@ -551,6 +552,7 @@ def test_conversation_cleanup_cannot_accept_a_503_read_denial(monkeypatch):
 
 
 def test_conversation_cleanup_failure_preserves_original_provider_failure(monkeypatch):
+    monkeypatch.setattr(smoke, "verify_private_text_search", lambda *a, **kw: None)
     monkeypatch.setattr(smoke, "acquire_ci_auth", lambda: ("synthetic-token", "owner"))
     monkeypatch.setattr(smoke, "http", lambda *a, **kw: (200, {}, {"id":"owner"}))
     monkeypatch.setattr(smoke, "sweep_dangling_synthetic_documents", lambda *a, **kw: None)
@@ -601,3 +603,17 @@ def test_standalone_gate_requires_native_routes_and_rejects_advertised_integrati
     paths.clear()
     with pytest.raises(AssertionError):
         smoke.check_standalone_surface()
+
+
+@pytest.mark.parametrize("changed", ["provider", "generated", "wrong-document", "no-marker", "bad-page"])
+def test_private_search_gate_rejects_unverified_literal_sources(monkeypatch, changed):
+    body = {"mode": "private_text_search", "generated_answer": False, "external_provider_used": False,
+            "results": [{"document_id": "owned", "text": "PUBLIC-42", "page_number": 1, "bbox": [1,2,3,4], "source_sha256": "a" * 64}]}
+    if changed == "provider": body["external_provider_used"] = True
+    if changed == "generated": body["generated_answer"] = True
+    if changed == "wrong-document": body["results"][0]["document_id"] = "other"
+    if changed == "no-marker": body["results"][0]["text"] = "unrelated"
+    if changed == "bad-page": body["results"][0]["page_number"] = 0
+    monkeypatch.setattr(smoke, "http", lambda *args, **kwargs: (200, {}, body))
+    with pytest.raises(AssertionError):
+        smoke.verify_private_text_search("synthetic-token", "owned", "PUBLIC-42")
