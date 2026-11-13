@@ -126,10 +126,10 @@ docker compose exec api alembic current
 
 ```bash
 # Build FastAPI backend image
-docker build -t search-sphere-api:latest -f apps/api/Dockerfile apps/api
+docker build -t search-sphere-api:latest -f apps/api/Dockerfile .
 
 # Build Dramatiq worker image
-docker build -t search-sphere-worker:latest -f apps/worker/Dockerfile apps/worker
+docker build -t search-sphere-worker:latest -f apps/worker/Dockerfile .
 
 # Build Next.js frontend image
 docker build -t search-sphere-web:latest -f apps/web/Dockerfile apps/web
@@ -218,3 +218,26 @@ Follow this 12-step verification protocol for any staging or production release:
 - **Remediation**:
   1. Check RabbitMQ queue depth in the RabbitMQ management dashboard.
   2. Scale worker processes horizontally: `docker compose up -d --scale worker=4` (or scale container replicas in your cloud orchestrator).
+
+## Reusable ingestion release and resume behavior
+
+The canonical API and worker builds require the **repository root** as Docker
+context; the API Dockerfile is `./apps/api/Dockerfile`. Render root directory is
+empty. The protected pinned release controller verifies the existing service,
+free plan, disabled autodeploy and approved trial credential before updating only
+these monorepo paths. It reads back configuration before starting a SHA-pinned
+build. Existing PostgreSQL migrations and signed synthetic release cleanup remain
+gates; there is no vector migration or automatic reindex of existing documents.
+
+The release gate now requires the reusable package check as well as the existing
+backend, worker, image and frontend jobs for the exact main commit. Core package
+installation is included in all application and release runtimes. Optional
+Docling/Paddle/model weights are excluded. See
+[free-tier reliability](docs/FREE_TIER_RELIABILITY.md) before enabling monitoring.
+
+`/health` remains inexpensive liveness. `/ready` performs bounded `SELECT 1`
+with one idle-pool disposal/retry after stale connectivity and reports a coarse
+worker state. Durable worker polling backs off on database failure and resumes
+leased jobs through the existing reclaim/idempotent publication protocol. A
+sleeping Render process performs no work. Private originals and job state remain
+in Supabase, never the ephemeral local filesystem.

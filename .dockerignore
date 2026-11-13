@@ -11,3 +11,17 @@
 **/.ruff_cache
 .git
 .DS_Store
+**/.env
+**/.env.*
+**/*.onnx
+**/*.safetensors
+**/*.pt
+**/*.pth
+**/.fastembed_cache
+packages/search-sphere-ingest/tests
+packages/search-sphere-ingest/evaluation
+packages/search-sphere-ingest/dist
+apps/api/src/routers/internal_medical*.py
+apps/api/src/routers/v1
+apps/api/src/vector_store/qdrant_store.py
+apps/api/src/maintenance/backfill_vector_scope.py

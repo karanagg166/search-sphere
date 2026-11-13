@@ -11,6 +11,7 @@ def native_tables(page, page_number, source_hash):
     candidates = []
     for index, table in enumerate(page.find_tables(strategy="lines_strict", use_layout=False).tables):
         rows = table.extract()
+        source_rows = rows
         if not 2 <= len(rows) <= 10000 or not 2 <= table.col_count <= 64:
             continue
         # Merged/missing cells are complex layouts, handled by hosted recognition.
@@ -42,6 +43,10 @@ def native_tables(page, page_number, source_hash):
             "column_edges": [float(cell[0]) for cell in table.rows[0].cells if cell] + [bbox[2]],
             "page_width": float(page.cropbox.width), "page_height": float(page.cropbox.height),
             "extraction_method": "native_pdf_table", "review_required": False, "row_offset": 0,
+            "cells": [{"row": r, "column": c, "row_span": 1, "column_span": 1,
+                       "header": not header.external and r == 0, "text": str(source_rows[r][c] or ""),
+                       "page_number": page_number,
+                       "bbox": list(bounds)} for r, row in enumerate(table.rows) for c, bounds in enumerate(row.cells) if bounds],
         }
         masks = [bbox]
         if header.external:

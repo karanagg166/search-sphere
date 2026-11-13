@@ -1,5 +1,13 @@
 # Search Sphere
 
+The reusable [search-sphere-ingest package](packages/search-sphere-ingest/README.md)
+provides independent PDF/image extraction and content-aware chunking. Search Sphere
+keeps its hosted Cohere policy, private storage and PostgreSQL/pgvector pipeline.
+See the [implementation and acceptance report](docs/DOCUMENT_INTELLIGENCE_RELEASE.md)
+and [free-tier reliability setup](docs/FREE_TIER_RELIABILITY.md) for tested behavior,
+optional providers and remaining live release gates. Warming is best effort;
+Render Free does not guarantee continuous availability.
+
 Search Sphere is a standalone application for private, per-user PDF storage,
 search and grounded questions and answers. Quick-Clinic and ExamArena will build
 separate chatbots; this application does not serve their chatbot APIs or depend

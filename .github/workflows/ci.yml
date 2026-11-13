@@ -44,6 +44,7 @@ jobs:
         run: |
           uv pip install --system -r apps/api/requirements-production.txt
           uv pip install --system pytest pytest-asyncio pytest-cov ruff aiosqlite "qdrant-client>=1.11.0,<2"
+          uv pip install --system ./packages/search-sphere-ingest
 
       - name: Lint with Ruff
         run: |
@@ -101,6 +102,7 @@ jobs:
           scripts/tests/test_ingestion_worker_postgres.py
           scripts/tests/test_document_cleanup_postgres.py
           scripts/tests/test_document_evidence_postgres.py
+          scripts/tests/test_normalized_publication_postgres.py
           scripts/tests/test_derived_assets_postgres.py
           scripts/tests/test_query_access_postgres.py
           scripts/tests/test_conversation_context_postgres.py
@@ -130,7 +132,7 @@ jobs:
         env:
           PYTHONPATH: "."
         run: |
-          pytest scripts/tests/test_monitor.py scripts/tests/test_ci_production_smoke.py scripts/tests/test_smoke_receipts.py scripts/tests/test_smoke_receipt_replay.py scripts/tests/test_native_reconciliation.py scripts/tests/test_release_artifacts.py scripts/tests/test_native_fixture_restore.py scripts/tests/test_release_gate.py scripts/tests/test_collection_scope_smoke.py -v
+          pytest scripts/tests/test_warm_monitor.py scripts/tests/test_monitor.py scripts/tests/test_ci_production_smoke.py scripts/tests/test_smoke_receipts.py scripts/tests/test_smoke_receipt_replay.py scripts/tests/test_native_reconciliation.py scripts/tests/test_release_artifacts.py scripts/tests/test_native_fixture_restore.py scripts/tests/test_release_gate.py scripts/tests/test_collection_scope_smoke.py -v
 
   hosted-runtime-image:
     name: Hosted Runtime Image
@@ -138,7 +140,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build production image
-        run: docker build -t search-sphere-hosted:ci apps/api
+        run: docker build -f apps/api/Dockerfile -t search-sphere-hosted:ci .
       - name: Verify hosted-only image without network access
         run: >-
           docker run --rm --network none --memory 512m
@@ -147,6 +149,20 @@ jobs:
           -e DATABASE_URL=postgresql+asyncpg://synthetic:synthetic@localhost/search_sphere_test
           -v "$PWD/scripts/check_hosted_image.py:/check_hosted_image.py:ro"
           search-sphere-hosted:ci python /check_hosted_image.py
+
+      - name: Evaluate real native extraction and bounded panel proposals
+        run: >-
+          docker run --rm --network none --memory 512m --cpus 1
+          -v "$PWD/packages/search-sphere-ingest/evaluation/container_acceptance.py:/acceptance.py:ro"
+          search-sphere-hosted:ci python /acceptance.py
+
+      - name: Bound API and raster panel memory together
+        run: >-
+          docker run --rm --network none --memory 512m
+          -e ENVIRONMENT=test -e STORAGE_BACKEND=local -e PYTHONPATH=/app
+          -e DATABASE_URL=postgresql+asyncpg://synthetic:synthetic@localhost/search_sphere_test
+          -v "$PWD/packages/search-sphere-ingest/evaluation/hosted_memory.py:/hosted-memory.py:ro"
+          search-sphere-hosted:ci python /hosted-memory.py
 
   worker-test:
     name: Worker Ingestion & Extraction Tests
@@ -164,6 +180,7 @@ jobs:
       - name: Install canonical hosted runtime and test dependencies
         run: |
           uv pip install --system -r apps/api/requirements-production.txt
+          uv pip install --system ./packages/search-sphere-ingest
           uv pip install --system pytest pytest-asyncio aiosqlite
       - name: Verify preserved deterministic processing and hosted adapters
         env:
@@ -173,7 +190,7 @@ jobs:
           STORAGE_BACKEND: local
         run: python scripts/run_worker_checks.py
       - name: Build independent worker from canonical source
-        run: docker build -f apps/worker/Dockerfile -t search-sphere-worker:ci apps/api
+        run: docker build -f apps/worker/Dockerfile -t search-sphere-worker:ci .
       - name: Verify hosted-only worker image without network
         run: >-
           docker run --rm --network none --memory 512m
@@ -221,3 +238,33 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: "https://mock-supabase-project.supabase.co"
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "mock_publishable_key"
         run: pnpm build
+
+  ingestion-package:
+    name: Reusable Ingestion Package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/search-sphere-ingest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          version: "0.13.7"
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: uv sync --locked --extra vision --extra opencv
+      - run: uv run --no-sync ruff check .
+      - run: uv run --no-sync ruff format --check .
+      - run: uv run --no-sync mypy src
+      - run: uv run --no-sync pytest -v
+      - run: uv export --locked --no-dev --extra vision --extra opencv --no-emit-project -o /tmp/ingest-runtime.txt > /dev/null
+      - run: uv run --no-sync pip-audit --no-deps -r /tmp/ingest-runtime.txt
+      - run: uv build
+      - name: Install wheel independently
+        run: |
+          uv venv /tmp/ingest-wheel
+          uv pip install --python /tmp/ingest-wheel/bin/python dist/*.whl
+          cd /tmp
+          /tmp/ingest-wheel/bin/python -c 'from search_sphere_ingest import DocumentPipeline; print(DocumentPipeline.__module__)'

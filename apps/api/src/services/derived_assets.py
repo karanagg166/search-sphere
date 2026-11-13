@@ -37,6 +37,9 @@ async def stage_derived_assets(sessions, queue, lease, source, extracted, storag
             if structured:
                 structured.update({"asset_id": asset_id, "asset_ids": [asset_id]})
                 structured["regions"] = [{**region, "asset_id": asset_id} for region in structured.get("regions", [])]
+                structured["sources"] = [{**ref, "source_image": asset_id} for ref in structured.get("sources", [])]
+                if structured.get("normalized"):
+                    structured["normalized"]["sources"] = [{**ref, "source_image": asset_id} for ref in structured["normalized"].get("sources", [])]
             page.blocks[index] = replace(
                 block, provenance={**block.provenance, "asset_id": asset_id},
                 structured=structured, crop=None,

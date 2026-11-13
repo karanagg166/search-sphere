@@ -1,5 +1,22 @@
 # AGENTS.md
 
+## Current ingestion and free deployment
+
+Read `packages/search-sphere-ingest/AGENTS.md`, its TESTING.md, and
+`docs/FREE_TIER_RELIABILITY.md` when changing ingestion or recovery. The existing
+PyMuPDF/Cohere extractor feeds the independent package's normalizer and specialized
+chunkers through `src/services/package_chunking.py`. There is one application
+pipeline; do not add another engine switch or restore retired client endpoints.
+Keep the package independent of application imports, auth and persistence.
+
+Build the canonical API/worker Dockerfiles from repository root. Preserve retired
+route exclusions, the free plan, provider data-classification approvals and pgvector.
+Docling/Paddle/local generative weights are excluded from the production image.
+CPU OpenCV proposals are bounded to 1400 pixels per side and remain unverified.
+The optional warming workflow stays disabled without fresh shared-workspace usage,
+provider terms verification and sufficient budget. No pings guarantee uptime.
+Mock provider tests do not establish live extraction acceptance.
+
 This file defines the rules that AI coding agents must follow while working on this project.
 
 The project is being built incrementally. Correct architecture, understandable code, testing, and learning are more important than implementing many features at once.

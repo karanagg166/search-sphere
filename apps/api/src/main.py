@@ -1,4 +1,3 @@
-import asyncio
 import os
 import re
 import uuid
@@ -201,18 +200,18 @@ async def memory_health_check():
 @app.get("/ready", tags=["Health"])
 async def readiness_check():
     """Readiness probe verifying critical infrastructure connectivity (database)."""
-    try:
-        async with asyncio.timeout(5.0):
-            async with AsyncSessionLocal() as session:
-                await session.execute(text("SELECT 1"))
+    from src.services.ingestion_worker import ingestion_worker
+    from src.services.readiness import database_readiness, worker_health
+
+    if await database_readiness.check(AsyncSessionLocal, engine):
         return {
             "status": "ready",
             "database": "connected",
             "environment": settings.ENVIRONMENT,
             "git_commit": os.getenv("RENDER_GIT_COMMIT", os.getenv("GIT_COMMIT", "dev")),
+            "worker": worker_health(ingestion_worker, settings.RUN_INGESTION_WORKER),
         }
-    except Exception as e:
-        logger.error("Readiness check failed", error_type=type(e).__name__)
+    else:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={

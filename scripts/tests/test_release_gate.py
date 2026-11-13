@@ -1,5 +1,6 @@
 """Release admission is fail-closed; all HTTP, credentials and subprocesses synthetic."""
 
+import copy
 import hashlib
 import io
 import sys
@@ -94,6 +95,7 @@ def test_migration_failure_does_not_print_driver_output(monkeypatch, capsys):
 def test_deployment_is_pinned_and_serving_sha_is_verified(monkeypatch):
     monkeypatch.setenv("RENDER_API_KEY", "synthetic-render-token")
     monkeypatch.setattr(gate, "render_preflight", Mock())
+    monkeypatch.setattr(gate, "configure_build", Mock())
     sha, calls = "b" * 40, []
     def request(base, path, token=None, payload=None):
         calls.append((base, path, payload))
@@ -126,3 +128,30 @@ def test_standalone_release_rejects_legacy_vector_backends_before_deploy(render,
     with pytest.raises(gate.ReleaseError, match="PostgreSQL/pgvector"):
         gate.render_preflight()
     assert all(payload is None for _, _, payload in render[2])
+
+
+def test_build_configuration_changes_only_owned_monorepo_paths(render, monkeypatch):
+    service, _, _ = render
+    calls = []
+    def request(base, path, token=None, payload=None, *, method=None):
+        calls.append((path, payload, method))
+        if method == 'PATCH':
+            service.update(copy.deepcopy(payload))
+            service['serviceDetails']['plan'] = 'free'
+        return service
+    monkeypatch.setattr(gate, 'request', request)
+    gate.configure_build(service)
+    assert calls[0][0] == '/services/' + gate.SERVICE
+    assert calls[0][1] == {'rootDir': '', 'serviceDetails': {'envSpecificDetails': {
+        'dockerContext': '.', 'dockerfilePath': './apps/api/Dockerfile'}}}
+    assert calls[0][2] == 'PATCH'
+    calls.clear()
+    gate.configure_build(service)
+    assert calls == []
+
+
+def test_unconfirmed_build_configuration_refuses_deployment(render, monkeypatch):
+    service, _, _ = render
+    monkeypatch.setattr(gate, 'request', lambda *args, **kwargs: service)
+    with pytest.raises(gate.ReleaseError, match='build paths'):
+        gate.configure_build(service)

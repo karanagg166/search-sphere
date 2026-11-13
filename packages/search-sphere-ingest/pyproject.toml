@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "search-sphere-ingest"
+version = "0.1.0"
+description = "Bounded PDF extraction, explicit uncertainty, and source-aware chunking"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE", "THIRD_PARTY.md"]
+dependencies = ["pydantic>=2.8,<3", "pymupdf>=1.27.2,<2", "pillow>=13,<14", "tiktoken>=0.7,<1"]
+
+[project.optional-dependencies]
+vision = ["google-genai>=1.0,<2"]
+opencv = ["opencv-python-headless>=4.10,<5"]
+docling = ["docling>=2.0,<3"]
+
+[dependency-groups]
+dev = ["pytest>=8.3,<10", "pytest-asyncio>=1,<2", "ruff>=0.14,<1", "mypy>=1.19,<2", "psutil>=7,<8", "pip-audit>=2.9,<3"]
+
+[project.scripts]
+search-sphere-ingest = "search_sphere_ingest.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/search_sphere_ingest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true

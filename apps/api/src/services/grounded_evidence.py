@@ -54,7 +54,9 @@ def evidence_units(chunks, formatter):
         observation=getattr(item,"observation",None)
         chunk=getattr(item,"chunk",None) or item
         block_types=set(getattr(chunk,"block_types",[]) or [])
-        review=bool(block_types & {"chart","image"})
+        review=bool(block_types & {"chart","image","diagram"})
+        provenance = (getattr(chunk, "metadata_json", {}) or {}).get("provenance", [])
+        review = review or any(item.get("review_required") or item.get("ocr_review_required") for item in provenance)
         if observation is not None:
             value=observation.value_text
             if value is None:
@@ -68,7 +70,7 @@ def evidence_units(chunks, formatter):
             text=getattr(chunk,"content",None)
             if not isinstance(text,str):
                 text=formatter([item])
-            if block_types & {"table","chart","image"}:
+            if block_types & {"table","chart","image","diagram"}:
                 pieces=[text]  # Preserve headers, row structure and review flags.
             else:
                 # Split only complete sentences/paragraphs. Never select a word

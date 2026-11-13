@@ -30,7 +30,7 @@ async def test_table_full_data_chunk_links_reindex_and_deletion_are_atomic(fixtu
     worker = PostgresIngestionWorker(fixture.sessions, storage_factory=lambda: fixture.storage)
     assert await worker.run_once()
     async with fixture.sessions() as db:
-        evidence = (await db.execute(select(DocumentEvidence).where(DocumentEvidence.source_record_id == doc.id))).scalar_one()
+        evidence = (await db.execute(select(DocumentEvidence).where(DocumentEvidence.source_record_id == doc.id, DocumentEvidence.kind == "table"))).scalar_one()
         assert evidence.data_json["headers"] == ["Item", "Value (mg)"]
         assert evidence.data_json["rows"] == [["A-101", "120"], ["B-102", "80"], ["C-103", "42"]]
         assert evidence.tenant_id == fixture.owner_id and evidence.subject_id == fixture.owner_id
@@ -58,9 +58,9 @@ async def test_table_full_data_chunk_links_reindex_and_deletion_are_atomic(fixtu
         original_id = evidence.evidence_id
     assert await worker.run_once()
     async with fixture.sessions() as db:
-        evidence = (await db.execute(select(DocumentEvidence).where(DocumentEvidence.source_record_id == doc.id))).scalar_one()
+        evidence = (await db.execute(select(DocumentEvidence).where(DocumentEvidence.source_record_id == doc.id, DocumentEvidence.kind == "table"))).scalar_one()
         assert evidence.evidence_id == original_id
         await delete_registered_document(db, "standalone", doc.id, "search_sphere", fixture.owner_id)
         await db.commit()
-        assert (await db.execute(select(func.count()).select_from(DocumentEvidence).where(DocumentEvidence.source_record_id == doc.id))).scalar_one() == 0
+        assert (await db.execute(select(func.count()).select_from(DocumentEvidence).where(DocumentEvidence.source_record_id == doc.id, DocumentEvidence.kind == "table"))).scalar_one() == 0
         assert (await db.execute(select(func.count()).select_from(DocumentChunk).where(DocumentChunk.document_id == doc.id))).scalar_one() == 0

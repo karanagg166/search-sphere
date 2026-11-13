@@ -251,6 +251,9 @@ class DocumentExtractor:
         if len(blocks) > 4096:
             raise DocumentExtractionError("PDF page exceeds the layout block limit.")
         ordered_blocks = reading_order(blocks, float(page.cropbox.width))
+        sizes = sorted(float(span.get("size", 11)) for block in ordered_blocks
+                       for line in block.get("lines", []) for span in line.get("spans", []))
+        baseline = sizes[len(sizes) // 2] if sizes else 11
 
         extracted_blocks: list[ExtractedBlock] = []
 
@@ -270,6 +273,9 @@ class DocumentExtractor:
                 "coordinate_space": "unrotated_pdf_points",
                 "page_size": [float(page.cropbox.width), float(page.cropbox.height)],
                 "page_rotation": int(page.rotation),
+                "pdf_to_page": list(page.transformation_matrix),
+                "cropbox": list(page.cropbox),
+                "document_title": (page.parent.metadata or {}).get("title", ""),
             }
             if block_type == self.IMAGE_BLOCK_TYPE:
                 provenance.update({"ocr_review_required": True, "caption_is_description": True})
@@ -280,6 +286,11 @@ class DocumentExtractor:
 
             if block_type == self.TEXT_BLOCK_TYPE:
                 text = self._extract_text_block(block)
+                size = max((float(span.get("size", baseline)) for line in block.get("lines", [])
+                            for span in line.get("spans", [])), default=baseline)
+                if len(text) < 180 and size >= baseline * 1.2:
+                    provenance["heading_level"] = 1 if size >= baseline * 1.5 else 2
+                    provenance["heading_evidence"] = "font_size_heuristic_requires_review"
 
                 if text:
                     extracted_blocks.append(

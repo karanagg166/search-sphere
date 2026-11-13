@@ -50,7 +50,9 @@ jobs:
           cp scripts/release_gate.py "$RUNNER_TEMP/search-sphere-release-gate.py"
           git checkout --detach "$EXPECTED_SHA"
       - name: Install selected migration runtime
-        run: uv pip install --system -r apps/api/requirements-production.txt
+        run: |
+          uv pip install --system -r apps/api/requirements-production.txt
+          uv pip install --system ./packages/search-sphere-ingest
       - name: Apply migrations before deployment and verify private SQL/Storage surface
         working-directory: apps/api
         env:

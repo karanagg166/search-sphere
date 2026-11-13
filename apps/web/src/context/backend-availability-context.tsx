@@ -382,12 +382,21 @@ export function BackendAvailabilityProvider({
     };
 
     window.addEventListener("online", handleOnline);
+    const reconnect = () => {
+      if (statusRef.current === "ready") {
+        setStatus("waking");
+        wakeStartTimeRef.current = Date.now();
+        checkAvailability(false);
+      }
+    };
+    window.addEventListener("search-sphere:reconnecting", reconnect);
     window.addEventListener("offline", handleOffline);
     return () => {
       window.removeEventListener("online", handleOnline);
+      window.removeEventListener("search-sphere:reconnecting", reconnect);
       window.removeEventListener("offline", handleOffline);
     };
-  }, [retry, setStatus]);
+  }, [retry, setStatus, checkAvailability]);
 
   // Listen to window focus and tab visibility change
   useEffect(() => {
