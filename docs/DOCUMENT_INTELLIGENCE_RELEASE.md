@@ -171,3 +171,11 @@ checks passed. CI additionally passed 196 durable PostgreSQL tests, nine Data AP
 denial checks, 48 provider-boundary checks and 251 monitor/release safety checks.
 A follow-up regression retains all raw cross-page table segments/header cells and
 maps each source to its own crop; its head must pass CI again before merging.
+
+A separate protected manual workflow, `visual-smoke.yml`, generates a real raster
+bar chart (42/80 items) and three-node process diagram in one image. It uploads
+only a signed synthetic fixture through the deployed API, reads scoped evidence
+IDs through a read-only SQL transaction, fetches full objects through authorized
+HTTP, reports label/relationship matches without claiming verification, and
+attempts physical cleanup even on failure. This workflow must run only after the
+pinned deployment; its unit tests establish fixture/metric logic, not live models.
