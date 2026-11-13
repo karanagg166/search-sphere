@@ -132,3 +132,26 @@ seconds. `/ready` returned HTTP 200 in 0.85 seconds. This demonstrates one actua
 cold-start recovery and database reachability for the **old** revision. It does
 not prove this candidate's worker recovery, uninterrupted availability, or new
 extraction deployment. See the release report for final deployment evidence.
+
+## Verified external scheduler option
+
+The [cron-job.org FAQ](https://cron-job.org/en/faq/), checked 2026-11-14,
+describes a free service with fair-use job counts, intervals down to one minute,
+a 30-second request ceiling and a 64 KiB response ceiling. Six hourly requests
+fit that published interval allowance. It gives no timing guarantee, retains
+recent HTTP responses, and can disable repeatedly failing jobs. No account/token
+was connected and no job was created here.
+
+After the Render budget/terms checks above, an operator can create a **disabled**
+job named `Search Sphere budget-approved health`, set URL to
+`https://search-sphere-api.onrender.com/health`, method GET, UTC timezone, minutes
+`7,17,27,37,47,57`, and only the approved warm-window hours. Send no credentials,
+cookies or private headers; retain only public liveness output. Set timeout to
+30 seconds and disable redirects if offered. Keep the existing twice-daily
+readiness monitor for actual DB activity. An HTTP-only scheduler cannot execute
+the local budget admission or consume its state: enable it only after manually
+checking daily usage and the window, and disable it before allowance exhaustion.
+Its failure email option does not establish the script's three-failure policy;
+use the script/GitHub fallback for that tested policy. A cold start may exceed
+30 seconds and produce a monitor failure even when the service later recovers.
+For these reasons the guarded script remains the safer configurable fallback.

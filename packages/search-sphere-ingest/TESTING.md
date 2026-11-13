@@ -65,3 +65,17 @@ and physical cleanup. The [release report](../../docs/DOCUMENT_INTELLIGENCE_RELE
 tracks those checks. Handwriting, broad multilingual OCR, chart numerical
 accuracy, independent arrow visibility, Docling and optional model resource
 benchmarks remain unaccepted. No release acceptance is inferred from mocks.
+
+Main-commit acceptance: `19c8f56be2d7044d123955e196f5536835ab0b30` passed
+[CI 43497998763](https://github.com/karanagg166/search-sphere/actions/runs/43497998763),
+including native AMD64 image gates, 41 package tests, 364 backend tests (one
+skip), 196 durable PostgreSQL tests, 96 worker tests and 70 frontend tests.
+See the repository release report for actual deployment and separate live results.
+
+Actual deployed hosted evaluation also passed:
+[run 43502742815](https://github.com/karanagg166/search-sphere/actions/runs/43502742815)
+returned one chart and one diagram with 2/2 numeric labels, 3/3 node labels and
+2/2 directed relations, preserving unverified/review-required flags. The
+[real RAG journey](https://github.com/karanagg166/search-sphere/actions/runs/43502734805)
+and physical fixture cleanup passed. This small fixture is not broad visual
+accuracy acceptance. Both live runs used the existing approved Cohere policy.

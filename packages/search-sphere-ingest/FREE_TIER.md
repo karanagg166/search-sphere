@@ -37,8 +37,10 @@ service starts again. It does not execute while Render suspends the process.
 Polling or keepalive traffic cannot establish a commercial uptime SLA. A $0
 always-awake backend requirement remains incompatible with this Render plan.
 
-Deployment gate: the new package has not been deployed to Render. The optional
-image requires repository-root build context, empty Render rootDir, and
+Deployed implementation: PR #93 reached Render/Vercel at
+`19c8f56be2d7044d123955e196f5536835ab0b30`; a real synthetic RAG journey and
+physical cleanup passed. Full optional-model/accuracy acceptance remains open.
+The canonical image requires repository-root build context, empty Render rootDir, and
 `./apps/api/Dockerfile`. The pinned release controller verifies the free/provider
 policy before configuring these paths. Two observed free web services share 750
 instance-hours; actual usage remains unknown. Warming is disabled without a fresh
