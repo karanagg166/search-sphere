@@ -6,7 +6,8 @@ Google Doc AI NOTES (modified 2026-11-12), read as requirements only.
 Baseline inspected: `4d28e58f4f310309f7c6ea350080419a6b51301b` on main.
 Implementation is in the normal `search-sphere` repository, branch
 `feat/reusable-ingestion-recovery`. No second application or checkout is required.
-Status: implementation candidate; **release acceptance is pending live gates**.
+Status: deployed implementation; **full release acceptance remains pending the
+explicit accuracy/free-tier blockers and live checks recorded below**.
 
 ## Reused baseline
 
@@ -154,9 +155,9 @@ backoff and 13.18-second successful request; `/ready` then succeeded in 0.85 sec
 This is evidence for the old deployment only. Vercel production was READY at
 baseline `4d28e58f4f310309f7c6ea350080419a6b51301b` (`dpl_EzgqNk7h7J3Cx8ctXeXiJU17vKcd`).
 
-PR, main CI, pinned release, deployed SHA, synthetic upload→embedding→retrieval→
-answer→citation→deletion and physical-cleanup evidence will be recorded after
-those gates execute. Until then none of those candidate live checks is accepted.
+Deployment and CI evidence follow below. Synthetic upload→embedding→retrieval→
+answer→citation→deletion and physical cleanup are accepted only when explicitly
+recorded as passed; deployment liveness alone does not prove that journey.
 Broad handwritten/multilingual/chart/diagram accuracy, optional heavyweight
 models, a verified scheduler, and guaranteed 24/7 hosting remain blockers.
 
@@ -169,8 +170,9 @@ Native AMD64 evidence: hosted API 265.2 MiB; worker 264.2 MiB; API plus 16 MP
 raster/CV 332.3 MiB; gold extraction peak 344,813,568 bytes, all text/table/link
 checks passed. CI additionally passed 196 durable PostgreSQL tests, nine Data API
 denial checks, 48 provider-boundary checks and 251 monitor/release safety checks.
-A follow-up regression retains all raw cross-page table segments/header cells and
-maps each source to its own crop; its head must pass CI again before merging.
+The final merged implementation also retains all raw cross-page table
+segments/header cells and maps each source to its own crop. Its final PR and main
+CI runs passed before the pinned deployment.
 
 A separate protected manual workflow, `visual-smoke.yml`, generates a real raster
 bar chart (42/80 items) and three-node process diagram in one image. It uploads
@@ -179,3 +181,85 @@ IDs through a read-only SQL transaction, fetches full objects through authorized
 HTTP, reports label/relationship matches without claiming verification, and
 attempts physical cleanup even on failure. This workflow must run only after the
 pinned deployment; its unit tests establish fixture/metric logic, not live models.
+
+## Final merged implementation and actual deployment
+
+- [PR #93](https://github.com/karanagg166/search-sphere/pull/93) merged to
+  `19c8f56be2d7044d123955e196f5536835ab0b30`.
+- [Exact-main CI 43497998763](https://github.com/karanagg166/search-sphere/actions/runs/43497998763)
+  passed all five required jobs: 41 package tests, 364 backend tests (one live
+  isolated-service skip), 96 worker tests, 70 frontend tests, 196 durable
+  PostgreSQL checks, nine Data API denials, 48 provider-boundary checks and 253
+  monitor/release/fixture checks. Ruff/typing/build/install/audit/image gates passed.
+- Native AMD64 main image measurements: hosted API 265.0 MiB; worker 264.4 MiB;
+  API plus real 16 MP raster/CV 330.3 MiB; real gold evaluation peak 344,547,328
+  bytes with the documented 30/30 sentences, 8/8 cells and 31/31 links.
+- [Pinned release 43498337703](https://github.com/karanagg166/search-sphere/actions/runs/43498337703)
+  verified the free plan, approved trial fingerprint, synthetic/public policy,
+  private storage/RLS/browser denial and existing migration head
+  `022_conversation_deletions`. Render deployment `dep-dbrmrhm7bikc73b0uhtg`
+  serves exactly `19c8f56be2d7044d123955e196f5536835ab0b30`; rootDir is empty,
+  Docker context `.`, Dockerfile `./apps/api/Dockerfile`, plan free, autodeploy off.
+- Vercel production deployment `dpl_DftJWLwTAnDfkKbL93qRGLn75aUs` was READY at
+  that same SHA. Render's sampled initial memory was approximately 183 MiB under
+  a 512 MiB limit; this is not a peak visual-workload measurement.
+- The release workflow's deployment succeeded; its initial post-deployment stage
+  stopped before application mutations because historical signed reconciliation
+  referenced a revision predating the new package CI requirement. No guard was
+  weakened. A fresh [read-only reconciliation 43499089308](https://github.com/karanagg166/search-sphere/actions/runs/43499089308)
+  passed and refreshed the signed baseline against the deployed revision.
+- A subsequent real `/ready` request returned the exact deployed SHA,
+  `database:connected` and `worker:running` after a first health wake timeout.
+  No guaranteed availability or indefinite activity is inferred from that sample.
+
+The normal repository remains the sole working checkout for this task. The
+user's existing ACCEPTANCE_MATRIX, ROLLOUT_REQUIREMENTS and private student
+contract edits were preserved byte-for-byte and excluded from all task commits.
+
+## Actual production RAG journey
+
+[Post-deployment smoke 43502734805](https://github.com/karanagg166/search-sphere/actions/runs/43502734805)
+**passed** against deployed `19c8f56be2d7044d123955e196f5536835ab0b30`.
+The signed synthetic fixture went through actual upload, extraction, shared
+chunking, approved hosted embeddings and pgvector indexing, hybrid retrieval,
+grounded standalone answers/page citations, standalone SSE, conversation
+answer/history and conversation SSE with exactly one additional persisted turn.
+Conversation deletion returned authorized 404. The scoped physical cleanup
+receipt verified zero remaining vectors and private original deletion. The
+signed fixture receipt artifact is retained by that workflow; no existing user
+documents were altered. Initial/final memory telemetry was 183.0/183.9 MiB with
+normal pressure. Database readiness reached a real `SELECT 1`. This proves one
+real synthetic journey, not broad document accuracy or uninterrupted uptime.
+
+## Actual hosted chart and diagram evaluation
+
+[Visual evaluation 43502742815](https://github.com/karanagg166/search-sphere/actions/runs/43502742815)
+**passed** on the same deployed SHA using actual hosted Cohere inference and a
+real raster PDF with two panels. The production API indexed two chunks. Authorized
+full source objects contained one chart and one diagram. Measured gold matches:
+2/2 visible numeric labels (42 and 80), 3/3 node labels (Start, Review, Finish), and
+2/2 directed node relationships. All generated numeric claims retained
+`verified:false`; all model-reported arrows retained `visible:false`, with review
+required. The original/full source objects remained retrievable through scoped
+HTTP evidence. Physical cleanup verified zero vectors and private objects removed.
+The signed cleanup receipt is retained in the workflow artifact.
+
+This is one synthetic bar-chart/process-diagram sample, not a universal numerical
+accuracy result or independent geometric proof of arrow visibility. Broader chart
+types, handwriting, multilingual raster OCR, Docling/model resource acceptance,
+unknown workspace-hour usage, scheduler setup and guaranteed availability remain
+explicit limitations. The full master release is **not RELEASE ACCEPTED** despite
+successful implementation CI, deployment, RAG and this visual fixture.
+
+## Reproducible artifact
+
+The tested 0.1.0 wheel builds with `uv build` in `packages/search-sphere-ingest`.
+Implementation wheel SHA-256:
+`374f8d6d378641057ea594e31fcb45bc6e16ee0f9b506a7c5a320255e7b61b12`.
+Documentation-only follow-ups can change artifact hashes if rebuilt; pin the
+implementation SHA for this receipt. Independent installation and real native
+PDF extraction/chunking passed in a separate Python 3.12 environment.
+
+```sh
+uv add "search-sphere-ingest @ git+https://github.com/karanagg166/search-sphere.git@19c8f56be2d7044d123955e196f5536835ab0b30#subdirectory=packages/search-sphere-ingest"
+```
