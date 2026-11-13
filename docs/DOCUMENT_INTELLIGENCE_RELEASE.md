@@ -159,3 +159,15 @@ answer→citation→deletion and physical-cleanup evidence will be recorded afte
 those gates execute. Until then none of those candidate live checks is accepted.
 Broad handwritten/multilingual/chart/diagram accuracy, optional heavyweight
 models, a verified scheduler, and guaranteed 24/7 hosting remain blockers.
+
+## Pull request CI evidence
+
+[PR #93](https://github.com/karanagg166/search-sphere/pull/93), initial implementation
+`a27ea31ff5503872818be7a9696b365a6a293087`, passed all five CI jobs in
+[run 43495894182](https://github.com/karanagg166/search-sphere/actions/runs/43495894182).
+Native AMD64 evidence: hosted API 265.2 MiB; worker 264.2 MiB; API plus 16 MP
+raster/CV 332.3 MiB; gold extraction peak 344,813,568 bytes, all text/table/link
+checks passed. CI additionally passed 196 durable PostgreSQL tests, nine Data API
+denial checks, 48 provider-boundary checks and 251 monitor/release safety checks.
+A follow-up regression retains all raw cross-page table segments/header cells and
+maps each source to its own crop; its head must pass CI again before merging.

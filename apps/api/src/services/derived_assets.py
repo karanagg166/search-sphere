@@ -37,19 +37,33 @@ async def stage_derived_assets(sessions, queue, lease, source, extracted, storag
             if structured:
                 structured.update({"asset_id": asset_id, "asset_ids": [asset_id]})
                 structured["regions"] = [{**region, "asset_id": asset_id} for region in structured.get("regions", [])]
-                structured["sources"] = [{**ref, "source_image": asset_id} for ref in structured.get("sources", [])]
-                if structured.get("normalized"):
-                    structured["normalized"]["sources"] = [{**ref, "source_image": asset_id} for ref in structured["normalized"].get("sources", [])]
             page.blocks[index] = replace(
                 block, provenance={**block.provenance, "asset_id": asset_id},
                 structured=structured, crop=None,
             )
+    resolve_source_images(extracted)
+
+
+def resolve_source_images(extracted):
+    # Logical tables can span several crops. Resolve after every segment is staged
+    # so a later-page source never points to the first page's image.
+    assets = {block.provenance["block_id"]: block.provenance["asset_id"]
+              for page in extracted.pages for block in page.blocks if "asset_id" in block.provenance}
+    for page in extracted.pages:
+        for block in page.blocks:
+            for data in (block.structured, block.structured.get("normalized", {})):
+                if not data:
+                    continue
+                data["sources"] = [{**ref, "source_image": assets.get(ref["region_id"], ref.get("source_image"))}
+                                   for ref in data.get("sources", [])]
 
 
 def attach_asset_references(processed):
     assets = {block.provenance["block_id"]: block.provenance["asset_id"]
               for page in processed.extracted.pages for block in page.blocks if "asset_id" in block.provenance}
     processed.embedded = replace(processed.embedded, chunks=[replace(chunk, provenance=[
-        {**item, "asset_id": assets[item["block_id"]]} if item.get("block_id") in assets else item
+        {**item, **({"asset_id": assets[item["block_id"]]} if item.get("block_id") in assets else {}),
+         "sources": [{**ref, "source_image": assets.get(ref["region_id"], ref.get("source_image"))}
+                     for ref in item.get("sources", [])]}
         for item in chunk.provenance
     ]) for chunk in processed.embedded.chunks])

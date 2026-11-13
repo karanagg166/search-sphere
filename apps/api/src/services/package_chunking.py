@@ -31,7 +31,13 @@ def chunk_extracted(document, *, manifest_target=None):
                 structured["extraction_status"] = "PARTIAL" if block.structured.get("review_required") else "COMPLETED"
                 structured.setdefault("sources", item.model_dump(mode="json")["sources"])
                 if item.kind == "table":
-                    structured.setdefault("cells", item.model_dump(mode="json")["cells"])
+                    structured["cells"] = item.model_dump(mode="json")["cells"]
+                    structured["segments"] = [
+                        {"page_number": segment["page_number"], "data": candidate["structured"],
+                         "provenance": candidate["provenance"]}
+                        for segment in pages for candidate in segment["blocks"]
+                        if candidate["block_type"] == "table" and candidate["structured"].get("evidence_id") == item.object_id
+                    ]
                 structured[item.kind + "_id"] = item.object_id
                 if not manifest_written:
                     structured["document_manifest"] = normalized.model_dump(mode="json", exclude={"objects"})
@@ -50,6 +56,7 @@ def chunk_extracted(document, *, manifest_target=None):
                        "source_object_id": identity, "chunk_id": chunk.chunk_id,
                        "pipeline_version": normalized.pipeline_version, "heading_path": chunk.heading_path,
                        "sentence_ids": chunk.sentence_ids, "paragraph_ids": chunk.paragraph_ids,
+                       "sources": [ref.model_dump(mode="json") for ref in chunk.sources],
                        "row_start": chunk.row_start, "row_end": chunk.row_end,
                        "structured_kind": chunk.kind, "review_required": reviews.get(identity, False) or chunk.kind in {"chart", "diagram", "image"}}
                       for identity in chunk.source_object_ids]
