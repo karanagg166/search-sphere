@@ -11,6 +11,7 @@ from search_sphere_ingest.errors import CapabilityUnavailable
 from search_sphere_ingest.hosted_layout import PageLayout
 from search_sphere_ingest.panels import propose_panels
 
+from src.inference.cohere_gateway import VISION_MODEL
 from src.inference.policy import ProviderInvalidResponseError
 from src.inference.sync_adapter import CohereSyncAdapter
 from src.processing.extraction.native_tables import table_text
@@ -95,6 +96,7 @@ class HostedLayoutRecognizer:
                 "block_id": evidence_id, "document_sha256": source_hash, "page_number": page_number,
                 "bbox": rect, "original_order": original_order, "region_order": index,
                 "source_kind": "hosted_layout", "ocr_review_required": True, "caption_is_description": True,
+                "provider": "cohere", "model": VISION_MODEL,
                 "evidence_id": evidence_id, "coordinate_space": coordinate_space,
             }
             data = {}

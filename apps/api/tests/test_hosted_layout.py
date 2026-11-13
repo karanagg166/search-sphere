@@ -50,6 +50,8 @@ def test_chart_preserves_source_crop_axes_units_readability_and_disables_exact_c
     assert points[0]["value"] == "42" and points[1]["readability"] == "approximate"
     assert points[2]["value"] is None and all(point["verified"] is False for point in points)
     assert chart.structured["exact_comparisons_allowed"] is False
+    assert chart.provenance["provider"] == "cohere"
+    assert chart.provenance["model"] == "command-a-vision-07-2025"
 
 
 @pytest.mark.asyncio

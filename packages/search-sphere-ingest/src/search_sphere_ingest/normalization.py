@@ -88,7 +88,8 @@ def normalize_blocks(
                 region_id=str(provenance.get("block_id") or identity),
                 reading_order=order,
                 parent_region_id=data.get("parent_region_id"),
-                provider=provenance.get("source_kind", "native"),
+                provider=provenance.get("provider") or provenance.get("source_kind", "native"),
+                model=provenance.get("model"),
                 coordinate_system=provenance.get("coordinate_space", "unrotated_pdf_points"),
                 source_image=provenance.get("asset_id"),
             )
@@ -241,7 +242,7 @@ def normalize_blocks(
                                 ),
                                 language=entry.get("language", "und"),
                                 style=entry.get("style", "unknown"),
-                                recognition_model="cohere_hosted_unverified",
+                                recognition_model=f"{ref.provider}:{ref.model or 'unspecified'}:unverified",
                                 confidence=entry.get("confidence"),
                             )
                             for entry in data.get("text_regions", [])
