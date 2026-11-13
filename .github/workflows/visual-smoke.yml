@@ -1,0 +1,51 @@
+name: Approved synthetic visual evaluation
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Full deployed main SHA with successful required CI
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: search-sphere-production-smoke
+  cancel-in-progress: false
+jobs:
+  evaluate:
+    if: github.ref == 'refs/heads/main'
+    environment: search-sphere-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          version: '0.13.7'
+          enable-cache: false
+      - name: Install evaluation dependencies
+        run: uv pip install --system ./packages/search-sphere-ingest 'sqlalchemy[asyncio]>=2.0.30,<3' 'asyncpg>=0.29,<1'
+      - name: Actual hosted chart and diagram extraction with guaranteed cleanup attempt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          DATABASE_URL: ${{ secrets.RELEASE_DATABASE_URL }}
+          PROD_SMOKE_USER_EMAIL: ${{ secrets.RELEASE_SMOKE_EMAIL }}
+          PROD_SMOKE_USER_PASSWORD: ${{ secrets.RELEASE_SMOKE_PASSWORD }}
+          PROD_SMOKE_FIXTURE_KEY: ${{ secrets.RELEASE_SMOKE_KEY }}
+        run: python scripts/live_visual_smoke.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: visual-fixture-receipts-${{ github.run_id }}
+          path: .ci_smoke_manifest.json
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 30

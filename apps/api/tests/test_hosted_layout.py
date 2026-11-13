@@ -50,6 +50,8 @@ def test_chart_preserves_source_crop_axes_units_readability_and_disables_exact_c
     assert points[0]["value"] == "42" and points[1]["readability"] == "approximate"
     assert points[2]["value"] is None and all(point["verified"] is False for point in points)
     assert chart.structured["exact_comparisons_allowed"] is False
+    assert chart.provenance["provider"] == "cohere"
+    assert chart.provenance["model"] == "command-a-vision-07-2025"
 
 
 @pytest.mark.asyncio
@@ -99,3 +101,34 @@ def test_scanned_page_uses_one_layout_call_and_does_not_duplicate_image_or_chart
     extracted = DocumentExtractor(layout_recognizer=recognizer).extract(content)
     assert len(calls) == 1 and len(extracted.pages[0].blocks) == 1
     assert extracted.pages[0].blocks[0].block_type == "chart"
+
+
+def test_dedicated_diagram_preserves_graph_ocr_boxes_and_unverified_edges():
+    region = {"kind": "diagram", "bbox": [0, 0, 1000, 1000], "title": "Public flow",
+        "nodes": [{"node_id": "a", "label": "Start", "kind": "process", "bbox": [50, 50, 400, 300]},
+                  {"node_id": "b", "label": "Continue?", "kind": "decision", "bbox": [500, 500, 950, 900]}],
+        "edges": [{"source": "a", "target": "b", "label": "next", "direction": "directed", "confidence": 0.8}],
+        "visible_text": "Start Continue?", "description": "Two connected steps",
+        "text_regions": [{"text": "Start", "bbox": [60, 60, 390, 290], "language": "en", "style": "printed"}]}
+    block = recognize([region])[0]
+    assert block.block_type == 'diagram' and block.crop.startswith(b'\x89PNG')
+    assert block.structured['edges'][0]['visible'] is False
+    assert block.structured['nodes'][0]['bbox'] == [60.0, 95.0, 200.0, 170.0]
+    assert block.structured['ocr_text'] == 'Start Continue?'
+    assert block.structured['visual_description'] == 'Two connected steps'
+    assert block.structured['extraction_status'] == 'PARTIAL'
+    region['edges'][0]['target'] = 'invented'
+    with pytest.raises(ProviderInvalidResponseError):
+        recognize([region])
+
+
+def test_uncertain_panel_detection_retains_parent_original(monkeypatch):
+    from search_sphere_ingest.models import Box
+    monkeypatch.setattr('src.processing.extraction.hosted_layout.propose_panels', lambda image: [
+        Box(x0=0, y0=0, x1=200, y1=300), Box(x0=200, y0=0, x1=400, y1=300)])
+    blocks = recognize([chart_region()])
+    assert len(blocks) == 2 and blocks[0].structured['container_only']
+    assert blocks[0].crop == png() and not blocks[0].content
+    assert blocks[1].structured['parent_region_id'] == blocks[0].provenance['block_id']
+    assert blocks[1].structured['panel_status'] == 'unresolved'
+    assert 'multiple_panels_not_separated' in blocks[1].structured['uncertainties']

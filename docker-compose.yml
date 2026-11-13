@@ -28,8 +28,8 @@ services:
   # ============================================================================
   api:
     build:
-      context: ./apps/api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/api/Dockerfile
     container_name: search_sphere_api
     restart: unless-stopped
     ports:
@@ -75,8 +75,8 @@ services:
   # ============================================================================
   worker:
     build:
-      context: ./apps/api
-      dockerfile: ../worker/Dockerfile
+      context: .
+      dockerfile: apps/worker/Dockerfile
     container_name: search_sphere_worker
     restart: unless-stopped
     env_file:

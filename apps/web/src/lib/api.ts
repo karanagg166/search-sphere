@@ -1,4 +1,5 @@
 import axios from "axios";
+import { canRecoverRead, readBackoff } from "./read-recovery";
 
 const getBaseUrl = (): string => {
   if (process.env.NEXT_PUBLIC_API_URL) {
@@ -60,6 +61,15 @@ apiClient.interceptors.response.use(
       originalRequest._retried = true;
       originalRequest.baseURL = directUrl;
       return axios(originalRequest);
+    }
+    if (typeof window !== "undefined" && canRecoverRead(error, localStorage.getItem("search_sphere_token"))) {
+      const session = localStorage.getItem("search_sphere_token");
+      const attempt = originalRequest._coldRetries || 0;
+      originalRequest._coldRetries = attempt + 1;
+      window.dispatchEvent(new Event("search-sphere:reconnecting"));
+      await new Promise((resolve) => setTimeout(resolve, readBackoff(attempt)));
+      if (session !== localStorage.getItem("search_sphere_token") || originalRequest.signal?.aborted) return Promise.reject(error);
+      return apiClient(originalRequest);
     }
     return Promise.reject(error);
   }

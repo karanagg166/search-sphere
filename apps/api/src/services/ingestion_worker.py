@@ -45,10 +45,12 @@ class PostgresIngestionWorker:
         self._wake = asyncio.Event()
         self.last_poll_at = None
         self.last_error_code = None
+        self.last_activity_at = None
         self._last_adoption = 0
+        self._poll_failures = 0
 
     def start(self):
-        if self._task is None:
+        if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run())
 
     async def stop(self):
@@ -73,15 +75,26 @@ class PostgresIngestionWorker:
                     self._last_adoption = time.monotonic()
                     await adopt_legacy_pending(self.sessions, self.queue, document_kinds=self.queue.document_kinds)
                 await DocumentCleanupWorker(self.sessions, self.storage_factory).run_once()
+                self._poll_failures = 0
                 if await self.run_once():
                     continue
             except asyncio.CancelledError:
                 raise
             except Exception as error:
+                self._poll_failures = min(self._poll_failures + 1, 6)
                 self.last_error_code = "queue_unavailable"
                 logger.warning("Ingestion polling failed", error_type=type(error).__name__)
+                # Same idle-pool recovery as readiness; no job writes are replayed.
+                try:
+                    # Dispose this worker's injected pool, including independent
+                    # hosts/tests, rather than assuming the application's global.
+                    pool = self.sessions.kw.get("bind")
+                    if pool is not None:
+                        await pool.dispose()
+                except Exception:
+                    pass
             try:
-                await asyncio.wait_for(self._wake.wait(), timeout=4)
+                await asyncio.wait_for(self._wake.wait(), timeout=min(60, 4 * 2 ** self._poll_failures))
             except TimeoutError:
                 pass
             self._wake.clear()
@@ -110,6 +123,7 @@ class PostgresIngestionWorker:
                         if not await self.queue.heartbeat(lease):
                             lost.set()
                             return
+                        self.last_activity_at = datetime.now(UTC)
                     except Exception:
                         lost.set()
                         return
@@ -117,6 +131,7 @@ class PostgresIngestionWorker:
         async def stage(value):
             if lost.is_set() or not await self.queue.stage(lease, value):
                 raise LeaseLostError
+            self.last_activity_at = datetime.now(UTC)
 
         pulse = asyncio.create_task(heartbeat())
         try:

@@ -1,0 +1,35 @@
+name: Optional budgeted warm monitor
+on:
+  schedule:
+    - cron: "7,17,27,37,47,57 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: search-sphere-warm-monitor
+  cancel-in-progress: false
+jobs:
+  probe:
+    # Off by default. Skipped jobs allocate no runner. The script independently
+    # refuses stale snapshots, unknown shared usage and unsafe monthly budgets.
+    if: github.ref == 'refs/heads/main' && vars.SS_WARM_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/warm-state.json
+          key: warm-state-main-${{ github.run_id }}
+          restore-keys: warm-state-main-
+      - name: Budget admission and inexpensive HTTPS probes
+        env:
+          SS_WARM_CONFIG: ${{ vars.SS_WARM_CONFIG }}
+        run: python3 scripts/warm_monitor.py --state "$RUNNER_TEMP/warm-state.json"
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: ${{ runner.temp }}/warm-state.json
+          key: warm-state-main-${{ github.run_id }}

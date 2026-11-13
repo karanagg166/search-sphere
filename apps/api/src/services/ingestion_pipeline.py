@@ -7,9 +7,9 @@ import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from search_sphere_ingest import IngestError
+
 from src.config import settings
-from src.processing.chunking import DocumentChunker
-from src.processing.chunking.structured_chunks import chunk_with_structures
 from src.processing.cleaning import TextCleaner
 from src.processing.embedding.dense_embedder import DenseEmbedder
 from src.processing.extraction.document_extractor import DocumentExtractor
@@ -21,6 +21,7 @@ from src.processing.models.document import (
     ExtractedPage,
 )
 from src.services.ingestion_source import IngestionSourceError
+from src.services.package_chunking import chunk_extracted
 
 if TYPE_CHECKING:
     from src.processing.extraction.medical_observation_extractor import (
@@ -52,7 +53,10 @@ async def process_ingestion(source, storage, stage):
             text = content.decode("utf-8")
         except UnicodeDecodeError:
             raise IngestionSourceError("invalid_document") from None
-        extracted = ExtractedDocument([ExtractedPage(1, [ExtractedBlock("text", text)])])
+        extracted = ExtractedDocument([ExtractedPage(1, [ExtractedBlock("text", text, {
+            "block_id": source_sha256 + ":1:0", "document_sha256": source_sha256,
+            "page_number": 1, "original_order": 0, "source_kind": "native_text",
+        })])])
     else:
         extracted = await asyncio.to_thread(DocumentExtractor(layout_recognizer=HostedLayoutRecognizer()).extract, content, source.mime_type)
     del content
@@ -62,13 +66,12 @@ async def process_ingestion(source, storage, stage):
         raise IngestionSourceError("invalid_document")
     cleaned = TextCleaner().clean_document(extracted)
     await stage("chunking")
-    # Public-fixture benchmark: 400/480 keeps retrieval quality with fewer hard
-    # splits than 350/400. The actual Cohere tokenizer remains authoritative.
-    chunker = DocumentChunker(target_tokens=min(settings.CHUNK_TARGET_TOKENS, 400), max_tokens=min(settings.CHUNK_MAX_TOKENS, 480))
     try:
-        chunked = await chunk_with_structures(cleaned, chunker)
+        chunked = await asyncio.to_thread(chunk_extracted, cleaned, manifest_target=extracted)
     except ValueError:
         raise IngestionSourceError("invalid_document") from None
+    except IngestError as error:
+        raise IngestionSourceError(error.code, retryable=error.retryable) from None
     if not chunked.chunks or len(chunked.chunks) > 1000:
         raise IngestionSourceError("empty_document" if not chunked.chunks else "invalid_document")
     await stage("embedding")

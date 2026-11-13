@@ -19,6 +19,7 @@ if "sqlite" not in settings.DATABASE_URL:
         "pool_recycle": 300,
         "pool_size": int(os.getenv("DB_POOL_SIZE", "5")),
         "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "5")),
+        "pool_timeout": 5,
     })
 if "asyncpg" in settings.DATABASE_URL:
     engine_kwargs["connect_args"] = {"timeout": 15.0, "command_timeout": 15.0}

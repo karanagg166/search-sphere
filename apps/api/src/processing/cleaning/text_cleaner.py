@@ -77,7 +77,7 @@ class TextCleaner:
         Clean an individual extracted block, preserving its domain block type.
         Returns None if the content is completely empty after cleaning.
         """
-        if block.block_type in {"table", "chart"}:
+        if block.block_type in {"table", "chart", "diagram"}:
             cleaned_content = block.content.strip()  # Preserve cell/series structure verbatim.
         elif block.block_type == "image":
             cleaned_content = self._clean_image_block(block.content)

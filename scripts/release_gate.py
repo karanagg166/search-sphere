@@ -17,7 +17,7 @@ SERVICE = "srv-db02odm7bikc73fv0e7g"
 WORKSPACE = "tea-d502qthr0fns73a09d0g"
 API_URL = "https://search-sphere-api.onrender.com"
 PROJECT = "jyzjgoniuwexvipbbpwa"
-REQUIRED_JOBS = {"Backend Lint & Tests", "Worker Ingestion & Extraction Tests", "Hosted Runtime Image", "Frontend Lint, Test & Build"}
+REQUIRED_JOBS = {"Backend Lint & Tests", "Worker Ingestion & Extraction Tests", "Hosted Runtime Image", "Frontend Lint, Test & Build", "Reusable Ingestion Package"}
 
 
 class ReleaseError(RuntimeError):
@@ -31,7 +31,7 @@ def require(name):
     return value
 
 
-def request(base, path, token=None, payload=None):
+def request(base, path, token=None, payload=None, *, method=None):
     headers = {"Accept": "application/json", "User-Agent": "SearchSphereReleaseGate/1"}
     if token:
         headers["Authorization"] = "Bearer " + token
@@ -41,7 +41,7 @@ def request(base, path, token=None, payload=None):
         data = json.dumps(payload).encode()
     for attempt in range(3):
         try:
-            with urllib.request.urlopen(urllib.request.Request(base + path, data=data, headers=headers), timeout=25) as response:
+            with urllib.request.urlopen(urllib.request.Request(base + path, data=data, headers=headers, method=method), timeout=25) as response:
                 return json.loads(response.read(4 * 1024 * 1024))
         except urllib.error.HTTPError as error:
             if data is None and error.code in {429, 500, 502, 503, 504} and attempt < 2:
@@ -115,6 +115,30 @@ def render_preflight():
     if values.get("STORAGE_BACKEND") != "supabase" or (values.get("SUPABASE_URL") or values.get("NEXT_PUBLIC_SUPABASE_URL")) != f"https://{PROJECT}.supabase.co":
         raise ReleaseError("Render storage configuration does not match the authorized Supabase project.")
     print(json.dumps({"render_service": SERVICE, "workspace": WORKSPACE, "plan": "free", "provider_policy_verified": True}))
+    return service
+
+
+def configure_build(service):
+    """Change only the existing service's monorepo paths after free/provider admission.
+
+    Render PATCH does not deploy automatically. No plan, scaling, credentials or
+    unrelated services are changed. Verify the stored paths before pinned deploy.
+    """
+    expected = {"dockerContext": ".", "dockerfilePath": "./apps/api/Dockerfile"}
+    current = service.get("serviceDetails", {}).get("envSpecificDetails", {})
+    if service.get("rootDir", "") == "" and all(current.get(key) == value for key, value in expected.items()):
+        return
+    token = require("RENDER_API_KEY")
+    path = "/services/" + SERVICE
+    request("https://api.render.com/v1", path, token, {
+        "rootDir": "", "serviceDetails": {"envSpecificDetails": expected},
+    }, method="PATCH")
+    stored = request("https://api.render.com/v1", path, token)
+    if (stored.get("rootDir", "") != "" or stored.get("serviceDetails", {}).get("plan") != "free"
+            or stored.get("autoDeploy") != "no"
+            or any(stored.get("serviceDetails", {}).get("envSpecificDetails", {}).get(key) != value for key, value in expected.items())):
+        raise ReleaseError("Render build paths were not confirmed; pinned deployment was refused.")
+    print(json.dumps({"canonical_build_context_verified": True, "render_service": SERVICE}))
 
 
 def validate_database_url(url):
@@ -174,7 +198,7 @@ async def seed_identity():
 
 
 def deploy(sha):
-    render_preflight()
+    configure_build(render_preflight())
     token = require("RENDER_API_KEY")
     base, path = "https://api.render.com/v1", f"/services/{SERVICE}/deploys"
     deployment = request(base, path, token, {"commitId": sha, "clearCache": "do_not_clear"})

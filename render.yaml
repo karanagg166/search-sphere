@@ -3,7 +3,8 @@ services:
     name: search-sphere-api
     runtime: docker
     dockerfilePath: apps/api/Dockerfile
-    dockerContext: apps/api
+    rootDir: ""
+    dockerContext: .
     plan: free
     region: singapore
     healthCheckPath: /health

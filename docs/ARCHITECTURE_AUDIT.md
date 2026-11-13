@@ -144,3 +144,28 @@ Standalone UI (separate /documents & /search endpoints with separate User auth)
 - **Phase D**: Multi-Tenant Qdrant Retrieval, Dense + BM25 RRF, Cross-Encoder Reranking, Grounded RAG, and SSE Streaming.
 - **Phase E**: Stable `/api/v1/` Versioned Endpoints, Standalone Route Adapters, and Medical Compatibility.
 - **Phase F**: Python SDK, TypeScript Client, ExamArena Blueprint, Full Test Suites (unit, integration, isolation, benchmarks), and Documentation.
+
+## 2026-11-14 ingestion and reliability implementation
+
+Baseline main: `4d28e58f4f310309f7c6ea350080419a6b51301b`. Reused native
+PyMuPDF extraction, Cohere guarded layout/OCR/captioning/tokenization/embeddings,
+private object storage, pgvector retrieval, durable worker leases, atomic
+publication, evidence authorization and physical cleanup. The public package at
+`packages/search-sphere-ingest` contains normalized schemas, optional providers,
+PDF/image APIs and specialized chunking without importing the web application.
+`package_chunking.py` adapts existing blocks; it does not extract a second time.
+All text/table/visual chunks link to retained source objects. Existing vectors
+remain untouched until an explicitly requested reprocessing operation.
+
+The hosted schema now distinguishes diagrams from charts and retains nodes,
+edges, OCR regions, language/style, merged cells, model uncertainty and panel
+parents. Unverified arrows/numbers remain review-required. CPU panel proposals
+are bounded; unresolved multiple panels retain the original crop and PARTIAL
+status. Optional heavyweight adapters are not production memory acceptance.
+
+Readiness coalesces concurrent checks and recovers stale pools without replaying
+writes. Worker poll failures back off; active jobs heartbeat. Frontend retries
+GET/HEAD only, with bounded delays and session checks. Budgeted monitoring is
+optional and disabled by default because two free services share 750 hours.
+See [current evidence](DOCUMENT_INTELLIGENCE_RELEASE.md) and
+[reliability configuration](FREE_TIER_RELIABILITY.md).
