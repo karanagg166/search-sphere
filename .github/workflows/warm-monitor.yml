@@ -13,6 +13,7 @@ jobs:
     # Off by default. Skipped jobs allocate no runner. The script independently
     # refuses stale snapshots, unknown shared usage and unsafe monthly budgets.
     if: github.ref == 'refs/heads/main' && vars.SS_WARM_ENABLED == 'true'
+    environment: search-sphere-release
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
@@ -27,6 +28,7 @@ jobs:
       - name: Budget admission and inexpensive HTTPS probes
         env:
           SS_WARM_CONFIG: ${{ vars.SS_WARM_CONFIG }}
+          RENDER_API_KEY: ${{ secrets.RELEASE_RENDER_API_KEY }}
         run: python3 scripts/warm_monitor.py --state "$RUNNER_TEMP/warm-state.json"
       - uses: actions/cache/save@v4
         if: always()

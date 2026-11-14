@@ -13,8 +13,12 @@ Build the canonical API/worker Dockerfiles from repository root. Preserve retire
 route exclusions, the free plan, provider data-classification approvals and pgvector.
 Docling/Paddle/local generative weights are excluded from the production image.
 CPU OpenCV proposals are bounded to 1400 pixels per side and remain unverified.
-The optional warming workflow stays disabled without fresh shared-workspace usage,
-provider terms verification and sufficient budget. No pings guarantee uptime.
+The default warming mode requires fresh shared-workspace usage and sufficient
+budget. The owner explicitly requested single-service warming after deleting the
+duplicate Quick-Clinic deployment, accepting unknown current-month consumption.
+That exceptional mode must verify the sole free Search Sphere service on every
+run, report that billing was not read, and stop if inventory changes. Never
+upgrade plans or claim the monitor guarantees uptime.
 Mock provider tests do not establish live extraction acceptance.
 
 This file defines the rules that AI coding agents must follow while working on this project.

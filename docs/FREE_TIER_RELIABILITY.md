@@ -155,3 +155,42 @@ Its failure email option does not establish the script's three-failure policy;
 use the script/GitHub fallback for that tested policy. A cold start may exceed
 30 seconds and produce a monitor failure even when the service later recovers.
 For these reasons the guarded script remains the safer configurable fallback.
+
+## Owner-requested single-service warming exception (2026-11-14)
+
+The owner explicitly requested activation despite the unavailable billing meter,
+after authorizing deletion of duplicate Quick-Clinic service
+`srv-dbpk7sajnfac739lqhpg`. Authenticated Render inventory confirms the sole
+remaining web service is Search Sphere on the free plan. The other Render account
+was not accessed. Deleted service hours already consumed are not refunded.
+
+A separate explicit configuration mode is now supported:
+
+```json
+{
+  "enabled": true,
+  "mode": "owner_requested_single_service",
+  "accept_allowance_suspension": true,
+  "expected_sha": "19c8f56be2d7044d123955e196f5536835ab0b30"
+}
+```
+
+Unlike the default snapshot budget mode, this mode has **no verified billing
+reading or monthly safety-reserve claim**. It represents the owner's request to
+proceed accepting possible suspension from earlier consumption. The protected
+workflow reads service inventory through the Render API before each health ping.
+It refuses extra services, foreign ownership, a paid plan, suspended service,
+missing credentials or inventory errors. Render credentials never reach the
+application health endpoint and are never logged. No paid service is provisioned.
+The existing default budget-policy tests remain unchanged.
+
+The public repository's minimal workflow requests `/health` approximately every
+10 minutes across all UTC hours and reuses `/ready` twice daily. It uses standard
+library Python without installing dependencies. GitHub scheduling delays, disabled
+schedules, Render restarts, remaining allowance and bandwidth/provider limits
+still prevent an uptime guarantee. Single-service full-month consumption is
+720/744 hours for 30/31 days, within 750 when no earlier competing usage applies.
+This month's previous Quick-Clinic usage may still exhaust that allowance.
+Disable immediately using repository variable `SS_WARM_ENABLED=false` if another
+service is added or warming is no longer wanted. No terms/support attestation is
+invented by this override; platform terms remain applicable.
