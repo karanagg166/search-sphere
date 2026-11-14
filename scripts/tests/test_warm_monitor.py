@@ -1,8 +1,15 @@
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from scripts.warm_monitor import admission, transition
+from scripts import warm_monitor
+from scripts.warm_monitor import (
+    admission,
+    classify_status,
+    probe_with_cold_recovery,
+    transition,
+)
 
 
 def config(now, **kwargs):
@@ -76,3 +83,65 @@ def test_live_inventory_cannot_admit_an_extra_service_foreign_workspace_or_paid_
         assert not single_service_inventory(invalid)
     rows[0]["service"]["serviceDetails"]["plan"] = "starter"
     assert not single_service_inventory(rows)
+
+
+def test_classify_status_covers_all_unambiguous_states():
+    assert classify_status(ping_sent=False, healthy=False, reason="disabled", cold_start=False, failures=0, recovered=False) == "monitoring_disabled"
+    assert classify_status(ping_sent=False, healthy=False, reason="workspace_budget_exceeded", cold_start=False, failures=0, recovered=False) == "skipped_budget"
+    assert classify_status(ping_sent=True, healthy=True, reason="ready", cold_start=False, failures=0, recovered=False) == "healthy"
+    assert classify_status(ping_sent=True, healthy=True, reason="cold_start_recovered", cold_start=True, failures=0, recovered=False) == "backend_cold_start"
+    assert classify_status(ping_sent=True, healthy=True, reason="ready", cold_start=False, failures=0, recovered=True) == "recovery_confirmed"
+    assert classify_status(ping_sent=True, healthy=False, reason="cold_or_network_unavailable", cold_start=False, failures=1, recovered=False) == "backend_unreachable"
+    assert classify_status(ping_sent=True, healthy=False, reason="database_unavailable", cold_start=False, failures=1, recovered=False) == "database_unavailable"
+    assert classify_status(ping_sent=True, healthy=False, reason="worker_unavailable", cold_start=False, failures=1, recovered=False) == "worker_unavailable"
+    assert classify_status(ping_sent=True, healthy=False, reason="cold_or_network_unavailable", cold_start=False, failures=3, recovered=False) == "repeated_failure"
+
+
+def test_probe_with_cold_recovery_distinguishes_cold_start_from_unreachable(monkeypatch):
+    calls = iter([
+        (False, "cold_or_network_unavailable", {"elapsed_seconds": 30.0}),
+        (True, "ready", {"elapsed_seconds": 6.2, "git_commit": "abc"}),
+    ])
+    monkeypatch.setattr(warm_monitor, "probe_with_details", lambda *a, **kw: next(calls))
+    healthy, reason, cold_start, details = probe_with_cold_recovery("/health", sleep_fn=lambda _: None)
+    assert healthy is True
+    assert reason == "cold_start_recovered"
+    assert cold_start is True
+    assert "cold_start_duration_seconds" in details
+
+    monkeypatch.setattr(warm_monitor, "probe_with_details", lambda *a, **kw: (False, "cold_or_network_unavailable", {"elapsed_seconds": 30.0}))
+    healthy2, reason2, cold_start2, _ = probe_with_cold_recovery("/health", sleep_fn=lambda _: None)
+    assert healthy2 is False
+    assert reason2 == "cold_or_network_unavailable"
+    assert cold_start2 is False
+
+
+def test_main_exits_nonzero_on_any_failed_admitted_probe_and_recovers(tmp_path, monkeypatch, capsys):
+    state_file = tmp_path / "warm-state.json"
+    summary_file = tmp_path / "summary.md"
+    cfg_file = tmp_path / "cfg.json"
+    cfg_file.write_text(json.dumps({
+        "enabled": True,
+        "mode": "owner_requested_single_service",
+        "accept_allowance_suspension": True,
+    }))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_file))
+    monkeypatch.setattr(warm_monitor, "verify_single_free_service", lambda: True)
+
+    # First run: probe fails even after cold-start retry -> must exit 1 (never green!)
+    monkeypatch.setattr(warm_monitor, "probe_with_cold_recovery", lambda *a, **kw: (False, "cold_or_network_unavailable", False, {"elapsed_seconds": 65.0}))
+    monkeypatch.setattr("sys.argv", ["warm_monitor.py", "--state", str(state_file), "--config", str(cfg_file)])
+    assert warm_monitor.main() == 1
+    out1 = json.loads(capsys.readouterr().out.splitlines()[0])
+    assert out1["status"] == "backend_unreachable"
+    assert out1["failures"] == 1
+    assert out1["ping_sent"] is True
+
+    # Second run: probe succeeds -> recovery_confirmed and exit 0
+    monkeypatch.setattr(warm_monitor, "probe_with_cold_recovery", lambda *a, **kw: (True, "ready", False, {"elapsed_seconds": 0.4, "worker": "running"}))
+    assert warm_monitor.main() == 0
+    out2 = json.loads(capsys.readouterr().out.splitlines()[0])
+    assert out2["status"] == "recovery_confirmed"
+    assert out2["recovered"] is True
+    assert out2["failures"] == 0
+    assert "Search Sphere Warm Monitor" in summary_file.read_text()

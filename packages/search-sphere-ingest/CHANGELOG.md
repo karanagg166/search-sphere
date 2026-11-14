@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0 — 2026-11-15
+
+- Improved multi-column `reading_order` to peel off short title/footer bands before
+  vertical column partitioning (`reading_order_accuracy` 1.00 on gold multi-column fixture).
+- Extended OpenCV `propose_panels` to detect horizontal full-width whitespace gutters and
+  2x2 grids in addition to vertical gutters while preserving parent geometry.
+- Lowered cross-page table continuation bottom-of-page threshold from `0.80` to `0.72`
+  to support tables above page footers while preserving strict column-edge and header checks.
+- Added reproducible `evaluation/gold_benchmark.py` and `tests/test_gold_evaluation.py`
+  covering CER/WER, reading order, table cells, cross-page merge precision/recall,
+  multi-axis panel detection, chart/diagram/image chunking, and source-link completeness.
+- Added `[project.urls]` metadata in `pyproject.toml` and verified clean-venv wheel
+  installation with custom tokenizer injection.
+
 ## 0.1.0 — unreleased
 
 - Independent typed PDF extraction/chunking package, public sync/async API and CLI.

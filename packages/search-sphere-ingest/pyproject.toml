@@ -4,13 +4,19 @@ build-backend = "hatchling.build"
 
 [project]
 name = "search-sphere-ingest"
-version = "0.1.0"
+version = "0.2.0"
 description = "Bounded PDF extraction, explicit uncertainty, and source-aware chunking"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "AGPL-3.0-or-later"
 license-files = ["LICENSE", "THIRD_PARTY.md"]
 dependencies = ["pydantic>=2.8,<3", "pymupdf>=1.27.2,<2", "pillow>=13,<14", "tiktoken>=0.7,<1"]
+
+[project.urls]
+Homepage = "https://github.com/karanagg166/search-sphere/tree/main/packages/search-sphere-ingest"
+Repository = "https://github.com/karanagg166/search-sphere"
+Issues = "https://github.com/karanagg166/search-sphere/issues"
+Changelog = "https://github.com/karanagg166/search-sphere/blob/main/packages/search-sphere-ingest/CHANGELOG.md"
 
 [project.optional-dependencies]
 vision = ["google-genai>=1.0,<2"]

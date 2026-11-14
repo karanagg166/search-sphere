@@ -5,7 +5,7 @@ from .errors import CapabilityUnavailable, IngestError, ResourceLimit
 from .models import Chunk, IngestResult, NormalizedDocument, Status
 from .pipeline import DocumentPipeline
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     "DocumentPipeline",
     "PipelineConfig",

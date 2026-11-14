@@ -1,6 +1,7 @@
 """Single-concurrency PostgreSQL ingestion for standalone Search Sphere documents."""
 
 import asyncio
+import random
 import time
 from datetime import UTC, datetime
 
@@ -94,7 +95,8 @@ class PostgresIngestionWorker:
                 except Exception:
                     pass
             try:
-                await asyncio.wait_for(self._wake.wait(), timeout=min(60, 4 * 2 ** self._poll_failures))
+                backoff = min(60.0, 4 * (2 ** self._poll_failures) * random.uniform(0.85, 1.15))
+                await asyncio.wait_for(self._wake.wait(), timeout=backoff)
             except TimeoutError:
                 pass
             self._wake.clear()

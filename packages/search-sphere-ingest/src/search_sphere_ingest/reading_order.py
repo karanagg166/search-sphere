@@ -97,6 +97,26 @@ def reading_order(
         split = (gap[0] + gap[1]) / 2
         before = [b for b in blocks if b["bbox"][2] <= split]
         after = [b for b in blocks if b["bbox"][0] >= split]
+        if before and after:
+            # Peel off short top/bottom bands (e.g. narrow titles or footers) that sit
+            # strictly above or below the opposing column before splitting columns.
+            other_top = min(b["bbox"][1] for b in after)
+            other_bottom = max(b["bbox"][3] for b in after)
+            left_top = min(b["bbox"][1] for b in before)
+            left_bottom = max(b["bbox"][3] for b in before)
+            band_top = max(other_top, left_top)
+            band_bottom = min(other_bottom, left_bottom)
+            if band_top < band_bottom:
+                top_band = [b for b in blocks if b["bbox"][3] <= band_top]
+                bottom_band = [b for b in blocks if b["bbox"][1] >= band_bottom]
+                if top_band or bottom_band:
+                    middle = [b for b in blocks if b not in top_band and b not in bottom_band]
+                    if middle and len(middle) < len(blocks):
+                        return (
+                            reading_order(top_band, page_width, depth + 1)
+                            + reading_order(middle, page_width, depth + 1)
+                            + reading_order(bottom_band, page_width, depth + 1)
+                        )
         return reading_order(before, page_width, depth + 1) + reading_order(
             after, page_width, depth + 1
         )
