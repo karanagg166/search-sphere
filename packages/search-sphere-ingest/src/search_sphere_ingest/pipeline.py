@@ -72,7 +72,8 @@ class DocumentPipeline:
             return self.extract_image(source)
         started = time.monotonic()
         data = load_pdf(source, self.config)
-        pdf, pages, checksum = inspect_pdf(data, self.config)
+        prep_issues: list[Issue] = []
+        pdf, pages, checksum = inspect_pdf(data, self.config, issues=prep_issues)
         fingerprint = stable_id(
             self.config.model_dump(),
             getattr(self.layout, "name", None),
@@ -85,6 +86,7 @@ class DocumentPipeline:
             config_fingerprint=fingerprint,
             title=str((pdf.metadata or {}).get("title", "")),
             pages=pages,
+            issues=prep_issues,
             trace_id=uuid.uuid4().hex,
         )
         try:
@@ -189,8 +191,26 @@ class DocumentPipeline:
                         document.source_sha256, info.page_number, tuple(value["bbox"]), order
                     )
                     size = max(span["size"] for line in value["lines"] for span in line["spans"])
+                    spans = [
+                        span
+                        for line in value["lines"]
+                        for span in line["spans"]
+                        if span["text"].strip()
+                    ]
+                    all_bold = bool(spans) and all(
+                        bool(span.get("flags", 0) & 16) for span in spans
+                    )
                     numbered = re.match(r"^(\d+(?:\.\d+)*)\.?\s+\S", text)
-                    if len(text) < 180 and (size >= baseline * 1.2 or numbered):
+                    is_bold_heading = (
+                        all_bold
+                        and len(text) < 120
+                        and len(value["lines"]) <= 2
+                        and size >= baseline * 0.98
+                        and not text.endswith((".", ",", ";"))
+                    )
+                    if (
+                        len(text) < 180 and (size >= baseline * 1.2 or numbered)
+                    ) or is_bold_heading:
                         level = (
                             min(6, numbered.group(1).count(".") + 1)
                             if numbered
@@ -239,11 +259,15 @@ class DocumentPipeline:
                             for line in nearby.splitlines()
                             if re.match(r"^(?:Figure|Fig\.|Chart|Diagram)\s+\w", line.strip(), re.I)
                         )
-                        paths = []
+                        paths: list[dict[str, object]] = []
+                        truncated_paths = False
                         for path in page.get_drawings():
                             bounds = path["rect"]
                             if bounds.x1 < x0 or bounds.x0 > x1 or bounds.y1 < y0 or bounds.y0 > y1:
                                 continue
+                            if len(paths) >= 1000:
+                                truncated_paths = True
+                                break
                             paths.append(
                                 {
                                     "bbox": list(bounds),
@@ -251,9 +275,12 @@ class DocumentPipeline:
                                     "items": [vector_data(segment) for segment in path["items"]],
                                 }
                             )
-                            if len(paths) > 1000:
-                                raise ResourceLimit("native_vector_budget")
                         visual.native_vector_paths = paths
+                        if (
+                            truncated_paths
+                            and "native_vector_paths_truncated" not in visual.uncertainties
+                        ):
+                            visual.uncertainties.append("native_vector_paths_truncated")
                     document.objects.extend(visuals)
                     document.issues.extend(issues)
             if info.selectable_characters == 0 and not boxes:

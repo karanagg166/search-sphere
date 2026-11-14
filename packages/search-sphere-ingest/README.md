@@ -1,10 +1,11 @@
-# search-sphere-ingest 0.1.0
+# search-sphere-ingest 0.3.0
 
 An independent Python library for bounded PDF/image extraction and source-aware chunking.
-Native text and ruled tables run without API keys. Missing visual providers produce
-explicit partial results. This is an initial release candidate, not an accepted production release.
-The distribution uses AGPL-3.0-or-later to remain compatible with PyMuPDF's
-open-source license; review LICENSE and THIRD_PARTY.md before redistribution.
+Native text and ruled/booktabs tables run without API keys. Missing visual providers produce
+explicit partial results.
+The distribution uses **AGPL-3.0-or-later** to remain compatible with PyMuPDF's
+open-source license (unless you hold an Artifex commercial license); review `LICENSE`
+and `THIRD_PARTY.md` before redistribution or SaaS deployment.
 
 ```sh
 uv sync --locked
@@ -37,7 +38,14 @@ Install independently from a reviewed Git commit (replace REVISION):
 ```sh
 uv add "search-sphere-ingest @ git+https://github.com/karanagg166/search-sphere.git@REVISION#subdirectory=packages/search-sphere-ingest"
 # Or from the built wheel:
-uv add /path/to/search_sphere_ingest-0.1.0-py3-none-any.whl
+uv add /path/to/search_sphere_ingest-0.3.0-py3-none-any.whl
+```
+
+See `examples/extract.py` for standalone Python usage and `examples/fastapi_app.py` for
+FastAPI integration. Run the reproducible real-world evaluation suite with:
+
+```sh
+uv run python -m evaluation.real_world_eval
 ```
 
 `pipeline.extract_image("public.png")` and `await pipeline.aextract_image(...)`

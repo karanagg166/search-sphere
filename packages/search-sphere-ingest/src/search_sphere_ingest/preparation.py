@@ -2,6 +2,7 @@
 
 import hashlib
 import math
+import re
 import zlib
 from pathlib import Path
 from typing import Any
@@ -10,9 +11,23 @@ import pymupdf
 
 from .config import PipelineConfig
 from .errors import IngestError, ResourceLimit
-from .models import Page
+from .models import Issue, Page
 
 fitz: Any = pymupdf
+
+_ALLOWED_PDF_FILTERS = frozenset(
+    {
+        "/FlateDecode",
+        "/ASCII85Decode",
+        "/ASCIIHexDecode",
+        "/LZWDecode",
+        "/RunLengthDecode",
+        "/DCTDecode",
+        "/JPXDecode",
+        "/CCITTFaxDecode",
+        "/JBIG2Decode",
+    }
+)
 
 
 def load_pdf(source: str | Path | bytes, config: PipelineConfig) -> bytes:
@@ -29,32 +44,33 @@ def load_pdf(source: str | Path | bytes, config: PipelineConfig) -> bytes:
     return data
 
 
+def _parse_filters(filter_value: str) -> list[str]:
+    if not filter_value or filter_value == "null":
+        return []
+    return re.findall(r"/[A-Za-z0-9]+", filter_value)
+
+
 def _check_streams(pdf: Any, config: PipelineConfig) -> None:
-    """Bound Flate expansion before text/layout processing; reject nested filters."""
+    """Bound Flate expansion before text/layout processing; reject nested/unknown filters."""
     if pdf.xref_length() > config.max_objects:
         raise ResourceLimit("too_many_pdf_objects")
-    total = 0
+    raw_total = 0
+    decoded_total = 0
+    max_stream_total = config.max_content_bytes * 4
     for xref in range(1, pdf.xref_length()):
         if not pdf.xref_is_stream(xref):
             continue
         raw = pdf.xref_stream_raw(xref)
         if raw is None:
             continue
-        total += len(raw)
-        if total > config.max_content_bytes:
+        raw_total += len(raw)
+        if raw_total > max_stream_total:
             raise ResourceLimit("pdf_stream_budget")
-        filter_value = pdf.xref_get_key(xref, "Filter")[1]
-        if filter_value in ("/FlateDecode", "[/FlateDecode]"):
-            try:
-                decoded = zlib.decompressobj().decompress(raw, config.max_content_bytes + 1)
-            except zlib.error:
-                raise IngestError("malformed_pdf_stream") from None
-            total += len(decoded)
-            if total > config.max_content_bytes:
-                raise ResourceLimit("pdf_decompression_budget")
-        elif filter_value not in ("null", "/DCTDecode", "/JPXDecode", "/CCITTFaxDecode"):
+        filters = _parse_filters(pdf.xref_get_key(xref, "Filter")[1])
+        if len(filters) > 3 or any(name not in _ALLOWED_PDF_FILTERS for name in filters):
             raise IngestError("unsupported_pdf_filter")
-        if pdf.xref_get_key(xref, "Subtype")[1] == "/Image":
+        is_image = pdf.xref_get_key(xref, "Subtype")[1] == "/Image"
+        if is_image:
             try:
                 width = int(pdf.xref_get_key(xref, "Width")[1])
                 height = int(pdf.xref_get_key(xref, "Height")[1])
@@ -62,9 +78,23 @@ def _check_streams(pdf: Any, config: PipelineConfig) -> None:
                 raise IngestError("invalid_image_dimensions") from None
             if width <= 0 or height <= 0 or width * height > config.max_image_pixels:
                 raise ResourceLimit("image_pixel_budget")
+        if filters == ["/FlateDecode"]:
+            stream_limit = config.max_image_pixels * 4 if is_image else config.max_content_bytes
+            try:
+                decoded = zlib.decompressobj().decompress(raw, stream_limit + 1)
+            except zlib.error:
+                raise IngestError("malformed_pdf_stream") from None
+            if len(decoded) > stream_limit:
+                raise ResourceLimit("pdf_decompression_budget")
+            if not is_image:
+                decoded_total += len(decoded)
+                if decoded_total > max_stream_total:
+                    raise ResourceLimit("pdf_decompression_budget")
 
 
-def inspect_pdf(data: bytes, config: PipelineConfig) -> tuple[Any, list[Page], str]:
+def inspect_pdf(
+    data: bytes, config: PipelineConfig, *, issues: list[Issue] | None = None
+) -> tuple[Any, list[Page], str]:
     try:
         pdf = fitz.open(stream=data, filetype="pdf")
     except Exception:
@@ -73,7 +103,10 @@ def inspect_pdf(data: bytes, config: PipelineConfig) -> tuple[Any, list[Page], s
         if pdf.needs_pass:
             raise IngestError("encrypted_pdf")
         if pdf.is_repaired:
-            raise IngestError("repaired_pdf_requires_review")
+            if issues is not None:
+                issues.append(Issue(code="repaired_pdf_requires_review", stage="preparation"))
+            elif config.require_complete:
+                raise IngestError("repaired_pdf_requires_review")
         if not 0 < pdf.page_count <= config.max_pages:
             raise ResourceLimit("page_budget")
         _check_streams(pdf, config)

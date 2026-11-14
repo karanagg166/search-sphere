@@ -40,7 +40,7 @@ def split_text_columns(block: dict[str, Any]) -> list[dict[str, Any]]:
             min(line["bbox"][1] for line in left),
             min(line["bbox"][1] for line in right),
         )
-        if overlap <= 0:
+        if overlap <= 2.0:
             return [group]  # Sequential indented lines are not columns.
         return partition(left, depth + 1) + partition(right, depth + 1)
 
@@ -80,12 +80,15 @@ def reading_order(
     left = min(b["bbox"][0] for b in blocks)
     right = max(b["bbox"][2] for b in blocks)
     width = max(right - left, page_width * 0.5)
+    tol = 2.0
     for wide in sorted(blocks, key=lambda b: b["bbox"][1]):
-        if wide["bbox"][2] - wide["bbox"][0] < width * 0.7:
+        if wide["bbox"][2] - wide["bbox"][0] < width * 0.65:
             continue
-        above = [b for b in blocks if b is not wide and b["bbox"][3] <= wide["bbox"][1]]
-        below = [b for b in blocks if b is not wide and b["bbox"][1] >= wide["bbox"][3]]
-        if len(above) + len(below) == len(blocks) - 1:
+        above = [b for b in blocks if b is not wide and b["bbox"][3] <= wide["bbox"][1] + tol]
+        below = [b for b in blocks if b is not wide and b["bbox"][1] >= wide["bbox"][3] - tol]
+        if len(above) + len(below) == len(blocks) - 1 and not (
+            set(map(id, above)) & set(map(id, below))
+        ):
             return (
                 reading_order(above, page_width, depth + 1)
                 + [wide]

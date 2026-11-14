@@ -73,7 +73,7 @@ async def test_normalized_pipeline_publishes_full_sources_and_scoped_links(
         for chunk in chunks:
             for ref in chunk.metadata_json["provenance"]:
                 assert ref["evidence_id"] in by_id
-                assert ref["pipeline_version"] == "0.1.0"
+                assert ref["pipeline_version"] == "0.3.0"
         await delete_registered_document(
             db, "standalone", document.id, "search_sphere", fixture.owner_id
         )

@@ -272,7 +272,7 @@ ContentObject = Annotated[Paragraph | Table | Visual, Field(discriminator="kind"
 
 class NormalizedDocument(Model):
     schema_version: Literal["1"] = "1"
-    pipeline_version: str = "0.1.0"
+    pipeline_version: str = "0.3.0"
     document_id: str
     source_sha256: str
     config_fingerprint: str
