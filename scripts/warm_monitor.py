@@ -17,13 +17,24 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 BASE_URL = "https://search-sphere-api.onrender.com"
+WORKSPACE_ID = "tea-d502qthr0fns73a09d0g"
+SERVICE_ID = "srv-db02odm7bikc73fv0e7g"
 
 
-def admission(config, now):
+def admission(config, now, *, verified_single_service=False):
     if not isinstance(config, dict):
         return False, "invalid_budget"
     if config.get("enabled") is not True:
         return False, "disabled"
+    # Explicit owner exception after deleting the duplicate service. This mode
+    # never represents a billing reading: the owner accepts possible suspension
+    # from earlier consumption. Reverify the sole free service on every run.
+    if config.get("mode") == "owner_requested_single_service":
+        if config.get("accept_allowance_suspension") is not True:
+            return False, "allowance_suspension_not_acknowledged"
+        if not verified_single_service:
+            return False, "single_free_service_not_verified"
+        return True, "single_service_unmetered_owner_override"
     if config.get("terms_verified") is not True:
         return False, "provider_terms_not_verified"
     try:
@@ -58,6 +69,35 @@ def admission(config, now):
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+def single_service_inventory(rows):
+    """Reject pagination/extra services, foreign ownership and any paid plan."""
+    if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+        return False
+    service = rows[0].get("service", {})
+    details = service.get("serviceDetails", {})
+    return ((service.get("id"), service.get("ownerId"), service.get("type"), service.get("repo")) ==
+            (SERVICE_ID, WORKSPACE_ID, "web_service", "https://github.com/karanagg166/search-sphere")
+            and details.get("plan") == "free" and details.get("url") == BASE_URL
+            and service.get("suspended") == "not_suspended")
+
+
+def verify_single_free_service():
+    token = os.getenv("RENDER_API_KEY", "")
+    if not token:
+        return False
+    request = urllib.request.Request(
+        "https://api.render.com/v1/services?ownerId=" + WORKSPACE_ID + "&limit=100",
+        headers={"Authorization": "Bearer " + token, "Accept": "application/json"})
+    try:
+        with urllib.request.build_opener(NoRedirect()).open(request, timeout=20) as response:
+            raw = response.read(524289)
+            if response.status != 200 or len(raw) > 524288:
+                return False
+            return single_service_inventory(json.loads(raw))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False  # Never log the token or an opaque platform response.
 
 
 def probe(path, *, expected_sha="", timeout=30):
@@ -128,7 +168,10 @@ def main():
     now = datetime.now(UTC)
     try:
         config = json.loads(args.config.read_text()) if args.config else json.loads(os.getenv("SS_WARM_CONFIG", "{}"))
-        allowed, reason = admission(config, now)
+        verified = (verify_single_free_service() if isinstance(config, dict)
+                    and config.get("enabled") is True
+                    and config.get("mode") == "owner_requested_single_service" else False)
+        allowed, reason = admission(config, now, verified_single_service=verified)
     except (OSError, ValueError, TypeError):
         allowed, reason = False, "invalid_budget"
     if not allowed:
@@ -151,7 +194,9 @@ def main():
     result = transition(state, healthy, now, reason)
     result["ready_at"] = state.get("ready_at", "")
     write_state(args.state, result)
-    print(json.dumps({"ping_sent": True, **result}))
+    print(json.dumps({"ping_sent": True,
+                      "budget_mode": "single_service_unmetered_owner_override" if verified else "operator_snapshot",
+                      "billing_meter_read": False, **result}))
     if result["alert"]:
         print("::error title=Search Sphere monitor::Three consecutive admitted probes failed: " + reason)
         return 1

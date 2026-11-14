@@ -41,3 +41,38 @@ def test_alert_only_on_third_consecutive_failure_and_reset_after_recovery():
         assert state["alert"] is (number == 3)
     recovered = transition(state, True, now + timedelta(hours=3), "ready")
     assert recovered["recovered"] and recovered["failures"] == 0 and recovered["schedule_gap"]
+
+
+def test_owner_override_requires_explicit_suspension_acceptance_and_live_inventory():
+    now = datetime.now(UTC)
+    requested = {"enabled": True, "mode": "owner_requested_single_service", "accept_allowance_suspension": True}
+    assert admission(requested, now) == (False, "single_free_service_not_verified")
+    assert admission(requested, now, verified_single_service=True) == (True, "single_service_unmetered_owner_override")
+    requested["accept_allowance_suspension"] = "true"
+    assert not admission(requested, now, verified_single_service=True)[0]
+    requested["enabled"] = False
+    assert admission(requested, now, verified_single_service=True) == (False, "disabled")
+
+
+def test_live_inventory_cannot_admit_an_extra_service_foreign_workspace_or_paid_plan():
+    from copy import deepcopy
+
+    from scripts.warm_monitor import (
+        BASE_URL,
+        SERVICE_ID,
+        WORKSPACE_ID,
+        single_service_inventory,
+    )
+
+    rows = [{"service": {"id": SERVICE_ID, "ownerId": WORKSPACE_ID, "type": "web_service",
+                         "repo": "https://github.com/karanagg166/search-sphere", "suspended": "not_suspended",
+                         "serviceDetails": {"plan": "free", "url": BASE_URL}}}]
+    assert single_service_inventory(rows)
+    assert not single_service_inventory(rows * 2)
+    assert not single_service_inventory([])
+    for field, value in [("ownerId", "foreign"), ("id", "different"), ("suspended", "suspended")]:
+        invalid = deepcopy(rows)
+        invalid[0]["service"][field] = value
+        assert not single_service_inventory(invalid)
+    rows[0]["service"]["serviceDetails"]["plan"] = "starter"
+    assert not single_service_inventory(rows)
