@@ -11,6 +11,7 @@ import json
 import math
 import os
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
@@ -19,6 +20,13 @@ from pathlib import Path
 BASE_URL = "https://search-sphere-api.onrender.com"
 WORKSPACE_ID = "tea-d502qthr0fns73a09d0g"
 SERVICE_ID = "srv-db02odm7bikc73fv0e7g"
+
+DISABLED_REASONS = frozenset({
+    "disabled",
+    "provider_terms_not_verified",
+    "allowance_suspension_not_acknowledged",
+})
+COLD_RETRYABLE_REASONS = frozenset({"cold_or_network_unavailable", "http_5xx"})
 
 
 def admission(config, now, *, verified_single_service=False):
@@ -100,32 +108,104 @@ def verify_single_free_service():
         return False  # Never log the token or an opaque platform response.
 
 
-def probe(path, *, expected_sha="", timeout=30):
-    # Fixed owned target, no redirects, no auth, no inference or private responses.
+def probe_with_details(path, *, expected_sha="", timeout=30):
+    """Execute one bounded HTTPS GET probe and return (healthy, reason, details)."""
     if path not in {"/health", "/ready"}:
         raise ValueError("Unsupported monitor endpoint")
+    started = time.monotonic()
     request = urllib.request.Request(BASE_URL + path, headers={"Accept": "application/json", "User-Agent": "SearchSphereMonitor/1"})
     try:
         with urllib.request.build_opener(NoRedirect()).open(request, timeout=timeout) as response:
             raw = response.read(16_385)
+            elapsed = round(time.monotonic() - started, 3)
             if response.status != 200 or len(raw) > 16_384:
-                return False, "invalid_response"
+                return False, "invalid_response", {"elapsed_seconds": elapsed}
             data = json.loads(raw)
+        details = {
+            "elapsed_seconds": elapsed,
+            "git_commit": data.get("git_commit", ""),
+            "memory_mb": data.get("memory_mb"),
+            "pressure_level": data.get("pressure_level", ""),
+            "worker": data.get("worker", ""),
+        }
         if data.get("status") not in ("ok", "ready"):
-            return False, "not_ready"
+            return False, "not_ready", details
         if path == "/ready" and data.get("database") != "connected":
-            return False, "database_unavailable"
+            return False, "database_unavailable", details
         if expected_sha and data.get("git_commit") != expected_sha:
-            return False, "revision_mismatch"
+            return False, "revision_mismatch", details
         if data.get("worker") in {"stalled", "stopped", "recovering"}:
-            return False, "worker_unavailable"
+            return False, "worker_unavailable", details
         if data.get("pressure_level") in {"high", "critical"}:
-            return False, "memory_pressure"
-        return True, "ready"
+            return False, "memory_pressure", details
+        return True, "ready", details
     except urllib.error.HTTPError as error:
-        return False, "database_unavailable" if path == "/ready" and error.code == 503 else "http_5xx" if error.code >= 500 else "http_error"
+        elapsed = round(time.monotonic() - started, 3)
+        reason = "database_unavailable" if path == "/ready" and error.code == 503 else "http_5xx" if error.code >= 500 else "http_error"
+        return False, reason, {"elapsed_seconds": elapsed, "http_status": error.code}
     except (OSError, ValueError, TypeError, AttributeError):
-        return False, "cold_or_network_unavailable"
+        elapsed = round(time.monotonic() - started, 3)
+        return False, "cold_or_network_unavailable", {"elapsed_seconds": elapsed}
+
+
+def probe(path, *, expected_sha="", timeout=30):
+    healthy, reason, _ = probe_with_details(path, expected_sha=expected_sha, timeout=timeout)
+    return healthy, reason
+
+
+def probe_with_cold_recovery(path, *, expected_sha="", timeout=30, wake_timeout=35, wake_backoff=5, sleep_fn=time.sleep):
+    """Distinguish a Render cold start from a persistent unreachable backend."""
+    started = time.monotonic()
+    healthy, reason, details = probe_with_details(path, expected_sha=expected_sha, timeout=timeout)
+    if healthy or reason not in COLD_RETRYABLE_REASONS:
+        return healthy, reason, False, details
+    sleep_fn(wake_backoff)
+    healthy2, reason2, details2 = probe_with_details(path, expected_sha=expected_sha, timeout=wake_timeout)
+    total_elapsed = round(time.monotonic() - started, 3)
+    details2["elapsed_seconds"] = total_elapsed
+    if healthy2:
+        details2["cold_start_duration_seconds"] = total_elapsed
+        return True, "cold_start_recovered", True, details2
+    return False, reason2, False, details2
+
+
+def classify_status(*, ping_sent, healthy, reason, cold_start, failures, recovered):
+    if not ping_sent:
+        return "monitoring_disabled" if reason in DISABLED_REASONS else "skipped_budget"
+    if healthy:
+        if recovered:
+            return "recovery_confirmed"
+        return "backend_cold_start" if cold_start else "healthy"
+    if failures >= 3:
+        return "repeated_failure"
+    if reason in {"database_unavailable", "worker_unavailable"}:
+        return reason
+    if reason in COLD_RETRYABLE_REASONS or reason in {"invalid_response", "not_ready"}:
+        return "backend_unreachable"
+    return reason
+
+
+def write_step_summary(payload):
+    summary_path = os.getenv("GITHUB_STEP_SUMMARY", "")
+    if not summary_path:
+        return
+    lines = [
+        "### Search Sphere Warm Monitor",
+        "",
+        "| Field | Value |",
+        "|---|---|",
+        f"| Status | `{payload.get('status', '')}` |",
+        f"| Request attempted | `{payload.get('request_attempted', False)}` |",
+        f"| Reason | `{payload.get('reason', '')}` |",
+        f"| Failures | `{payload.get('failures', 0)}` |",
+        f"| Recovered | `{payload.get('recovered', False)}` |",
+        f"| Elapsed (s) | `{payload.get('elapsed_seconds', '')}` |",
+        f"| Git commit | `{payload.get('git_commit', '')}` |",
+        f"| Memory (MB) | `{payload.get('memory_mb', '')}` |",
+        f"| Worker | `{payload.get('worker', '')}` |",
+    ]
+    with open(summary_path, "a", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
 
 
 def transition(state, success, now, reason):
@@ -175,7 +255,10 @@ def main():
     except (OSError, ValueError, TypeError):
         allowed, reason = False, "invalid_budget"
     if not allowed:
-        print(json.dumps({"ping_sent": False, "reason": reason}))
+        status = classify_status(ping_sent=False, healthy=False, reason=reason, cold_start=False, failures=0, recovered=False)
+        payload = {"ping_sent": False, "request_attempted": False, "status": status, "reason": reason}
+        print(json.dumps(payload))
+        write_step_summary(payload)
         return 0
     try:
         state = json.loads(args.state.read_text()) if args.state.stat().st_size < 4096 else {}
@@ -183,23 +266,51 @@ def main():
         state = {}
     if not isinstance(state, dict):
         state = {}
-    healthy, reason = probe("/health", expected_sha=config.get("expected_sha", ""))
+    expected_sha = config.get("expected_sha", "")
+    healthy, reason, cold_start, details = probe_with_cold_recovery("/health", expected_sha=expected_sha)
     # Reuse readiness twice daily, not on every ten-minute liveness probe.
     # A successful query, not merely a health ping, is the activity evidence.
     last_ready = state.get("ready_at", "")
     if healthy and (not last_ready or now.isoformat()[:13] != last_ready[:13]) and now.hour in {6, 18}:
-        healthy, reason = probe("/ready", expected_sha=config.get("expected_sha", ""))
+        healthy, ready_reason, _, ready_details = probe_with_cold_recovery("/ready", expected_sha=expected_sha)
+        details.update({k: v for k, v in ready_details.items() if v not in (None, "")})
         if healthy:
             state["ready_at"] = now.isoformat()
+        else:
+            reason = ready_reason
     result = transition(state, healthy, now, reason)
     result["ready_at"] = state.get("ready_at", "")
+    status = classify_status(
+        ping_sent=True,
+        healthy=healthy,
+        reason=reason,
+        cold_start=cold_start,
+        failures=result["failures"],
+        recovered=result["recovered"],
+    )
     write_state(args.state, result)
-    print(json.dumps({"ping_sent": True,
-                      "budget_mode": "single_service_unmetered_owner_override" if verified else "operator_snapshot",
-                      "billing_meter_read": False, **result}))
-    if result["alert"]:
-        print("::error title=Search Sphere monitor::Three consecutive admitted probes failed: " + reason)
+    payload = {
+        "ping_sent": True,
+        "request_attempted": True,
+        "status": status,
+        "cold_start": cold_start,
+        "budget_mode": "single_service_unmetered_owner_override" if verified else "operator_snapshot",
+        "billing_meter_read": False,
+        **details,
+        **result,
+    }
+    print(json.dumps(payload))
+    write_step_summary(payload)
+    if not healthy:
+        if result["alert"]:
+            print("::error title=Search Sphere monitor::Three consecutive admitted probes failed: " + reason)
+        else:
+            print(f"::warning title=Search Sphere monitor::Admitted probe failed ({status}: {reason}, streak {result['failures']}/3)")
         return 1
+    if status == "recovery_confirmed":
+        print("::notice title=Search Sphere monitor::Service recovery confirmed")
+    elif status == "backend_cold_start":
+        print(f"::warning title=Search Sphere monitor::Backend cold start recovered in {details.get('cold_start_duration_seconds', '')}s")
     return 0
 
 

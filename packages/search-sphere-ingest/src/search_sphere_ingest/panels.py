@@ -1,11 +1,28 @@
 """Conservative panel proposals. Geometry is evidence, never proof of semantic separation."""
 
+from collections.abc import Callable
 from io import BytesIO
 
 from PIL import Image
 
 from .errors import CapabilityUnavailable
 from .models import Box
+
+
+def _longest_zero_run(projection: "object", start: int, end: int, min_width: int) -> int | None:
+    middle = [idx for idx in range(start, end) if projection[idx] == 0]  # type: ignore[index]
+    runs: list[list[int]] = []
+    for idx in middle:
+        if not runs or idx != runs[-1][-1] + 1:
+            runs.append([idx])
+        else:
+            runs[-1].append(idx)
+    if not runs:
+        return None
+    best = max(runs, key=len)
+    if len(best) < min_width:
+        return None
+    return (best[0] + best[-1]) // 2
 
 
 def propose_panels(image: bytes) -> list[Box]:
@@ -32,25 +49,73 @@ def propose_panels(image: bytes) -> list[Box]:
     significant = [(x, y, w, h) for x, y, w, h in boxes if w * h > width * height * 0.04]
     if not 2 <= len(significant) <= 8:
         return []
-    # Keep all disconnected labels/legends by splitting only a full-height whitespace gutter.
-    projection = (foreground > 0).sum(axis=0)
-    middle = [x for x in range(width // 4, width * 3 // 4) if projection[x] == 0]
-    runs: list[list[int]] = []
-    for x in middle:
-        if not runs or x != runs[-1][-1] + 1:
-            runs.append([x])
-        else:
-            runs[-1].append(x)
-    if not runs or len(max(runs, key=len)) < max(12, width // 25):
-        return []
-    gutter = max(runs, key=len)
-    split = (gutter[0] + gutter[-1]) // 2
-    if not any(x + w < split for x, _, w, _ in significant) or not any(
-        x > split for x, _, w, _ in significant
-    ):
-        return []
-    boundary = split * original_width / width
-    return [
-        Box(x0=0, y0=0, x1=boundary, y1=original_height),
-        Box(x0=boundary, y0=0, x1=original_width, y1=original_height),
-    ]
+
+    fg_mask = foreground > 0
+    v_split = _longest_zero_run(
+        fg_mask.sum(axis=0), width // 5, width * 4 // 5, max(12, width // 25)
+    )
+    h_split = _longest_zero_run(
+        fg_mask.sum(axis=1), height // 5, height * 4 // 5, max(12, height // 25)
+    )
+
+    has_v = (
+        v_split is not None
+        and any(x + w < v_split for x, _, w, _ in significant)
+        and any(x > v_split for x, _, _, _ in significant)
+    )
+    has_h = (
+        h_split is not None
+        and any(y + h < h_split for _, y, _, h in significant)
+        and any(y > h_split for _, y, _, _ in significant)
+    )
+
+    if has_v and has_h and v_split is not None and h_split is not None:
+        bx = v_split * original_width / width
+        by = h_split * original_height / height
+        quadrants: list[tuple[float, float, float, float, Callable[[int, int, int, int], bool]]] = [
+            (0.0, 0.0, bx, by, lambda x, y, w, h: x + w < v_split and y + h < h_split),
+            (
+                bx,
+                0.0,
+                float(original_width),
+                by,
+                lambda x, y, w, h: x > v_split and y + h < h_split,
+            ),
+            (
+                0.0,
+                by,
+                bx,
+                float(original_height),
+                lambda x, y, w, h: x + w < v_split and y > h_split,
+            ),
+            (
+                bx,
+                by,
+                float(original_width),
+                float(original_height),
+                lambda x, y, w, h: x > v_split and y > h_split,
+            ),
+        ]
+        populated = [
+            Box(x0=x0, y0=y0, x1=x1, y1=y1)
+            for x0, y0, x1, y1, pred in quadrants
+            if any(pred(x, y, w, h) for x, y, w, h in significant)
+        ]
+        if len(populated) >= 2:
+            return populated
+
+    if has_v and v_split is not None:
+        boundary = v_split * original_width / width
+        return [
+            Box(x0=0, y0=0, x1=boundary, y1=original_height),
+            Box(x0=boundary, y0=0, x1=original_width, y1=original_height),
+        ]
+
+    if has_h and h_split is not None:
+        boundary = h_split * original_height / height
+        return [
+            Box(x0=0, y0=0, x1=original_width, y1=boundary),
+            Box(x0=0, y0=boundary, x1=original_width, y1=original_height),
+        ]
+
+    return []

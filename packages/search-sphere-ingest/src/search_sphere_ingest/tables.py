@@ -10,7 +10,7 @@ def continuation_score(before: Table, after: Table, pages: list[Page]) -> float:
     if right.page_number != left.page_number + 1 or before.section_id != after.section_id:
         return 0
     p, q = pages[left.page_number - 1], pages[right.page_number - 1]
-    if left.bbox.y1 / p.height < 0.8 or right.bbox.y0 / q.height > 0.25:
+    if left.bbox.y1 / p.height < 0.72 or right.bbox.y0 / q.height > 0.25:
         return 0
     if (
         len(before.headers) != len(after.headers)
