@@ -259,6 +259,8 @@ jobs:
       - run: uv run --no-sync ruff format --check .
       - run: uv run --no-sync mypy src
       - run: uv run --no-sync pytest -v
+      - name: Run real-world extraction evaluation
+        run: uv run --no-sync python -m evaluation.real_world_eval
       - run: uv export --locked --no-dev --extra vision --extra opencv --no-emit-project -o /tmp/ingest-runtime.txt > /dev/null
       - run: uv run --no-sync pip-audit --no-deps -r /tmp/ingest-runtime.txt
       - run: uv build

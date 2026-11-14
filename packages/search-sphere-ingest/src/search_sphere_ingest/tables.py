@@ -19,7 +19,7 @@ def continuation_score(before: Table, after: Table, pages: list[Page]) -> float:
     ):
         return 0
     if len(before.column_edges) != len(after.column_edges) or any(
-        abs(a / p.width - b / q.width) > 0.015
+        abs(a / p.width - b / q.width) > 0.025
         for a, b in zip(before.column_edges, after.column_edges, strict=True)
     ):
         return 0

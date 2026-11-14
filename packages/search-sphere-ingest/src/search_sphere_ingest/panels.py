@@ -46,8 +46,8 @@ def propose_panels(image: bytes) -> list[Box]:
         joined, 1, np.pi / 180, threshold=50, minLineLength=max(20, width // 5), maxLineGap=8
     )
     boxes = [cv2.boundingRect(contour) for contour in contours]
-    significant = [(x, y, w, h) for x, y, w, h in boxes if w * h > width * height * 0.04]
-    if not 2 <= len(significant) <= 8:
+    significant = [(x, y, w, h) for x, y, w, h in boxes if w * h > width * height * 0.02]
+    if not 2 <= len(significant) <= 32:
         return []
 
     fg_mask = foreground > 0
@@ -119,3 +119,26 @@ def propose_panels(image: bytes) -> list[Box]:
         ]
 
     return []
+
+
+def estimate_skew_degrees(image: bytes) -> float:
+    """Estimate dominant text/document skew angle in [-45, 45] degrees using OpenCV."""
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        raise CapabilityUnavailable("opencv_extra_required") from None
+    with Image.open(BytesIO(image)) as original:
+        original.thumbnail((1400, 1400))
+        rgb = np.asarray(original.convert("RGB"))
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    fg = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
+    coords = np.column_stack(np.where(fg > 0))
+    if len(coords) < 100:
+        return 0.0
+    angle = float(cv2.minAreaRect(coords[:, ::-1])[-1])
+    if angle < -45:
+        angle = 90 + angle
+    elif angle > 45:
+        angle = angle - 90
+    return round(angle, 2)

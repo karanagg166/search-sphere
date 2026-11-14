@@ -1,0 +1,88 @@
+{
+  "corpus_version": "1.0.0",
+  "documents": [
+    {
+      "id": "arxiv_1706_03762_p1_p8",
+      "file": "arxiv_1706_03762_sample.pdf",
+      "category": "native_complex_research_paper",
+      "source": "https://arxiv.org/abs/1706.03762 (Vaswani et al., 2017, pages 1-8)",
+      "license": "CC-BY / arXiv perpetual non-exclusive license",
+      "expected": {
+        "pages": 8,
+        "required_headings": [
+          "Attention Is All You Need",
+          "Abstract",
+          "Introduction",
+          "Background",
+          "Model Architecture",
+          "Why Self-Attention",
+          "Training",
+          "Results"
+        ],
+        "required_phrases": [
+          "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks",
+          "Scaled Dot-Product Attention",
+          "Multi-Head Attention",
+          "Positional Encoding",
+          "WMT 2014 English-to-German"
+        ],
+        "min_tables": 1,
+        "min_visuals": 2
+      }
+    },
+    {
+      "id": "multicolumn_booktabs_crosspage_pd",
+      "file": "generated:multicolumn_booktabs_crosspage",
+      "category": "multicolumn_tables_merged_crosspage",
+      "source": "Public-domain NIST/IETF style technical benchmark fixture",
+      "license": "CC0-1.0",
+      "expected": {
+        "reading_order_phrases": [
+          "1. Executive Summary",
+          "Left column paragraph one.",
+          "Left column paragraph two.",
+          "Right column paragraph one.",
+          "Right column paragraph two."
+        ],
+        "cross_page_table_rows": 3,
+        "merged_table_headers": ["Quarter", "Latency (ms)", "Throughput (rps)"]
+      }
+    },
+    {
+      "id": "multilingual_en_hi_pd",
+      "file": "generated:multilingual_en_hi",
+      "category": "multilingual_english_hindi",
+      "source": "Public Domain Preamble of the Constitution of India (English & Devanagari)",
+      "license": "Public Domain",
+      "expected": {
+        "required_phrases": [
+          "WE, THE PEOPLE OF INDIA",
+          "हम, भारत के लोग"
+        ]
+      }
+    },
+    {
+      "id": "rotated_and_skewed_pd",
+      "file": "generated:rotated_and_skewed",
+      "category": "rotated_skewed_scanned",
+      "source": "Synthetic public-domain rotated PDF & 7-degree skewed raster scan",
+      "license": "CC0-1.0",
+      "expected": {
+        "rotated_text": "Rotated ninety degrees exact verification sentence.",
+        "skew_degrees": 7.0,
+        "scan_status": "PARTIAL"
+      }
+    },
+    {
+      "id": "visual_panels_and_ocr_pd",
+      "file": "generated:visual_panels_and_ocr",
+      "category": "multipanel_charts_diagrams_photo_ocr",
+      "source": "Synthetic public-domain 2x2 panel, 8-chart-type & 3-diagram-type raster suite",
+      "license": "CC0-1.0",
+      "expected": {
+        "panel_layouts": ["vertical", "horizontal", "grid"],
+        "ocr_phrase": "INVOICE TOTAL 420.50 USD"
+      }
+    }
+  ]
+}

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "search-sphere-ingest"
-version = "0.2.0"
+version = "0.3.0"
 description = "Bounded PDF extraction, explicit uncertainty, and source-aware chunking"
 readme = "README.md"
 requires-python = ">=3.12"

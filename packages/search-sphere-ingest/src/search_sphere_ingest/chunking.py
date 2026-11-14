@@ -6,6 +6,7 @@ from .config import PipelineConfig
 from .errors import ResourceLimit
 from .models import Chunk, NormalizedDocument, Paragraph, SourceRef, Table, Visual, stable_id
 from .providers import Tokenizer
+from .text import sentences
 
 
 class TiktokenTokenizer:
@@ -270,33 +271,41 @@ class Chunker:
             for edge in visual.edges
         ]
         if visual.ocr_text:
-            details.append("OCR transcription (review required):\n" + visual.ocr_text)
+            ocr_header = "OCR transcription (review required):"
+            ocr_sentences = [s.text for s in sentences(visual.ocr_text, visual.object_id)]
+            if ocr_sentences:
+                details.append(ocr_header)
+                details.extend(ocr_sentences)
+            else:
+                details.append(ocr_header + "\n" + visual.ocr_text)
         if visual.native_text:
             details.append("Native PDF labels:\n" + visual.native_text)
+        prefix = "\n".join(part for part in (context, visual.title) if part)
         for detail in details:
-            prefix = context + "\n" + visual.title
             # Relations retain both endpoint labels in one unit; never sever an edge.
             if (
                 " -> " in detail
-                and self.tokenizer.count(prefix + "\n" + detail) > self.config.max_tokens
+                and self.tokenizer.count((prefix + "\n" if prefix else "") + detail)
+                > self.config.max_tokens
             ):
                 raise ResourceLimit("diagram_relationship_exceeds_token_budget")
             for part in self._fragments(prefix, detail):
-                text = prefix + "\n" + part
                 if (
-                    len(output) == 1
-                    and self.tokenizer.count(output[0].text + "\n" + detail)
+                    output
+                    and self.tokenizer.count(output[-1].text + "\n" + part)
                     <= self.config.max_tokens
                 ):
-                    output[0] = self._make(
+                    output[-1] = self._make(
                         document,
                         visual.kind,
-                        output[0].text + "\n" + detail,
+                        output[-1].text + "\n" + part,
                         [visual.object_id],
                         visual.heading_path,
                         visual.sources,
+                        fragment=output[-1].fragment or len(details) > 1,
                     )
-                    break
+                    continue
+                text = (prefix + "\n" + part) if prefix else part
                 output.append(
                     self._make(
                         document,

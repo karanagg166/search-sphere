@@ -14,23 +14,44 @@ from .models import Box, OCRRegion, SourceRef
 
 
 class TesseractOCRProvider:
-    def __init__(self, language: str = "eng", *, timeout_seconds: float = 15) -> None:
+    def __init__(
+        self, language: str = "eng", *, timeout_seconds: float = 15, psm: int = 11
+    ) -> None:
         if not language.replace("+", "").replace("_", "").isalnum():
             raise ValueError("Invalid OCR language")
+        if not 0 <= psm <= 13:
+            raise ValueError("Invalid Tesseract PSM")
         executable = shutil.which("tesseract")
         if not executable:
             raise CapabilityUnavailable("tesseract_executable_unavailable")
-        self.executable, self.language, self.timeout = executable, language, timeout_seconds
+        self.executable, self.language, self.timeout, self.psm = (
+            executable,
+            language,
+            timeout_seconds,
+            psm,
+        )
         self.name = "tesseract:" + language
 
     def recognize(self, image: bytes, source: SourceRef) -> list[OCRRegion]:
+        if len(image) > 8 * 1024 * 1024:
+            raise ResourceLimit("ocr_image_budget")
         with Image.open(BytesIO(image)) as picture:
             width, height = picture.size
-        if width * height > 4_000_000 or len(image) > 4 * 1024 * 1024:
-            raise ResourceLimit("ocr_image_budget")
+            if width * height > 16_000_000:
+                raise ResourceLimit("ocr_image_budget")
+            ocr_image = image
+            if width * height > 4_000_000:
+                scale = (4_000_000 / (width * height)) ** 0.5
+                resized = picture.convert("RGB").resize(
+                    (max(1, int(width * scale)), max(1, int(height * scale)))
+                )
+                width, height = resized.size
+                buf = BytesIO()
+                resized.save(buf, format="PNG")
+                ocr_image = buf.getvalue()
         with TemporaryDirectory(prefix="ss-ocr-") as directory:
             path = Path(directory) / "source.png"
-            path.write_bytes(image)
+            path.write_bytes(ocr_image)
             try:
                 # output file avoids buffering arbitrary OCR output in subprocess pipes.
                 subprocess.run(
@@ -41,7 +62,7 @@ class TesseractOCRProvider:
                         "-l",
                         self.language,
                         "--psm",
-                        "11",
+                        str(self.psm),
                         "tsv",
                     ],
                     timeout=self.timeout,
