@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "search-sphere-rag"
+version = "0.1.0"
+description = "Reusable hosted embeddings, vector validation, hybrid RRF fusion, reranking, and query rewriting for Search Sphere consumers"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
+dependencies = ["pydantic>=2.8,<3", "httpx>=0.28,<1"]
+
+[project.urls]
+Homepage = "https://github.com/karanagg166/search-sphere/tree/main/packages/search-sphere-rag"
+Repository = "https://github.com/karanagg166/search-sphere"
+Issues = "https://github.com/karanagg166/search-sphere/issues"
+
+[dependency-groups]
+dev = ["pytest>=8.3,<10", "pytest-asyncio>=1,<2", "ruff>=0.14,<1", "mypy>=1.19,<2"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/search_sphere_rag"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
