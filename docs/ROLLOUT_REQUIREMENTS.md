@@ -1,9 +1,5 @@
 # Search Sphere repair and rollout ledger
 
-> November 10 scope: Search Sphere is standalone. Consumer chatbot integration
-> is retired from the deployed application; see [standalone scope](STANDALONE_SCOPE.md).
-> Earlier multi-application requirements and results below are historical.
-
 This is the active acceptance ledger for the backend repair requested on 2026-11-06.
 Statuses describe observed code and execution separately. A unit test or healthy
 endpoint is not proof of a completed live journey. No phase is complete until its
@@ -1680,3 +1676,84 @@ Broad labeled retrieval/answer/refusal/P95/capacity comparisons, forced in-fligh
 production restart/provider-failure cases, final attribute-policy applicability
 and strict consumer pre-deploy admission remain open. Successful positive
 journeys do not close these requirements or the budget/production-term blockers.
+
+### 2026-11-09: ownership, assigned staff and free-only operation
+
+The owner clarified that standalone files are private to their user, medical
+access follows Quick-Clinic's patient grants, and private school records belong
+to their student while permitting assigned teachers and the school's principal.
+Before repairs, the ExamArena access inventory in `docs/ACCESS_CONTROL.md`
+recorded school-wide teacher reads, classmates' full profile reads and self-service
+role/school elevation paths. Shared course PDFs already had enrollment checks;
+they were not a private student-file catalog. Existing PostgreSQL identities,
+enrollment and teaching assignments were reused rather than introducing a second
+permission store.
+
+ExamArena [#44](https://github.com/karanagg166/ExamArena/pull/44) merged as
+`071bb9988f130b93309ab5e58f2d79e6c9cd47ca`. Current database assignments now gate
+student profiles/history, rosters, results and analytics. Student self access,
+assigned and legacy primary teachers, affiliated principals, empty grants,
+cross-school denials, revoked roles/assignments and elevation attempts have real
+PostgreSQL regression coverage. Exact main CI
+[42592123399](https://github.com/karanagg166/ExamArena/actions/runs/42592123399)
+passed. The initial failing CI 42534500257 remains a failure; its principal
+serialization and outdated fixture problems were repaired before merge.
+
+ExamArena [#45](https://github.com/karanagg166/ExamArena/pull/45) merged as
+`bbaccf8d253f226544e7c95aca0ef8257efe8787`. Course operations and evidence emission
+reuse fresh assignments, apply SQL catalog filters, reject class-deletion scope
+promotion and bind deleted-document cleanup to the original collection. The
+release controller now checks private synthetic profiles/history and rejects a
+wrong collection before verifying physical cleanup. Its exact main CI
+[42598983455](https://github.com/karanagg166/ExamArena/actions/runs/42598983455)
+passed; final premerge backend tests reported 897 passed and one skipped. Failing
+42590218407 exposed legacy cleanup requests without a subject; safe catalog-based
+scope derivation and revocation regressions repaired that compatibility path.
+
+Production operator checks against 071bb99 passed all 18 authenticated private
+record assertions using only synthetic fixture IDs. Earlier attempts failed at
+cold health recovery and a 15-second read deadline. Authorized history reads took
+17.6–17.8 seconds, and request-level PostgreSQL tests reproduced four connections
+for one history request. ExamArena
+[#46](https://github.com/karanagg166/ExamArena/pull/46), merged as
+`1591dbdfde5b9e23fa37ef0737164b07674b3f4d`, reuses the request session and rejects
+student roster reads before metadata work. Those tests now bound history to two
+connections including authentication and denied roster reads to one. Health-only
+recovery has a hard 120-second elapsed budget, and private-record fixture reads
+allow 30 seconds. No upload, answer or model retry was added. All 128 focused
+checks and both full premerge CI runs 42600304775/42600457912 passed. Exact-main
+CI and the final live course journey are tracked separately below.
+
+Search Sphere [#88](https://github.com/karanagg166/search-sphere/pull/88) merged as
+`f006484793a21a846aa9fe7ed291a9ccf3433c08`. The production frontend explains that
+external AI approval differs from document access, preserves `provider_not_approved`
+through HTTP/SSE/JSON and removes an ineffective retry action. Forty-five frontend
+tests, exact main CI 42590240984 and the production assets pass. No ordinary
+account, private content or provider policy was reclassified. The reported
+unknown-classification account remains blocked from trial inference.
+
+The newly dispatched native production journey
+[42603228444](https://github.com/karanagg166/search-sphere/actions/runs/42603228444)
+passed against the unchanged Render API `b205832aa49c983c2bf95c692a0e29b35df697f9`.
+A new synthetic PDF indexed into two chunks, retrieval found its unique marker,
+standalone/conversation answers had supporting page citations, both SSE paths
+completed and saved exactly the expected turns, and cleanup independently proved
+zero physical vectors and deleted private objects. Memory was 223.2 MiB initially
+and 265.5 MiB finally, with normal pressure. The production frontend also returned
+200. This is positive synthetic proof, not permission for real private inference.
+
+The owner confirmed that Render has **no payment method attached** and requires
+free/trial use only. Render's [documented quota behavior](https://render.com/docs/faq)
+pauses builds/services without a payment method rather than charging overages.
+The service connector confirms plan `free`; Vercel's team context directly reports
+`hobby`; Cohere Trial remains owner-confirmed with the application hard cap of
+900 monthly reservations. This supersedes the previous unresolved Render billing
+question. No paid service, upgrade, model or new Render deployment was introduced.
+Cohere Trial production/commercial eligibility and private-data approval remain
+separate external requirements.
+
+[PRIVATE_STUDENT_DOCUMENT_CONTRACT.md](PRIVATE_STUDENT_DOCUMENT_CONTRACT.md)
+records the remaining private PDF contract and maps the existing tables. That
+upload/search feature is **not implemented**: class membership must not grant
+classmates another student's private file. The broader rollout remains open for
+this and the previously recorded versioning, evaluation and release-gate work.
