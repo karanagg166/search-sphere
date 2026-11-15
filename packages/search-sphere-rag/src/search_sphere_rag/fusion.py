@@ -88,7 +88,9 @@ def reciprocal_rank_fusion(
         )
     )
     selected = fused[:top_k]
-    return [item.model_copy(update={"final_rank": idx}) for idx, item in enumerate(selected, start=1)]
+    return [
+        item.model_copy(update={"final_rank": idx}) for idx, item in enumerate(selected, start=1)
+    ]
 
 
 def deduplicate_candidates(

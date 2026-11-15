@@ -63,8 +63,12 @@ class _StubLexicalRetriever:
 
 
 def test_rrf_and_dedup() -> None:
-    c1 = RetrievalCandidate(chunk_id="c1", document_id="d1", content="HbA1c 5.8 percent normal", score=0.9)
-    c2 = RetrievalCandidate(chunk_id="c2", document_id="d1", content="HbA1c 5.8 percent normal", score=0.8)
+    c1 = RetrievalCandidate(
+        chunk_id="c1", document_id="d1", content="HbA1c 5.8 percent normal", score=0.9
+    )
+    c2 = RetrievalCandidate(
+        chunk_id="c2", document_id="d1", content="HbA1c 5.8 percent normal", score=0.8
+    )
     fused = reciprocal_rank_fusion([c1, c2], [c2], top_k=5)
     assert fused[0].candidate.chunk_id == "c2"
     deduped = deduplicate_candidates(fused, similarity_threshold=0.8)
@@ -75,12 +79,19 @@ def test_rrf_and_dedup() -> None:
 async def test_hybrid_rag_engine_with_cohere_rerank_and_fallback() -> None:
     def embed_handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content.decode("utf-8"))
-        return httpx.Response(200, json={"embeddings": {"float": [[0.1] * 384 for _ in body["texts"]]}})
+        return httpx.Response(
+            200, json={"embeddings": {"float": [[0.1] * 384 for _ in body["texts"]]}}
+        )
 
     def rerank_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
-            json={"results": [{"index": 0, "relevance_score": 0.99}, {"index": 1, "relevance_score": 0.65}]},
+            json={
+                "results": [
+                    {"index": 0, "relevance_score": 0.99},
+                    {"index": 1, "relevance_score": 0.65},
+                ]
+            },
         )
 
     engine = HybridRagEngine(
@@ -95,7 +106,9 @@ async def test_hybrid_rag_engine_with_cohere_rerank_and_fallback() -> None:
             transport=httpx.MockTransport(rerank_handler),
         ),
     )
-    resp = await engine.retrieve("What is my fasting glucose?", scope={"patient_id": "pat_1"}, top_k=2)
+    resp = await engine.retrieve(
+        "What is my fasting glucose?", scope={"patient_id": "pat_1"}, top_k=2
+    )
     assert resp.strategy == "hybrid"
     assert resp.reranked is True
     assert resp.reranker_model == "rerank-v3.5"
@@ -111,7 +124,9 @@ async def test_hybrid_rag_engine_with_cohere_rerank_and_fallback() -> None:
         lexical_retriever=_StubLexicalRetriever(),
         reranker=failing_rerank,
     )
-    resp2 = await engine_fallback.retrieve("fasting glucose", scope={"patient_id": "pat_1"}, top_k=2)
+    resp2 = await engine_fallback.retrieve(
+        "fasting glucose", scope={"patient_id": "pat_1"}, top_k=2
+    )
     assert resp2.strategy == "sparse"
     assert resp2.reranked is False
     assert resp2.reranker_model == "hybrid_rrf_fallback"
@@ -121,7 +136,10 @@ async def test_hybrid_rag_engine_with_cohere_rerank_and_fallback() -> None:
 @pytest.mark.asyncio
 async def test_query_intent_history_and_rewrite() -> None:
     assert classify_query_intent("hello").route == QueryIntentRoute.DIRECT
-    assert classify_query_intent("What is my document processing status?").route == QueryIntentRoute.TOOL_API
+    assert (
+        classify_query_intent("What is my document processing status?").route
+        == QueryIntentRoute.TOOL_API
+    )
     assert requires_history("What about its reference range?") is True
 
     rewritten = await rewrite_query(

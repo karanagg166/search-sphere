@@ -62,7 +62,11 @@ class HybridRagEngine:
                 f"top_k must be between 1 and {self.max_top_k}, got {resolved_top_k}."
             )
 
-        resolved_candidate_k = candidate_k if candidate_k is not None else max(self.default_candidate_k, resolved_top_k * 3)
+        resolved_candidate_k = (
+            candidate_k
+            if candidate_k is not None
+            else max(self.default_candidate_k, resolved_top_k * 3)
+        )
         if resolved_candidate_k < resolved_top_k:
             raise RetrievalValidationError("candidate_k cannot be less than top_k.")
 
@@ -118,7 +122,9 @@ class HybridRagEngine:
                 reranked = True
                 reranker_model = self.reranker.model_name
             except ProviderCallError:
-                results = await self.fallback_reranker.rerank(clean_query, fused, top_k=resolved_top_k)
+                results = await self.fallback_reranker.rerank(
+                    clean_query, fused, top_k=resolved_top_k
+                )
                 reranker_model = self.fallback_reranker.model_name
         else:
             results = await self.fallback_reranker.rerank(clean_query, fused, top_k=resolved_top_k)
