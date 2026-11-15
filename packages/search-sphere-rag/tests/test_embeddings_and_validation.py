@@ -31,7 +31,9 @@ def test_validate_vectors_rejects_nan_inf_and_bool() -> None:
 
 
 def test_embedding_space_mismatch_rejected() -> None:
-    cohere_space = EmbeddingSpace(provider="cohere", model="embed-english-light-v3.0", dimension=384)
+    cohere_space = EmbeddingSpace(
+        provider="cohere", model="embed-english-light-v3.0", dimension=384
+    )
     google_space = EmbeddingSpace(provider="google", model="gemini-embedding-001", dimension=384)
     with pytest.raises(EmbeddingSpaceMismatchError):
         cohere_space.assert_compatible(google_space)

@@ -118,10 +118,14 @@ class CohereRerankProvider:
                     headers={"Authorization": f"Bearer {self._api_key}"},
                 )
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
-                raise ProviderCallError(f"Cohere rerank request failed: {type(exc).__name__}") from exc
+                raise ProviderCallError(
+                    f"Cohere rerank request failed: {type(exc).__name__}"
+                ) from exc
 
             if resp.status_code != 200:
-                raise ProviderCallError(f"Cohere rerank rejected request with HTTP {resp.status_code}.")
+                raise ProviderCallError(
+                    f"Cohere rerank rejected request with HTTP {resp.status_code}."
+                )
 
             payload: dict[str, Any] = resp.json()
 

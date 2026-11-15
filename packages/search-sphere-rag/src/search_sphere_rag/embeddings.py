@@ -52,7 +52,9 @@ class CohereEmbeddingProvider:
             raise EmbeddingValidationError("Cohere API key is required.")
         resolved_dim = dimension or KNOWN_EMBEDDING_DIMENSIONS.get(("cohere", model))
         if resolved_dim is None or resolved_dim <= 0:
-            raise EmbeddingValidationError(f"Unknown Cohere embedding dimension for model '{model}'.")
+            raise EmbeddingValidationError(
+                f"Unknown Cohere embedding dimension for model '{model}'."
+            )
         self._api_key = api_key.strip()
         self._batch_size = max(1, min(batch_size, 96))
         self._timeout = timeout_seconds
@@ -100,15 +102,21 @@ class CohereEmbeddingProvider:
                         headers={"Authorization": f"Bearer {self._api_key}"},
                     )
                 except (httpx.TimeoutException, httpx.NetworkError) as exc:
-                    raise ProviderCallError(f"Cohere embed request failed: {type(exc).__name__}") from exc
+                    raise ProviderCallError(
+                        f"Cohere embed request failed: {type(exc).__name__}"
+                    ) from exc
 
                 if resp.status_code != 200:
-                    raise ProviderCallError(f"Cohere embed rejected request with HTTP {resp.status_code}.")
+                    raise ProviderCallError(
+                        f"Cohere embed rejected request with HTTP {resp.status_code}."
+                    )
 
                 payload: dict[str, Any] = resp.json()
                 raw_vecs = (payload.get("embeddings") or {}).get("float")
                 if not isinstance(raw_vecs, list):
-                    raise EmbeddingValidationError("Cohere embed response missing float embeddings.")
+                    raise EmbeddingValidationError(
+                        "Cohere embed response missing float embeddings."
+                    )
                 validated = validate_vectors(
                     raw_vecs,
                     expected_count=len(batch),
@@ -195,16 +203,22 @@ class GoogleEmbeddingProvider:
                     json={"requests": requests_body},
                 )
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
-                raise ProviderCallError(f"Google embed request failed: {type(exc).__name__}") from exc
+                raise ProviderCallError(
+                    f"Google embed request failed: {type(exc).__name__}"
+                ) from exc
 
             if resp.status_code != 200:
-                raise ProviderCallError(f"Google embed rejected request with HTTP {resp.status_code}.")
+                raise ProviderCallError(
+                    f"Google embed rejected request with HTTP {resp.status_code}."
+                )
 
             payload: dict[str, Any] = resp.json()
             raw_items = payload.get("embeddings")
             if not isinstance(raw_items, list):
                 raise EmbeddingValidationError("Google embed response missing embeddings list.")
-            raw_vecs = [item.get("values") if isinstance(item, dict) else None for item in raw_items]
+            raw_vecs = [
+                item.get("values") if isinstance(item, dict) else None for item in raw_items
+            ]
             validated = validate_vectors(
                 raw_vecs,  # type: ignore[arg-type]
                 expected_count=len(cleaned),

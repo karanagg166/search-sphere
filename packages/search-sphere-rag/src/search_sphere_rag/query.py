@@ -32,10 +32,7 @@ def requires_history(query: str) -> bool:
     clean = query.strip()
     if not clean or _DIRECT_GREETING.fullmatch(clean):
         return False
-    return bool(
-        _REFERENCE_PATTERN.search(clean)
-        or re.match(r"^(?:and|but|also)\b", clean, re.I)
-    )
+    return bool(_REFERENCE_PATTERN.search(clean) or re.match(r"^(?:and|but|also)\b", clean, re.I))
 
 
 def preserves_query_identifiers(
@@ -45,9 +42,30 @@ def preserves_query_identifiers(
 ) -> bool:
     """Guard against rewritten queries dropping IDs/dates/negations or inventing numbers."""
     ignored = {
-        "What", "Which", "When", "Where", "Who", "Why", "How", "Explain", "Tell",
-        "Please", "Summarize", "Summarise", "And", "Also", "But", "Is", "Are",
-        "Can", "Does", "Do", "The", "It", "I", "My",
+        "What",
+        "Which",
+        "When",
+        "Where",
+        "Who",
+        "Why",
+        "How",
+        "Explain",
+        "Tell",
+        "Please",
+        "Summarize",
+        "Summarise",
+        "And",
+        "Also",
+        "But",
+        "Is",
+        "Are",
+        "Can",
+        "Does",
+        "Do",
+        "The",
+        "It",
+        "I",
+        "My",
     }
     tokens = re.findall(r"[\w]+(?:[-./][\w]+)*", query)
     protected = {
