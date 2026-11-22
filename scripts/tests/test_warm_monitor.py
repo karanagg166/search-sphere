@@ -110,10 +110,43 @@ def test_probe_with_cold_recovery_distinguishes_cold_start_from_unreachable(monk
     assert "cold_start_duration_seconds" in details
 
     monkeypatch.setattr(warm_monitor, "probe_with_details", lambda *a, **kw: (False, "cold_or_network_unavailable", {"elapsed_seconds": 30.0}))
-    healthy2, reason2, cold_start2, _ = probe_with_cold_recovery("/health", sleep_fn=lambda _: None)
+    healthy2, reason2, cold_start2, _ = probe_with_cold_recovery("/health", wake_retries=1, sleep_fn=lambda _: None)
     assert healthy2 is False
     assert reason2 == "cold_or_network_unavailable"
     assert cold_start2 is False
+
+
+def test_probe_with_cold_recovery_handles_multi_attempt_cold_boot(monkeypatch):
+    calls = iter([
+        (False, "cold_or_network_unavailable", {"elapsed_seconds": 30.0}),
+        (False, "cold_or_network_unavailable", {"elapsed_seconds": 35.0}),
+        (False, "http_5xx", {"elapsed_seconds": 5.0}),
+        (True, "ready", {"elapsed_seconds": 1.2, "git_commit": "abc"}),
+    ])
+    monkeypatch.setattr(warm_monitor, "probe_with_details", lambda *a, **kw: next(calls))
+    healthy, reason, cold_start, details = probe_with_cold_recovery("/health", wake_retries=4, sleep_fn=lambda _: None)
+    assert healthy is True
+    assert reason == "cold_start_recovered"
+    assert cold_start is True
+    assert "cold_start_duration_seconds" in details
+
+
+def test_probe_with_cold_recovery_stops_on_non_retryable_reason(monkeypatch):
+    seen = []
+
+    def fake_probe(*a, **kw):
+        idx = len(seen)
+        seen.append(idx)
+        if idx == 0:
+            return (False, "cold_or_network_unavailable", {"elapsed_seconds": 30.0})
+        return (False, "revision_mismatch", {"elapsed_seconds": 0.4})
+
+    monkeypatch.setattr(warm_monitor, "probe_with_details", fake_probe)
+    healthy, reason, cold_start, _ = probe_with_cold_recovery("/health", wake_retries=4, sleep_fn=lambda _: None)
+    assert healthy is False
+    assert reason == "revision_mismatch"
+    assert cold_start is False
+    assert len(seen) == 2
 
 
 def test_main_exits_nonzero_on_any_failed_admitted_probe_and_recovers(tmp_path, monkeypatch, capsys):

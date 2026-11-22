@@ -4,9 +4,10 @@ import "./globals.css";
 import { Providers } from "@/components/providers";
 import { BackendStatusBanner } from "@/components/backend-status-banner";
 
-const inter = Inter({ subsets: ["latin"] });
+const inter = Inter({ subsets: ["latin"], display: "swap" });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://search-sphere-rose.vercel.app"),
   title: "Search Sphere | Semantic Search & RAG Platform",
   description: "Search Sphere - Scalable semantic search and RAG platform",
   icons: {

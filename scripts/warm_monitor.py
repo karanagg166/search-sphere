@@ -153,20 +153,36 @@ def probe(path, *, expected_sha="", timeout=30):
     return healthy, reason
 
 
-def probe_with_cold_recovery(path, *, expected_sha="", timeout=30, wake_timeout=35, wake_backoff=5, sleep_fn=time.sleep):
+def probe_with_cold_recovery(
+    path,
+    *,
+    expected_sha="",
+    timeout=30,
+    wake_timeout=35,
+    wake_backoff=10,
+    wake_retries=4,
+    sleep_fn=time.sleep,
+):
     """Distinguish a Render cold start from a persistent unreachable backend."""
     started = time.monotonic()
     healthy, reason, details = probe_with_details(path, expected_sha=expected_sha, timeout=timeout)
     if healthy or reason not in COLD_RETRYABLE_REASONS:
         return healthy, reason, False, details
-    sleep_fn(wake_backoff)
-    healthy2, reason2, details2 = probe_with_details(path, expected_sha=expected_sha, timeout=wake_timeout)
-    total_elapsed = round(time.monotonic() - started, 3)
-    details2["elapsed_seconds"] = total_elapsed
-    if healthy2:
-        details2["cold_start_duration_seconds"] = total_elapsed
-        return True, "cold_start_recovered", True, details2
-    return False, reason2, False, details2
+    last_reason, last_details = reason, details
+    for _ in range(wake_retries):
+        sleep_fn(wake_backoff)
+        healthy2, reason2, details2 = probe_with_details(
+            path, expected_sha=expected_sha, timeout=wake_timeout
+        )
+        total_elapsed = round(time.monotonic() - started, 3)
+        details2["elapsed_seconds"] = total_elapsed
+        if healthy2:
+            details2["cold_start_duration_seconds"] = total_elapsed
+            return True, "cold_start_recovered", True, details2
+        last_reason, last_details = reason2, details2
+        if reason2 not in COLD_RETRYABLE_REASONS:
+            break
+    return False, last_reason, False, last_details
 
 
 def classify_status(*, ping_sent, healthy, reason, cold_start, failures, recovered):

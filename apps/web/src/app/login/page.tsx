@@ -13,7 +13,7 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const urlError = searchParams.get("error");
 
-  const { login, loginWithGoogle, loginWithGitHub, isAuthenticated, isLoading } = useAuth();
+  const { login, loginWithGoogle, loginWithGitHub, isAuthenticated } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -44,21 +44,13 @@ function LoginForm() {
     }
   };
 
-  if (isLoading) {
-    return (
-      <main className="min-h-screen bg-background text-foreground flex items-center justify-center p-4">
-        <Loader2 className="w-8 h-8 text-primary animate-spin" />
-      </main>
-    );
-  }
-
   return (
     <main className="min-h-screen bg-background text-foreground flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-md rounded-2xl border border-border bg-card p-8 shadow-2xl">
         {/* Brand */}
         <div className="flex flex-col items-center text-center mb-6">
           <Link href="/" className="flex items-center gap-2 mb-3">
-            <Search className="w-7 h-7 text-primary" />
+            <Search className="w-7 h-7 text-primary" aria-hidden="true" />
             <span className="text-2xl font-bold tracking-tight">Search Sphere</span>
           </Link>
           <h1 className="text-xl font-semibold">Sign in to your account</h1>
@@ -75,7 +67,7 @@ function LoginForm() {
             onClick={loginWithGoogle}
             className="w-full flex items-center justify-center gap-3 py-5 text-sm font-medium border-border hover:bg-muted/60"
           >
-            <svg className="w-4 h-4" viewBox="0 0 24 24">
+            <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true">
               <path
                 fill="#4285F4"
                 d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.65v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.14z"
@@ -102,7 +94,7 @@ function LoginForm() {
             onClick={loginWithGitHub}
             className="w-full flex items-center justify-center gap-3 py-5 text-sm font-medium border-border hover:bg-muted/60"
           >
-            <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24" aria-hidden="true">
               <path
                 fillRule="evenodd"
                 clipRule="evenodd"
@@ -126,7 +118,7 @@ function LoginForm() {
         {/* Error Alert */}
         {error && (
           <div className="mb-4 flex items-center gap-2 rounded-lg bg-destructive/10 border border-destructive/20 p-3 text-xs text-destructive">
-            <AlertCircle className="w-4 h-4 shrink-0" />
+            <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
             <span>{error}</span>
           </div>
         )}
@@ -134,8 +126,9 @@ function LoginForm() {
         {/* Form */}
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div>
-            <label className="block text-xs font-medium text-foreground mb-1">Email Address</label>
+            <label htmlFor="login-email" className="block text-xs font-medium text-foreground mb-1">Email Address</label>
             <input
+              id="login-email"
               type="email"
               required
               placeholder="you@domain.com"
@@ -146,8 +139,9 @@ function LoginForm() {
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-foreground mb-1">Password</label>
+            <label htmlFor="login-password" className="block text-xs font-medium text-foreground mb-1">Password</label>
             <input
+              id="login-password"
               type="password"
               required
               placeholder="••••••••"

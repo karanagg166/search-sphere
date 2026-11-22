@@ -11,7 +11,7 @@ on:
       retries:
         description: "Max retry attempts per endpoint"
         required: false
-        default: "3"
+        default: "5"
       timeout:
         description: "Total timeout per attempt (seconds)"
         required: false
@@ -53,6 +53,6 @@ jobs:
           SEARCH_SPHERE_API_URL: ${{ secrets.SEARCH_SPHERE_API_URL || 'https://search-sphere-api.onrender.com' }}
         run: |
           python scripts/monitor_backends.py \
-            --retries "${{ github.event.inputs.retries || '3' }}" \
+            --retries "${{ github.event.inputs.retries || '5' }}" \
             --timeout "${{ github.event.inputs.timeout || '35' }}" \
-            --backoff 5
+            --backoff 10

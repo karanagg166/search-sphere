@@ -4,7 +4,7 @@ import uuid
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -83,6 +83,9 @@ class RequestCorrelationMiddleware(BaseHTTPMiddleware):
         try:
             response = await call_next(request)
             response.headers["X-Request-ID"] = request_id
+            response.headers.setdefault("X-Content-Type-Options", "nosniff")
+            response.headers.setdefault("X-Frame-Options", "DENY")
+            response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
             return response
         except Exception as exc:
             logger.error("Unhandled error in request middleware", error_type=type(exc).__name__, path=request.url.path)
@@ -161,6 +164,12 @@ app.include_router(answer_router)
 app.include_router(conversations_router)
 app.include_router(feedback_router)
 app.include_router(private_search_router)
+
+
+@app.head("/health", tags=["Health"], include_in_schema=False)
+async def health_head():
+    """Lightweight HEAD probe for uptime monitors."""
+    return Response(status_code=status.HTTP_200_OK)
 
 
 @app.get("/health", tags=["Health"])
