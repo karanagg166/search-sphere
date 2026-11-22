@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
@@ -8,21 +8,20 @@ import { Loader2, AlertCircle, Search } from "lucide-react";
 import Link from "next/link";
 import axios from "axios";
 
+const subscribeNoop = () => () => {};
+const getUrlError = () => new URLSearchParams(window.location.search).get("error");
+const getServerUrlError = () => null;
+
 export default function LoginPage() {
   const router = useRouter();
   const { login, loginWithGoogle, loginWithGitHub, isAuthenticated } = useAuth();
 
+  const urlError = useSyncExternalStore(subscribeNoop, getUrlError, getServerUrlError);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  useEffect(() => {
-    const paramError = new URLSearchParams(window.location.search).get("error");
-    if (paramError) {
-      setError(paramError);
-    }
-  }, []);
+  const error = submitError ?? urlError;
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -32,16 +31,16 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
+    setSubmitError(null);
     setIsSubmitting(true);
     try {
       await login({ email: email.trim(), password });
       router.push("/");
     } catch (err: unknown) {
       if (axios.isAxiosError(err) && err.response?.data?.detail) {
-        setError(err.response.data.detail);
+        setSubmitError(err.response.data.detail);
       } else {
-        setError("Invalid email or password.");
+        setSubmitError("Invalid email or password.");
       }
     } finally {
       setIsSubmitting(false);
