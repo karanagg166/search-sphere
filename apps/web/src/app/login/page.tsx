@@ -1,24 +1,28 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Loader2, AlertCircle, Search } from "lucide-react";
 import Link from "next/link";
 import axios from "axios";
 
-function LoginForm() {
+export default function LoginPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const urlError = searchParams.get("error");
-
   const { login, loginWithGoogle, loginWithGitHub, isAuthenticated } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(urlError);
+  const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    const paramError = new URLSearchParams(window.location.search).get("error");
+    if (paramError) {
+      setError(paramError);
+    }
+  }, []);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -172,19 +176,5 @@ function LoginForm() {
         </div>
       </div>
     </main>
-  );
-}
-
-export default function LoginPage() {
-  return (
-    <Suspense
-      fallback={
-        <main className="min-h-screen bg-background text-foreground flex items-center justify-center p-4">
-          <Loader2 className="w-8 h-8 text-primary animate-spin" />
-        </main>
-      }
-    >
-      <LoginForm />
-    </Suspense>
   );
 }
